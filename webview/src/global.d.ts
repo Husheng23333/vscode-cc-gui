@@ -377,6 +377,11 @@ interface Window {
   onFilePathResolved?: (json: string) => void;
 
   /**
+   * Drag-drop path batch resolved callback (absolute OS paths from extension host).
+   */
+  onDropPathsResolved?: (json: string) => void;
+
+  /**
    * Show success message
    */
   showSuccess?: (message: string) => void;

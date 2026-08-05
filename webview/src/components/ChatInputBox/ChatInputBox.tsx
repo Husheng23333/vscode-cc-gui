@@ -585,6 +585,9 @@ export const ChatInputBox = memo(forwardRef<ChatInputBoxHandle, ChatInputBoxProp
         style={containerStyle}
         onMouseOver={handleMouseOver}
         onMouseLeave={handleMouseLeave}
+        onDragEnter={handleDragOver}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
       >
         <ResizeHandles getHandleProps={getHandleProps} nudge={nudge} />
 

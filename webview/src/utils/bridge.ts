@@ -169,6 +169,83 @@ export const sendBridgeEvent = (event: string, content = '') => {
   return callBridge(`${event}:${content}`);
 };
 
+export type DropPathResolveRequest = {
+  uris?: string[];
+  names?: string[];
+  texts?: string[];
+  absolutePaths?: string[];
+};
+
+type DropPathsCallback = (paths: string[]) => void;
+
+const pendingDropPathResolves = new Map<string, {
+  callback: DropPathsCallback;
+  timeoutId: ReturnType<typeof setTimeout>;
+}>();
+let dropPathsHandlerInstalled = false;
+let dropPathRequestSeq = 0;
+
+function installDropPathsHandler() {
+  if (dropPathsHandlerInstalled) return;
+  dropPathsHandlerInstalled = true;
+  const previous = window.onDropPathsResolved;
+  window.onDropPathsResolved = (json: string) => {
+    try {
+      previous?.(json);
+    } catch {
+      // ignore previous handler errors
+    }
+    try {
+      const data = typeof json === 'string' ? JSON.parse(json) : json;
+      const requestId = String(data?.requestId ?? '');
+      const paths = Array.isArray(data?.paths)
+        ? data.paths.filter((p: unknown): p is string => typeof p === 'string' && p.trim().length > 0)
+        : [];
+      const entry = pendingDropPathResolves.get(requestId);
+      if (!entry) return;
+      clearTimeout(entry.timeoutId);
+      pendingDropPathResolves.delete(requestId);
+      entry.callback(paths);
+    } catch {
+      // ignore malformed payload
+    }
+  };
+}
+
+/**
+ * Ask the extension host to resolve drag-drop candidates to absolute OS paths.
+ * Prefer this over bare webview filenames (Mac/Windows path differences).
+ */
+export function resolveDropPathsWithHost(
+  payload: DropPathResolveRequest,
+  callback: DropPathsCallback,
+  timeoutMs = 5000,
+): void {
+  installDropPathsHandler();
+  const requestId = `drop-${Date.now()}-${++dropPathRequestSeq}`;
+  const timeoutId = setTimeout(() => {
+    pendingDropPathResolves.delete(requestId);
+    // Fallback: return whatever absolute paths the webview already had
+    callback(payload.absolutePaths?.filter(Boolean) ?? []);
+  }, timeoutMs);
+  pendingDropPathResolves.set(requestId, { callback, timeoutId });
+  const sent = sendBridgeEvent(
+    'resolve_drop_paths',
+    JSON.stringify({
+      requestId,
+      uris: payload.uris ?? [],
+      names: payload.names ?? [],
+      texts: payload.texts ?? [],
+      absolutePaths: payload.absolutePaths ?? [],
+    }),
+  );
+  if (!sent) {
+    clearTimeout(timeoutId);
+    pendingDropPathResolves.delete(requestId);
+    callback(payload.absolutePaths?.filter(Boolean) ?? []);
+  }
+}
+
 export const resolveFilePath = (filePath?: string) => {
   if (!filePath) {
     return;
