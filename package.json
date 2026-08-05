@@ -1,0 +1,230 @@
+{
+  "name": "vscode-cc-gui",
+  "displayName": "CC GUI（Claude and Codex）",
+  "description": "Independent open-source GUI for Claude Code CLI and Codex (unofficial)",
+  "version": "0.0.1",
+  "publisher": "MossX",
+  "author": {
+    "name": "MossX"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hpstream/vscode-cc-gui"
+  },
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other", "AI"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "icon": "media/icon.png",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cc-gui-activity",
+          "title": "CC GUI",
+          "icon": "media/icon-activity.svg"
+        }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "cc-gui-secondary",
+          "title": "CC GUI",
+          "icon": "media/icon-outline.svg"
+        }
+      ]
+    },
+    "views": {
+      "cc-gui-activity": [
+        {
+          "type": "webview",
+          "id": "ccGui.mainView",
+          "name": "CC GUI"
+        }
+      ],
+      "cc-gui-secondary": [
+        {
+          "type": "webview",
+          "id": "ccGui.secondaryView",
+          "name": "CC GUI"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "ccGui.openPanel",
+        "title": "Open CC GUI",
+        "category": "CC GUI",
+        "icon": {
+          "light": "media/icon-outline.svg",
+          "dark": "media/icon-outline.svg"
+        }
+      },
+      {
+        "command": "ccGui.newSession",
+        "title": "New Chat Tab",
+        "category": "CC GUI",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ccGui.renameActiveChatTab",
+        "title": "Rename Active Chat Tab",
+        "category": "CC GUI",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "ccGui.openDevTools",
+        "title": "Open Webview Developer Tools",
+        "category": "CC GUI",
+        "icon": "$(debug-console)"
+      },
+      {
+        "command": "ccGui.hidePanel",
+        "title": "Hide CC GUI Panel",
+        "category": "CC GUI"
+      },
+      {
+        "command": "ccGui.sendSelection",
+        "title": "Send Selection Reference to Claude",
+        "category": "CC GUI"
+      },
+      {
+        "command": "ccGui.copySelectionReference",
+        "title": "Copy AI Reference",
+        "category": "CC GUI"
+      },
+      {
+        "command": "ccGui.sendFilePath",
+        "title": "Send File Path to Claude",
+        "category": "CC GUI"
+      },
+      {
+        "command": "ccGui.generateCommitMessage",
+        "title": "Generate Commit Message with Claude",
+        "category": "CC GUI",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "ccGui.quickFixWithClaude",
+        "title": "Fix with Claude",
+        "category": "CC GUI"
+      },
+      {
+        "command": "ccGui.saveSessionTemplate",
+        "title": "Save Session as Template",
+        "category": "CC GUI"
+      },
+      {
+        "command": "ccGui.createSessionFromTemplate",
+        "title": "Create Session from Template",
+        "category": "CC GUI"
+      },
+      {
+        "command": "ccGui.runSetupWizard",
+        "title": "Run Setup Wizard",
+        "category": "CC GUI"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "ccGui.openPanel",
+          "group": "navigation@100"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "ccGui.sendSelection",
+          "when": "editorHasSelection",
+          "group": "ccGui@1"
+        },
+        {
+          "command": "ccGui.copySelectionReference",
+          "when": "editorHasSelection",
+          "group": "ccGui@2"
+        },
+        {
+          "command": "ccGui.sendFilePath",
+          "group": "ccGui@3"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "ccGui.sendFilePath",
+          "group": "ccGui@1"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "ccGui.sendFilePath",
+          "group": "ccGui@1"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "ccGui.generateCommitMessage",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "ccGui.newSession",
+          "when": "view == ccGui.mainView || view == ccGui.secondaryView",
+          "group": "navigation"
+        },
+        {
+          "command": "ccGui.openDevTools",
+          "when": "view == ccGui.mainView || view == ccGui.secondaryView",
+          "group": "navigation"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "ccGui.sendSelection",
+        "key": "ctrl+alt+k",
+        "mac": "cmd+alt+k",
+        "when": "editorHasSelection"
+      },
+      {
+        "command": "ccGui.quickFixWithClaude",
+        "key": "ctrl+shift+q",
+        "mac": "cmd+shift+q",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "CC GUI",
+      "properties": {
+        "ccGui.nodePath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to Node.js executable"
+        },
+        "ccGui.autoSyncActiveFile": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically sync active editor file context to Claude"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "npm run build:ext && npm run build:webview",
+    "build:debug": "npm run build:ext:debug && npm run build:webview",
+    "build:ext": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "build:ext:debug": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "build:webview": "cd webview && npm run build",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "dev": "npm run watch",
+    "test:ext": "node --experimental-strip-types --no-warnings --test 'src/__tests__/**/*.test.mts'"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "~5.3.0"
+  }
+}

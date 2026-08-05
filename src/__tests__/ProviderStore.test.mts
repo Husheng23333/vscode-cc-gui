@@ -1,0 +1,152 @@
+import { after, before, beforeEach, describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+const originalHome = process.env.HOME;
+const originalUserprofile = process.env.USERPROFILE;
+let tmpHome: string;
+
+before(() => {
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-store-test-'));
+  process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome;
+});
+
+after(() => {
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+  if (originalUserprofile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = originalUserprofile;
+  try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* ignore */ }
+});
+
+beforeEach(() => {
+  const codemossDir = path.join(tmpHome, '.codemoss');
+  if (fs.existsSync(codemossDir)) {
+    fs.rmSync(codemossDir, { recursive: true, force: true });
+  }
+});
+
+const { ProviderStore } = await import('../bridge/services/ProviderStore.ts');
+
+function configPath(): string {
+  return path.join(tmpHome, '.codemoss', 'config.json');
+}
+
+function readConfig(): any {
+  return JSON.parse(fs.readFileSync(configPath(), 'utf8'));
+}
+
+function createContext(initialState: Record<string, any> = {}) {
+  const state = new Map(Object.entries(initialState));
+  return {
+    globalState: {
+      get<T>(key: string): T | undefined {
+        return state.get(key);
+      },
+      update(key: string, value: any) {
+        state.set(key, value);
+        return Promise.resolve();
+      },
+    },
+  } as any;
+}
+
+describe('ProviderStore shared config', () => {
+  it('writes Claude providers into ~/.codemoss/config.json using the shared shape', async () => {
+    const syncedSnapshots: any[] = [];
+    const store = new ProviderStore(createContext(), {
+      syncProviderToDisk: (providers) => {
+        syncedSnapshots.push(providers);
+      },
+    });
+
+    await store.saveClaudeProviders([
+      { id: '__local_settings_json__', name: 'Local Settings (settings.json)', isActive: false },
+      {
+        id: 'proxy-a',
+        name: 'Proxy A',
+        remark: 'shared-provider',
+        settingsConfig: {
+          env: {
+            ANTHROPIC_BASE_URL: 'https://example.test',
+          },
+        },
+        isActive: true,
+      },
+    ]);
+
+    const config = readConfig();
+    assert.equal(config.version, 2);
+    assert.equal(config.claude.current, 'proxy-a');
+    assert.deepEqual(config.claude.providerOrder, ['proxy-a']);
+    assert.equal(config.claude.providers['proxy-a'].name, 'Proxy A');
+    assert.equal(config.claude.providers['proxy-a'].remark, 'shared-provider');
+    assert.equal(config.claude.providers['proxy-a'].settingsConfig.env.ANTHROPIC_BASE_URL, 'https://example.test');
+    assert.equal(store.getActiveClaudeProvider()?.id, 'proxy-a');
+    assert.equal(syncedSnapshots.length, 1);
+  });
+
+  it('migrates legacy Codex globalState into the shared config file', () => {
+    const store = new ProviderStore(
+      createContext({
+        'ccg.codex_providers': [
+          { id: 'codex-proxy', name: 'Codex Proxy', remark: 'legacy' },
+        ],
+        'ccg.codex_current_provider_id': '__codex_cli_login__',
+        'ccg.codex_local_config_authorized': true,
+      }),
+      { syncProviderToDisk: () => {} },
+    );
+
+    const providers = store.getCodexProviders();
+    assert.equal(providers[0].id, '__codex_cli_login__');
+    assert.equal(providers[0].isActive, true);
+    assert.equal(providers[1].id, 'codex-proxy');
+    assert.equal(providers[1].isActive, false);
+
+    const config = readConfig();
+    assert.equal(config.codex.current, '__codex_cli_login__');
+    assert.equal(config.codex.localConfigAuthorized, true);
+    assert.deepEqual(config.codex.providerOrder, ['codex-proxy']);
+    assert.equal(config.codex.providers['codex-proxy'].name, 'Codex Proxy');
+  });
+
+  it('prefers existing shared config over legacy globalState data', () => {
+    fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+    fs.writeFileSync(configPath(), JSON.stringify({
+      version: 2,
+      claude: {
+        current: 'shared-claude',
+        providers: {
+          'shared-claude': { id: 'shared-claude', name: 'Shared Claude' },
+        },
+        providerOrder: ['shared-claude'],
+      },
+      codex: {
+        current: 'shared-codex',
+        localConfigAuthorized: false,
+        providers: {
+          'shared-codex': { id: 'shared-codex', name: 'Shared Codex' },
+        },
+        providerOrder: ['shared-codex'],
+      },
+    }, null, 2));
+
+    const store = new ProviderStore(
+      createContext({
+        'ccg.providers': [{ id: 'legacy-claude', name: 'Legacy Claude', isActive: true }],
+        'ccg.codex_providers': [{ id: 'legacy-codex', name: 'Legacy Codex', isActive: true }],
+        'ccg.codex_current_provider_id': 'legacy-codex',
+        'ccg.codex_local_config_authorized': true,
+      }),
+      { syncProviderToDisk: () => {} },
+    );
+
+    assert.equal(store.getActiveClaudeProvider()?.id, 'shared-claude');
+    assert.equal(store.getActiveCodexProvider()?.id, 'shared-codex');
+    assert.equal(store.isCodexLocalConfigAuthorized(), false);
+  });
+});

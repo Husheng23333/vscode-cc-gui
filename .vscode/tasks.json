@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "npm",
+      "script": "build:ext:debug",
+      "group": "build",
+      "label": "npm: build:ext:debug"
+    },
+    {
+      "type": "npm",
+      "script": "build:debug",
+      "group": "build",
+      "label": "npm: build:debug"
+    },
+    {
+      "type": "npm",
+      "script": "build:ext",
+      "group": "build",
+      "label": "npm: build:ext"
+    },
+    {
+      "type": "npm",
+      "script": "build",
+      "group": "build",
+      "label": "npm: build"
+    }
+  ]
+}
