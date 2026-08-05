@@ -62,6 +62,8 @@ interface CustomModelDialogProps {
   onClose: () => void;
   /** If provided, opens in add-model mode directly */
   initialAddMode?: boolean;
+  /** Enables Codex-only context-window metadata editing. */
+  contextWindowEnabled?: boolean;
 }
 
 /**
@@ -86,6 +88,28 @@ function parsePricingInput(value: string): number | undefined {
 function isInvalidPricingValue(value: string): boolean {
   const parsed = parsePricingInput(value);
   return parsed !== undefined && (!Number.isFinite(parsed) || parsed < 0);
+}
+
+
+const CONTEXT_WINDOW_TOKENS_PER_K = 1000;
+const MAX_CONTEXT_WINDOW_K = 2_147_483;
+
+function parseContextWindowKInput(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const contextWindowK = Number(trimmed);
+  return Number.isSafeInteger(contextWindowK)
+    ? contextWindowK * CONTEXT_WINDOW_TOKENS_PER_K
+    : undefined;
+}
+
+function isInvalidContextWindowK(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const contextWindowK = Number(trimmed);
+  return !Number.isSafeInteger(contextWindowK)
+    || contextWindowK < 1
+    || contextWindowK > MAX_CONTEXT_WINDOW_K;
 }
 
 function hasPricing(pricing?: ModelPricing): boolean {
@@ -123,6 +147,7 @@ export function CustomModelDialog({
   onConfiguredModelPricingChange,
   onClose,
   initialAddMode = false,
+  contextWindowEnabled = false,
 }: CustomModelDialogProps) {
   const { t } = useTranslation();
 
@@ -136,6 +161,8 @@ export function CustomModelDialog({
   const [newPricingInputs, setNewPricingInputs] = useState<Record<PricingFieldKey, string>>({ ...EMPTY_PRICING_INPUTS });
   const [modelIdError, setModelIdError] = useState<string | null>(null);
   const [pricingError, setPricingError] = useState<string | null>(null);
+  const [newContextWindowK, setNewContextWindowK] = useState('');
+  const [contextWindowError, setContextWindowError] = useState<string | null>(null);
   // Pricing is optional — collapsed by default to keep the form lightweight.
   const [pricingCollapsed, setPricingCollapsed] = useState(true);
 
@@ -147,6 +174,8 @@ export function CustomModelDialog({
     setNewModelLabel('');
     setNewModelDesc('');
     setNewPricingInputs({ ...EMPTY_PRICING_INPUTS });
+    setNewContextWindowK('');
+    setContextWindowError(null);
     setModelIdError(null);
     setPricingError(null);
     setPricingCollapsed(true);
@@ -211,19 +240,36 @@ export function CustomModelDialog({
     });
   }, [newPricingInputs, t]);
 
+  const validateContextWindowInput = useCallback((): string | null => {
+    if (!contextWindowEnabled) return null;
+    if (isInvalidContextWindowK(newContextWindowK)) {
+      return t('settings.pluginModels.contextWindow.invalidValue', {
+        defaultValue: 'Maximum context must be a positive integer in K units',
+      });
+    }
+    return null;
+  }, [contextWindowEnabled, newContextWindowK, t]);
+
   const buildModelFromForm = useCallback((): CodexCustomModel => {
     const sanitizedId = sanitizeInput(newModelId).trim();
     const sanitizedLabel = sanitizeInput(newModelLabel).trim();
     const sanitizedDescription = sanitizeInput(newModelDesc).trim();
     const pricing = buildPricing(newPricingInputs);
+    const contextWindowTokens = contextWindowEnabled
+      ? parseContextWindowKInput(newContextWindowK)
+      : undefined;
     const model: CodexCustomModel = {
       id: sanitizedId,
       label: sanitizedLabel || sanitizedId,
       description: sanitizedDescription || undefined,
     };
 
-    return pricing ? { ...model, pricing } : model;
-  }, [newModelId, newModelLabel, newModelDesc, newPricingInputs]);
+    let next: CodexCustomModel = pricing ? { ...model, pricing } : model;
+    if (contextWindowEnabled && contextWindowTokens !== undefined) {
+      next = { ...next, contextWindowTokens };
+    }
+    return next;
+  }, [contextWindowEnabled, newContextWindowK, newModelId, newModelLabel, newModelDesc, newPricingInputs]);
 
   const validateForm = useCallback((): boolean => {
     if (editingConfiguredModel) {
@@ -231,10 +277,12 @@ export function CustomModelDialog({
       if (priceError) {
         setModelIdError(null);
         setPricingError(priceError);
+        setContextWindowError(null);
         return false;
       }
       setModelIdError(null);
       setPricingError(null);
+      setContextWindowError(null);
       return true;
     }
 
@@ -242,6 +290,15 @@ export function CustomModelDialog({
     if (idError) {
       setModelIdError(idError);
       setPricingError(null);
+      setContextWindowError(null);
+      return false;
+    }
+
+    const contextError = validateContextWindowInput();
+    if (contextError) {
+      setModelIdError(null);
+      setPricingError(null);
+      setContextWindowError(contextError);
       return false;
     }
 
@@ -249,13 +306,15 @@ export function CustomModelDialog({
     if (priceError) {
       setModelIdError(null);
       setPricingError(priceError);
+      setContextWindowError(null);
       return false;
     }
 
     setModelIdError(null);
     setPricingError(null);
+    setContextWindowError(null);
     return true;
-  }, [editingConfiguredModel, newModelId, validateModelId, validatePricingInputs]);
+  }, [editingConfiguredModel, newModelId, validateContextWindowInput, validateModelId, validatePricingInputs]);
 
   const handleAddModel = useCallback(() => {
     if (!validateForm()) {
@@ -288,6 +347,9 @@ export function CustomModelDialog({
     setNewModelId(model.id);
     setNewModelLabel(model.label);
     setNewModelDesc(model.description || '');
+    setNewContextWindowK(!contextWindowEnabled || model.contextWindowTokens === undefined
+      ? ''
+      : String(model.contextWindowTokens / CONTEXT_WINDOW_TOKENS_PER_K));
     setNewPricingInputs({
       inputCostPer1M: formatPricingValue(model.pricing?.inputCostPer1M),
       outputCostPer1M: formatPricingValue(model.pricing?.outputCostPer1M),
@@ -307,6 +369,9 @@ export function CustomModelDialog({
     setNewModelId(model.id);
     setNewModelLabel(model.label || model.id);
     setNewModelDesc(model.description || '');
+    setNewContextWindowK(!contextWindowEnabled || model.contextWindowTokens === undefined
+      ? ''
+      : String(model.contextWindowTokens / CONTEXT_WINDOW_TOKENS_PER_K));
     setNewPricingInputs({
       inputCostPer1M: formatPricingValue(model.pricing?.inputCostPer1M),
       outputCostPer1M: formatPricingValue(model.pricing?.outputCostPer1M),
@@ -433,6 +498,14 @@ export function CustomModelDialog({
                           {getPricingSummary(model.pricing)}
                         </div>
                       )}
+                      {contextWindowEnabled && model.contextWindowTokens !== undefined && (
+                        <div className={styles.modelItemPricing}>
+                          {t('settings.pluginModels.contextWindow.summary', {
+                            value: model.contextWindowTokens.toLocaleString(),
+                            defaultValue: `Context: ${model.contextWindowTokens.toLocaleString()} tokens`,
+                          })}
+                        </div>
+                      )}
                     </div>
                     <div className={styles.modelItemActions}>
                       <button
@@ -517,6 +590,40 @@ export function CustomModelDialog({
                 style={DESC_INPUT_STYLE}
                 disabled={isEditingConfiguredModel}
               />
+              {contextWindowEnabled && !isEditingConfiguredModel && (
+                <div className={styles.formRow} style={{ marginTop: 8, flexDirection: 'column', alignItems: 'stretch' }}>
+                  <label htmlFor="model-context-window-input">
+                    {t('settings.pluginModels.contextWindow.label', {
+                      defaultValue: 'Context window (K tokens)',
+                    })}
+                  </label>
+                  <input
+                    id="model-context-window-input"
+                    type="text"
+                    inputMode="numeric"
+                    className={`form-input ${contextWindowError ? 'input-error' : ''}`}
+                    placeholder={t('settings.pluginModels.contextWindow.placeholder', {
+                      defaultValue: 'e.g. 200 for 200K',
+                    })}
+                    value={newContextWindowK}
+                    onChange={(e) => {
+                      setNewContextWindowK(e.target.value);
+                      if (contextWindowError) setContextWindowError(null);
+                    }}
+                    aria-invalid={!!contextWindowError}
+                  />
+                  <small className={styles.sectionHint}>
+                    {t('settings.pluginModels.contextWindow.hint', {
+                      defaultValue: 'Optional. Enter thousands of tokens (200 = 200,000). Codex only.',
+                    })}
+                  </small>
+                  {contextWindowError && (
+                    <div className={styles.validationError} role="alert">
+                      {contextWindowError}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className={styles.pricingSection}>
                 <button

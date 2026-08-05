@@ -1,6 +1,6 @@
 # Changelog
 
-##### **2026年8月5日（v0.0.2）**
+##### **2026年8月5日（v0.0.2-fix2）**
 
 English:
 - Add `enableDebugLog` setting (default off) and show Webview DevTools only when enabled

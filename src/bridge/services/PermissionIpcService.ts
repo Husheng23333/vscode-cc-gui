@@ -299,7 +299,7 @@ export class PermissionIpcService implements vscode.Disposable {
       const enabled = this.globalState?.get<boolean>('ccg.ask_user_question_notification_enabled', false) === true;
       if (!enabled) return;
       void vscode.window.showInformationMessage(
-        `Claude is waiting for your answer (${toolName})`,
+        `AI is waiting for your answer (${toolName})`,
       );
     } catch (error) {
       this.log.appendLine(`[BRIDGE] askUserQuestion notification failed: ${error}`);

@@ -109,6 +109,19 @@ export function isValidCodexCustomModel(model: unknown): model is CodexCustomMod
     if (!isValidModelPricing(obj.pricing)) return false;
   }
 
+  // contextWindowTokens is optional, but must fit the Java/VS Code int-based usage pipeline
+  if (obj.contextWindowTokens !== undefined) {
+    if (
+      typeof obj.contextWindowTokens !== 'number'
+      || !Number.isSafeInteger(obj.contextWindowTokens)
+      || obj.contextWindowTokens < 1_000
+      || obj.contextWindowTokens % 1_000 !== 0
+      || obj.contextWindowTokens > 2_147_483_647
+    ) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -219,6 +232,11 @@ export interface CodexCustomModel {
   description?: string;
   /** Optional per-million-token pricing for cost calculation */
   pricing?: ModelPricing;
+  /**
+   * Optional context window size in tokens (Codex custom models only).
+   * Must be a positive multiple of 1000 (UI edits this in K units).
+   */
+  contextWindowTokens?: number;
 }
 
 /**

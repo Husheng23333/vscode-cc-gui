@@ -221,7 +221,6 @@ export const ChatScreen = ({
           {messages.length === 0 && (
             <WelcomeScreen
               currentProvider={currentProvider}
-              currentModelId={selectedModel}
               t={t}
               onProviderChange={onProviderSelect}
               onVersionClick={openChangelogDialog}

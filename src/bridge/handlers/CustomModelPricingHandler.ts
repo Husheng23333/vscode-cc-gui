@@ -1,5 +1,6 @@
 import { BridgeContext, BridgeHandler, BridgeMessage } from '../types';
 import { ModelPricing, setCustomModelPricing } from '../services/customPricingStore';
+import { setCustomContextWindows } from '../services/customContextWindowStore';
 
 const SET_EVENT = 'set_custom_model_pricing';
 const PRICE_FIELDS: (keyof ModelPricing)[] = [
@@ -33,8 +34,9 @@ function parsePricing(raw: unknown): ModelPricing | undefined {
  *
  * The frontend emits `set_custom_model_pricing` whenever plugin-level custom models or
  * pricing-only Claude configured models change. Payload shape:
- * `{ "provider": "claude"|"codex", "models": [ { "id": "...", "pricing": { ... } } ] }`.
+ * `{ "provider": "claude"|"codex", "models": [ { "id": "...", "pricing": { ... }, "contextWindowTokens"?: number } ] }`.
  * Models without a valid `pricing` field are omitted so cost calculation falls back to defaults.
+ * Codex models may also carry `contextWindowTokens` (multiples of 1000).
  */
 export class CustomModelPricingHandler implements BridgeHandler {
   readonly supportedEvents = [SET_EVENT] as const;
@@ -61,6 +63,24 @@ export class CustomModelPricingHandler implements BridgeHandler {
       }, {});
 
       setCustomModelPricing(provider, pricingMap);
+
+      if (provider === 'codex') {
+        const windows = models.reduce<Record<string, number>>((acc, entry) => {
+          if (!entry || typeof entry !== 'object') return acc;
+          const id = typeof (entry as any).id === 'string' ? (entry as any).id.trim() : '';
+          if (!id) return acc;
+          const tokens = (entry as any).contextWindowTokens;
+          if (typeof tokens === 'number' && Number.isSafeInteger(tokens) && tokens >= 1000 && tokens % 1000 === 0) {
+            return { ...acc, [id]: tokens };
+          }
+          return acc;
+        }, {});
+        setCustomContextWindows('codex', windows);
+        this.context.log.appendLine(
+          `[CustomModelPricingHandler] Persisted ${Object.keys(windows).length} Codex context windows`,
+        );
+      }
+
       this.context.log.appendLine(
         `[CustomModelPricingHandler] Persisted ${Object.keys(pricingMap).length} pricing entries for ${provider}`,
       );

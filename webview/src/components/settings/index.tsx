@@ -102,6 +102,8 @@ const SettingsView = ({
     chatBgColor,
     setChatBgColor,
     userMsgColor,
+    chatBarColor,
+    setChatBarColor,
     setUserMsgColor,
     diffTheme,
     setDiffTheme,
@@ -503,6 +505,8 @@ const SettingsView = ({
               onAutoOpenFileEnabledChange={handleAutoOpenFileEnabledChange}
               chatBgColor={chatBgColor}
               onChatBgColorChange={setChatBgColor}
+              chatBarColor={chatBarColor}
+              onChatBarColorChange={setChatBarColor}
               userMsgColor={userMsgColor}
               onUserMsgColorChange={setUserMsgColor}
               diffTheme={diffTheme}

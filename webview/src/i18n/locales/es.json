@@ -25,7 +25,8 @@
     "minutes": "m",
     "optional": "Optional",
     "collapse": "Contraer",
-    "expand": "Expandir"
+    "expand": "Expandir",
+    "gotIt": "Entendido"
   },
   "chat": {
     "sendMessage": "Enviar mensaje a {{provider}}",
@@ -90,7 +91,7 @@
     "attachmentFile": "[Adjunto: {{fileName}}]",
     "unknownFile": "Unknown file",
     "attachmentsUploaded": "[Archivos adjuntos cargados]",
-    "streamingConnected": "{{provider}} conectado, entendiendo tu pregunta",
+    "streamingConnected": "AI conectado, entendiendo tu pregunta",
     "showEarlierMessages": "Mostrar {{count}} mensajes anteriores",
     "totalDuration": "Esta respuesta tardó",
     "tokenUsage": "{{input}} entrada / {{output}} salida",
@@ -261,7 +262,7 @@
       "permissionDialogTimeout": {
         "label": "Tiempo de espera de diálogos de permisos y preguntas",
         "unit": "segundos",
-        "hint": "Establece el tiempo de espera para los diálogos de preguntas de Claude y los diálogos de solicitud de permisos (30~3600 segundos). Después del tiempo de espera, el diálogo se cerrará automáticamente y Claude continuará."
+        "hint": "Establece el tiempo de espera para los diálogos de preguntas de la IA y los diálogos de solicitud de permisos (30~3600 segundos). Después del tiempo de espera, el diálogo se cerrará automáticamente y la IA continuará."
       },
       "chatBgColor": {
         "label": "Color de fondo del chat",
@@ -291,14 +292,21 @@
         "label": "Notificación de pregunta al usuario",
         "enabled": "Activado",
         "disabled": "Desactivado",
-        "hint": "Cuando está activado, muestra una notificación del sistema cuando Claude te hace una pregunta, para que no la pierdas. Cuando está desactivado, no aparece ninguna notificación."
+        "hint": "Cuando está activado, muestra una notificación del sistema cuando la IA te hace una pregunta, para que no la pierdas. Cuando está desactivado, no aparece ninguna notificación."
+      },
+      "chatBarColor": {
+        "label": "Chat bar color",
+        "custom": "Custom",
+        "reset": "Reset",
+        "hint": "Applies to the chat header and status bar. Leave empty to follow the theme default."
       }
     },
     "providers": "Gestión de proveedores",
     "providersDesc": "Gestionar configuración de proveedores de API Claude y Codex, cambiar entre diferentes proveedores de servicio API",
     "providerTab": {
       "claude": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "cli": "CLI"
     },
     "pluginModels": {
       "title": "Modelos personalizados",
@@ -324,7 +332,14 @@
       "configuredSectionDesc": "Los modelos del proveedor de Claude activo o settings.json ya aparecen en el selector. Aquí solo se puede modificar el precio.",
       "configuredEditHint": "Este modelo está gestionado por el proveedor de Claude activo o settings.json. Aquí solo se puede modificar el precio.",
       "customSectionTitle": "Modelos personalizados",
-      "editPricing": "Editar precio"
+      "editPricing": "Editar precio",
+      "contextWindow": {
+        "label": "Context window (K tokens)",
+        "placeholder": "e.g. 200 for 200K",
+        "hint": "Optional. Enter thousands of tokens (200 = 200,000). Codex only.",
+        "invalidValue": "Maximum context must be a positive integer in K units",
+        "summary": "Context: {{value}} tokens"
+      }
     },
     "dependencies": "Dependencias SDK",
     "dependenciesDesc": "Gestionar instalaciones y actualizaciones de dependencias AI SDK",
@@ -767,7 +782,57 @@
         "saveChanges": "Save"
       }
     },
-    "configure": "Configurar"
+    "configure": "Configurar",
+    "cli": {
+      "hint": "These CLIs must be installed and configured in your system terminal. The plugin only detects installation status and version — it will never install them for you. Confirm each CLI works in the terminal before coming back here to use it.",
+      "refresh": "Re-check",
+      "retry": "Retry",
+      "loading": "Checking CLI installation status…",
+      "loadFailed": "Detection failed. Please try again.",
+      "status": {
+        "installed": "Installed",
+        "notInstalled": "Not installed"
+      },
+      "viewInstallGuide": "Install guide",
+      "howToInstall": "View install guide",
+      "copy": "Copy",
+      "copied": "Copied to clipboard",
+      "copyFailed": "Failed to copy",
+      "tools": {
+        "grok": {
+          "name": "Grok CLI",
+          "description": "xAI Grok terminal coding agent"
+        },
+        "kimi": {
+          "name": "Kimi CLI",
+          "description": "Moonshot Kimi Code CLI"
+        },
+        "opencode": {
+          "name": "OpenCode",
+          "description": "Open-source terminal AI coding agent"
+        },
+        "pi": {
+          "name": "PI CLI",
+          "description": "Minimal terminal coding agent with multi-provider model support"
+        }
+      },
+      "installDialog": {
+        "title": "Install {{name}}",
+        "lead": "Install {{name}} in your system terminal first and make sure `{{binary}}` is available, then come back and click Re-check. This plugin will not run the installer for you.",
+        "stepOpenTerminal": "Open your system terminal (Terminal / iTerm / PowerShell, etc.)",
+        "stepRunCommand": "Copy and run the install command below",
+        "stepVerify": "After install, run `{{binary}} --version` to verify",
+        "stepReturn": "Return here and click Re-check",
+        "primaryCommand": "Recommended install command (macOS / Linux)",
+        "windowsCommand": "Windows (PowerShell)",
+        "altCommand": "Alternative install method",
+        "openDocs": "Open official docs"
+      },
+      "listTitle": "Local CLI tools",
+      "summary": "{{installed}} / {{total}} installed",
+      "moreComingSoon": "More coming soon",
+      "copyPath": "Copy path"
+    }
   },
   "history": {
     "title": "Historial de sesiones",
@@ -869,7 +934,7 @@
     "timeoutWarning": "Por favor responde pronto, el diálogo se cerrará en {{seconds}} segundos"
   },
   "askUserQuestion": {
-    "title": "Claude tiene algunas preguntas para ti",
+    "title": "La IA tiene algunas preguntas para ti",
     "progress": "Pregunta {{current}} / {{total}}",
     "multiSelectHint": "Puedes seleccionar múltiples opciones",
     "cancel": "Cancelar",
@@ -886,10 +951,10 @@
   },
   "planApproval": {
     "title": "Plan Ready for Approval",
-    "subtitle": "Claude has finished planning and is ready to execute.",
+    "subtitle": "AI has finished planning and is ready to execute.",
     "requestedPermissions": "Requested Permissions",
     "executionMode": "Execution Mode",
-    "executionModeDescription": "Select how Claude should execute the plan:",
+    "executionModeDescription": "Select how AI should execute the plan:",
     "approve": "Approve & Execute",
     "reject": "Reject",
     "toApprove": "to approve",
@@ -1077,7 +1142,7 @@
         "title": "Características principales",
         "toolExtension": {
           "label": "Extensión de herramientas",
-          "description": "Agrega capacidades como acceso al sistema de archivos y red a Claude"
+          "description": "Agrega capacidades como acceso al sistema de archivos y red a la IA"
         },
         "dataConnection": {
           "label": "Conexión de datos",
@@ -1202,7 +1267,7 @@
     "undoChanges": "Deshacer cambios",
     "undoConfirmTitle": "Deshacer cambios del archivo",
     "undoWillDelete": "Este archivo fue recién creado. Deshacer eliminará este archivo.",
-    "undoWillRestore": "Esto restaurará el archivo a su estado antes de las modificaciones de Claude.",
+    "undoWillRestore": "Esto restaurará el archivo a su estado antes de las modificaciones de la IA.",
     "undoCannotUndo": "Esta acción no se puede deshacer.",
     "confirmUndo": "Confirmar deshacer",
     "undoSuccess": "Cambios de {{fileName}} deshechos",
@@ -1263,7 +1328,7 @@
       "title": "¿Qué son las Skills?",
       "overview": {
         "title": "Descripción general",
-        "description": "Las Skills son conjuntos de instrucciones, scripts y carpetas de recursos cargados dinámicamente que mejoran el rendimiento de Claude para tareas específicas. Las Skills enseñan a Claude cómo completar tareas particulares de manera repetible, como crear documentos usando pautas de marca de la empresa, analizar datos siguiendo flujos de trabajo específicos de la organización o automatizar tareas personales."
+        "description": "Las Skills son conjuntos de instrucciones, scripts y carpetas de recursos cargados dinámicamente que mejoran el rendimiento de la IA para tareas específicas. Las Skills enseñan a la IA cómo completar tareas particulares de manera repetible, como crear documentos usando pautas de marca de la empresa, analizar datos siguiendo flujos de trabajo específicos de la organización o automatizar tareas personales."
       },
       "structure": {
         "title": "Estructura de Skill",
@@ -1296,7 +1361,7 @@
         "title": "Consejos de Uso",
         "item1": "Asegúrese de que el directorio de Skill contenga un archivo SKILL.md válido",
         "item2": "Los nombres de Skill deben usar letras minúsculas, números y guiones (hyphen-case)",
-        "item3": "Las Skills se activan automáticamente en las sesiones de Claude después de cargarse",
+        "item3": "Las Skills se activan automáticamente en las sesiones de la IA después de cargarse",
         "item4": "Controle el estado de Skills individuales con interruptores de habilitar/deshabilitar",
         "item5": "Mencione el nombre de la Skill en el chat para usarla, p. ej., \"Usa la skill pdf para extraer campos del formulario\""
       },
@@ -1454,7 +1519,14 @@
     },
     "searchPlaceholder": "Buscar modelos",
     "noModelsFound": "No se encontraron modelos",
-    "hiddenModelCount": "+ {{count}} modelos más. Escribe para buscar."
+    "hiddenModelCount": "+ {{count}} modelos más. Escribe para buscar.",
+    "grok": {
+      "grok45": {
+        "label": "Grok 4.5",
+        "description": "xAI Grok 4.5"
+      }
+    },
+    "cliLoadFailed": "Failed to load models. Click to retry."
   },
   "modes": {
     "default": {
@@ -1512,6 +1584,20 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "grok": {
+      "label": "Grok CLI"
+    },
+    "kimi": {
+      "label": "Kimi CLI"
+    },
+    "pi": {
+      "label": "PI CLI"
+    },
+    "beta": {
+      "badge": "Beta",
+      "title": "Beta Feature",
+      "message": "This feature is still in Beta. If you encounter any bugs, please report them to the author promptly."
     }
   },
   "promptEnhancer": {

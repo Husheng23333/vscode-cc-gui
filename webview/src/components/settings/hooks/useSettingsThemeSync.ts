@@ -2,6 +2,11 @@
 import { useState, useEffect } from 'react';
 import { applyDiffTheme, getStoredDiffTheme, type DiffThemeMode } from '../../../utils/diffTheme';
 import { detectIdeThemeFromDom } from '../../../utils/detectIdeTheme';
+import {
+  applyChatBarThemeColor,
+  CHAT_BAR_COLOR_STORAGE_KEY,
+  isValidHexColor,
+} from '../../../utils/chatBarTheme';
 
 // Extend window type for IDE theme injection
 declare global {
@@ -21,6 +26,8 @@ export interface UseSettingsThemeSyncReturn {
   setChatBgColor: (color: string) => void;
   userMsgColor: string;
   setUserMsgColor: (color: string) => void;
+  chatBarColor: string;
+  setChatBarColor: (color: string) => void;
   diffTheme: DiffThemeMode;
   setDiffTheme: (theme: DiffThemeMode) => void;
 }
@@ -69,6 +76,15 @@ export function useSettingsThemeSync(): UseSettingsThemeSyncReturn {
   const [userMsgColor, setUserMsgColor] = useState<string>(() => {
     const saved = localStorage.getItem('userMsgColor');
     if (saved && /^#[0-9a-fA-F]{6}$/.test(saved)) {
+      return saved;
+    }
+    return '';
+  });
+
+  // Shared chat header / status bar color
+  const [chatBarColor, setChatBarColor] = useState<string>(() => {
+    const saved = localStorage.getItem(CHAT_BAR_COLOR_STORAGE_KEY);
+    if (saved && isValidHexColor(saved)) {
       return saved;
     }
     return '';
@@ -140,6 +156,16 @@ export function useSettingsThemeSync(): UseSettingsThemeSyncReturn {
     }
   }, [userMsgColor]);
 
+  // Chat bar (header / status) color handler
+  useEffect(() => {
+    applyChatBarThemeColor(chatBarColor);
+    if (chatBarColor && isValidHexColor(chatBarColor)) {
+      localStorage.setItem(CHAT_BAR_COLOR_STORAGE_KEY, chatBarColor);
+    } else {
+      localStorage.removeItem(CHAT_BAR_COLOR_STORAGE_KEY);
+    }
+  }, [chatBarColor]);
+
   // Diff theme handler
   useEffect(() => {
     applyDiffTheme(diffTheme, ideTheme);
@@ -156,6 +182,8 @@ export function useSettingsThemeSync(): UseSettingsThemeSyncReturn {
     setChatBgColor,
     userMsgColor,
     setUserMsgColor,
+    chatBarColor,
+    setChatBarColor,
     diffTheme,
     setDiffTheme,
   };

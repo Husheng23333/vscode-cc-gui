@@ -29,15 +29,12 @@ function getProviderOptionStyle(enabled: boolean): React.CSSProperties {
 
 interface BlinkingLogoProps {
   provider: string;
-  /** Current model ID, used to show vendor-specific icon */
-  modelId?: string;
   onProviderChange?: (providerId: string) => void;
 }
 
-export const BlinkingLogo = ({ provider, modelId, onProviderChange }: BlinkingLogoProps) => {
+export const BlinkingLogo = ({ provider, onProviderChange }: BlinkingLogoProps) => {
   const { t } = useTranslation();
   const [displayProvider, setDisplayProvider] = useState(provider);
-  const [displayModelId, setDisplayModelId] = useState(modelId);
   const [animationState, setAnimationState] = useState<'idle' | 'closing' | 'opening'>('idle');
 
   // Dropdown state
@@ -48,14 +45,14 @@ export const BlinkingLogo = ({ provider, modelId, onProviderChange }: BlinkingLo
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (provider !== displayProvider || modelId !== displayModelId) {
+    if (provider !== displayProvider) {
       if (animationState === 'idle') {
         setAnimationState('closing');
       } else if (animationState === 'opening') {
          setAnimationState('closing');
       }
     }
-  }, [provider, modelId, displayProvider, displayModelId, animationState]);
+  }, [provider, displayProvider, animationState]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -63,7 +60,6 @@ export const BlinkingLogo = ({ provider, modelId, onProviderChange }: BlinkingLo
     if (animationState === 'closing') {
       timer = setTimeout(() => {
         setDisplayProvider(provider);
-        setDisplayModelId(modelId);
         setAnimationState('opening');
       }, 200);
     } else if (animationState === 'opening') {
@@ -75,7 +71,7 @@ export const BlinkingLogo = ({ provider, modelId, onProviderChange }: BlinkingLo
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [animationState, provider, modelId]);
+  }, [animationState, provider]);
 
   // Click outside handler
   useEffect(() => {
@@ -145,7 +141,6 @@ export const BlinkingLogo = ({ provider, modelId, onProviderChange }: BlinkingLo
       >
         <ProviderModelIcon
           providerId={displayProvider}
-          modelId={displayModelId}
           size={displayProvider === 'codex' ? 64 : 58}
           colored
         />

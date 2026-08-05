@@ -22,7 +22,7 @@ npm exec --yes --package=@vscode/vsce -- vsce package
 The generated file is named `vscode-cc-gui-<version>.vsix` and is placed in the project root. Install it in VS Code with:
 
 ```powershell
-code --install-extension .\vscode-cc-gui-0.0.2.vsix
+code --install-extension .\vscode-cc-gui-0.0.2-fix2.vsix
 ```
 
 If the webview dependencies are missing, install them once and run the build again:

@@ -59,6 +59,9 @@ interface BasicConfigSectionProps {
   // Chat background color configuration
   chatBgColor?: string;
   onChatBgColorChange?: (color: string) => void;
+  // Shared chat header / status bar color
+  chatBarColor?: string;
+  onChatBarColorChange?: (color: string) => void;
   // User message bubble color configuration
   userMsgColor?: string;
   onUserMsgColorChange?: (color: string) => void;
@@ -150,6 +153,8 @@ const BasicConfigSection = (props: BasicConfigSectionProps) => {
           onBrowseCodeFontFile={props.onBrowseCodeFontFile}
           chatBgColor={props.chatBgColor}
           onChatBgColorChange={props.onChatBgColorChange}
+          chatBarColor={props.chatBarColor}
+          onChatBarColorChange={props.onChatBarColorChange}
           userMsgColor={props.userMsgColor}
           onUserMsgColorChange={props.onUserMsgColorChange}
           diffTheme={props.diffTheme}

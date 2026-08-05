@@ -48,7 +48,7 @@ export class DiffService {
 
       if (isNewFile) {
         const action = await vscode.window.showInformationMessage(
-          `Claude wants to create: ${path.basename(filePath)}`,
+          `AI wants to create: ${path.basename(filePath)}`,
           'Create File',
           'Cancel',
         );
