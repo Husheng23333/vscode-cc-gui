@@ -8,6 +8,7 @@ import {
 } from '../components/ChatInputBox/types';
 import type { Attachment, ChatInputBoxHandle, PermissionMode, ReasoningEffort, SelectedAgent, CodexFastMode } from '../components/ChatInputBox/types';
 import type { ViewMode } from './useModelProviderState';
+import { isCliOnlyProvider } from './providers/cliProviders';
 
 /**
  * Command sets for local handling (shared with App.tsx to avoid duplication)
@@ -343,19 +344,21 @@ export function useMessageSender({
 
     if (!text && !hasAttachments) return;
 
-    // Check SDK status
-    if (!sdkStatusLoaded) {
-      addToast(t('chat.sdkStatusLoading'), 'info');
-      return;
-    }
-    if (!currentSdkInstalled) {
-      addToast(
-        t('chat.sdkNotInstalled', { provider: currentProvider === 'codex' ? 'Codex' : 'Claude Code' }) + ' ' + t('chat.goInstallSdk'),
-        'warning'
-      );
-      setSettingsInitialTab('dependencies');
-      setCurrentView('settings');
-      return;
+    // Check SDK status (CLI providers use system binaries, not npm SDKs).
+    if (!isCliOnlyProvider(currentProvider)) {
+      if (!sdkStatusLoaded) {
+        addToast(t('chat.sdkStatusLoading'), 'info');
+        return;
+      }
+      if (!currentSdkInstalled) {
+        addToast(
+          t('chat.sdkNotInstalled', { provider: currentProvider === 'codex' ? 'Codex' : 'Claude Code' }) + ' ' + t('chat.goInstallSdk'),
+          'warning'
+        );
+        setSettingsInitialTab('dependencies');
+        setCurrentView('settings');
+        return;
+      }
     }
 
     // Build user message content blocks

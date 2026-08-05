@@ -2,7 +2,7 @@
   "name": "vscode-cc-gui",
   "displayName": "CC GUI（Claude and Codex）",
   "description": "Independent open-source GUI for Claude Code CLI and Codex (unofficial)",
-  "version": "0.0.2",
+  "version": "0.0.2-fix2",
   "publisher": "MossX",
   "author": {
     "name": "MossX"

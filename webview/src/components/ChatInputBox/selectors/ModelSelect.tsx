@@ -28,10 +28,23 @@ interface ModelSelectProps {
   onChange: (modelId: string) => void;
   models?: ModelInfo[];
   currentProvider?: string;
+  /** True while CLI providers (OpenCode / Kimi) are still fetching model catalogs. */
+  loading?: boolean;
+  /** Set when the CLI model catalog fetch failed (or timed out); row offers retry. */
+  error?: string | null;
+  /** Retries the CLI model catalog fetch for the current provider. */
+  onRetry?: () => void;
   onAddModel?: () => void;
   longContextEnabled?: boolean;
   onLongContextChange?: (enabled: boolean) => void;
 }
+
+const LOADING_OPTION_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  cursor: 'default',
+};
 
 const DEFAULT_MODEL_MAP: Record<string, ModelInfo> = AVAILABLE_MODELS.reduce(
   (acc, model) => {
@@ -48,6 +61,8 @@ const MODEL_LABEL_KEYS: Record<string, string> = {
   'claude-sonnet-4-6': 'models.claude.sonnet46.label',
   'claude-fable-5': 'models.claude.fable5.label',
   'claude-opus-4-8': 'models.claude.opus48.label',
+  'grok-4.5': 'models.grok.grok45.label',
+  grok: 'models.grok.grok45.label',
   'claude-opus-4-6': 'models.claude.opus46_1m.label',
   'claude-opus-4-6[1m]': 'models.claude.opus46_1m.label',
   'claude-haiku-4-5': 'models.claude.haiku45.label',
@@ -73,6 +88,8 @@ const MODEL_DESCRIPTION_KEYS: Record<string, string> = {
   'gpt-5.6-luna': 'models.codex.gpt56luna.description',
   'gpt-5.5': 'models.codex.gpt55.description',
   'gpt-5.4': 'models.codex.gpt54.description',
+  'grok-4.5': 'models.grok.grok45.description',
+  grok: 'models.grok.grok45.description',
 };
 
 /**
@@ -107,9 +124,13 @@ const resolveMappedModelName = (
   return mapped?.trim() || undefined;
 };
 
+/** Cap dropdown height so long model catalogs (e.g. OpenCode) stay usable. */
+const MODEL_DROPDOWN_MAX_HEIGHT = 300;
+
 /**
- * Resolve the display model name for icon matching.
+ * Resolve the display model name for dropdown row icon matching.
  * For mapped Claude models, returns the mapped name; otherwise the original ID.
+ * Note: the closed button trigger uses CLI/provider icon only; list rows use model icons.
  */
 const resolveModelIdForIcon = (
   modelId: string,
@@ -131,7 +152,7 @@ const resolveModelIdForIcon = (
  * ModelSelect - Model selector component
  * Supports switching between Sonnet 4.5, Opus 4.5, and other models, including Codex models
  */
-export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, currentProvider = 'claude', onAddModel, longContextEnabled = true, onLongContextChange }: ModelSelectProps) => {
+export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, currentProvider = 'claude', loading = false, error = null, onRetry, onAddModel, longContextEnabled = true, onLongContextChange }: ModelSelectProps) => {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -143,6 +164,9 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
     dropdownRef,
     preferredAlignment: 'right',
   });
+  const dropdownMaxHeight = maxHeight != null
+    ? Math.min(maxHeight, MODEL_DROPDOWN_MAX_HEIGHT)
+    : MODEL_DROPDOWN_MAX_HEIGHT;
 
   // Strip [1m] suffix for finding the model in the list
   const strippedValue = strip1MContextSuffix(value);
@@ -266,7 +290,7 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
     if (isOpen) {
       recalculate();
     }
-  }, [isOpen, filteredModels.length, recalculate]);
+  }, [isOpen, filteredModels.length, loading, recalculate]);
 
   return (
     <div style={RELATIVE_INLINE_BLOCK_STYLE}>
@@ -278,7 +302,6 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
       >
         <ProviderModelIcon
           providerId={currentProvider}
-          modelId={resolveModelIdForIcon(currentModel.id, modelMapping, MODEL_ID_TO_MAPPING_KEY)}
           size={12}
           colored
         />
@@ -290,7 +313,7 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
         <div
           ref={dropdownRef}
           className="selector-dropdown"
-          style={{ ...DROPDOWN_STYLE, ...positionedStyle, maxHeight, overflowY: 'auto' }}
+          style={{ ...DROPDOWN_STYLE, ...positionedStyle, maxHeight: dropdownMaxHeight, overflowY: 'auto' }}
         >
           {showSearch && (
             <div className="selector-search-row">
@@ -302,6 +325,32 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
                 placeholder={t('models.searchPlaceholder', { defaultValue: 'Search models' })}
                 autoFocus
               />
+            </div>
+          )}
+          {loading && (
+            <div
+              className="selector-option selector-option-status"
+              data-testid="model-loading"
+              style={LOADING_OPTION_STYLE}
+            >
+              <span className="codicon codicon-loading codicon-modifier-spin" />
+              <span>{t('chat.loadingDropdown', { defaultValue: 'Loading…' })}</span>
+            </div>
+          )}
+          {!loading && error && (
+            <div
+              className="selector-option selector-option-status"
+              data-testid="model-load-error"
+              style={{ ...LOADING_OPTION_STYLE, cursor: onRetry ? 'pointer' : 'default' }}
+              title={error}
+              onClick={() => onRetry?.()}
+            >
+              <span className="codicon codicon-warning" />
+              <span>
+                {t('models.cliLoadFailed', {
+                  defaultValue: 'Failed to load models. Click to retry.',
+                })}
+              </span>
             </div>
           )}
           {visibleModels.map((model) => (

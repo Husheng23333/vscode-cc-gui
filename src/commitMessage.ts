@@ -20,6 +20,11 @@ export interface CommitMessageGenerationResult {
   error?: string;
 }
 
+export interface CommitMessageGenerateOptions {
+  /** Streaming preview of the commit message (may be partial). */
+  onProgress?: (partial: string) => void;
+}
+
 export class CommitMessageService {
   private readonly store: SettingsStore;
 
@@ -34,7 +39,10 @@ export class CommitMessageService {
     return this.store.getCommitGenerationEnabled();
   }
 
-  async generate(workspacePath: string): Promise<CommitMessageGenerationResult> {
+  async generate(
+    workspacePath: string,
+    options: CommitMessageGenerateOptions = {},
+  ): Promise<CommitMessageGenerationResult> {
     const diff = this.getGitDiff(workspacePath);
     if (!diff.trim()) {
       throw new Error('No changes found');
@@ -58,7 +66,13 @@ export class CommitMessageService {
       const raw = await this.bridge.requestAiText(provider, prompt, {
         model: model ?? undefined,
         disableThinking: true,
-        streaming: false,
+        streaming: Boolean(options.onProgress),
+        onProgress: options.onProgress
+          ? (partial) => {
+              const cleaned = cleanupCommitMessage(partial);
+              if (cleaned) options.onProgress?.(cleaned);
+            }
+          : undefined,
       });
       const commitMessage = cleanupCommitMessage(raw);
       if (!commitMessage) {

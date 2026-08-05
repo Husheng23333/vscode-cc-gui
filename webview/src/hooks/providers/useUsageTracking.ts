@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { CLI_ONLY_PROVIDERS } from './cliProviders';
 
 const PROVIDER_TO_SDK: Record<string, string> = {
   claude: 'claude-sdk',
@@ -6,6 +7,10 @@ const PROVIDER_TO_SDK: Record<string, string> = {
   bedrock: 'claude-sdk',
   codex: 'codex-sdk',
   openai: 'codex-sdk',
+  grok: 'grok-cli',
+  kimi: 'kimi-cli',
+  opencode: 'opencode-cli',
+  pi: 'pi-cli',
 };
 
 type SdkStatus = Record<string, { installed?: boolean; status?: string }>;
@@ -25,6 +30,8 @@ export function useUsageTracking() {
 
   const isSdkInstalled = useCallback(
     (providerId: string): boolean => {
+      // Headless CLI providers are system-installed; do not gate on SDK status.
+      if (CLI_ONLY_PROVIDERS.has(providerId)) return true;
       if (!sdkStatusLoaded) return false;
       const sdkId = PROVIDER_TO_SDK[providerId] || 'claude-sdk';
       const status = sdkStatus[sdkId];

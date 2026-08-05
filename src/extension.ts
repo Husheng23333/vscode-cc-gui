@@ -122,7 +122,12 @@ export function activate(context: vscode.ExtensionContext) {
         },
         async () => {
           try {
-            const result = await service.generate(workspacePath);
+            const result = await service.generate(workspacePath, {
+              onProgress: (partial) => {
+                // Stream partial commit text into the SCM input box as tokens arrive.
+                setScmCommitInputBox(partial);
+              },
+            });
             if (result.commitMessage) {
               const applied = setScmCommitInputBox(result.commitMessage);
               if (applied) {

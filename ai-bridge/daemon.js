@@ -28,6 +28,10 @@ import path from 'node:path';
 import { createInterface } from 'readline';
 import { handleClaudeCommand } from './channels/claude-channel.js';
 import { handleCodexCommand } from './channels/codex-channel.js';
+import { handleGrokCommand } from './channels/grok-channel.js';
+import { handleKimiCommand } from './channels/kimi-channel.js';
+import { handleOpenCodeCommand } from './channels/opencode-channel.js';
+import { handlePiCommand } from './channels/pi-channel.js';
 import { loadClaudeSdk, isClaudeSdkAvailable } from './utils/sdk-loader.js';
 import {
   sendMessagePersistent,
@@ -447,13 +451,25 @@ async function processRequest(request) {
     } else if (provider === 'claude' && command === 'getContextUsage') {
       await getContextUsagePersistent(stdinData);
     } else {
-      // Dispatch to the existing handlers for non-send commands.
+      // Dispatch to the existing handlers for non-send commands + CLI providers.
       switch (provider) {
         case 'claude':
           await handleClaudeCommand(command, [], stdinData);
           break;
         case 'codex':
           await handleCodexCommand(command, [], stdinData);
+          break;
+        case 'grok':
+          await handleGrokCommand(command, [], stdinData);
+          break;
+        case 'kimi':
+          await handleKimiCommand(command, [], stdinData);
+          break;
+        case 'opencode':
+          await handleOpenCodeCommand(command, [], stdinData);
+          break;
+        case 'pi':
+          await handlePiCommand(command, [], stdinData);
           break;
         default:
           throw new Error(`Unknown provider: ${provider}`);

@@ -20,8 +20,6 @@ const VERSION_TAG_STYLE: React.CSSProperties = { cursor: 'pointer' };
 
 export interface WelcomeScreenProps {
   currentProvider: string;
-  /** Current model ID for vendor-specific icon display */
-  currentModelId?: string;
   t: TFunction;
   onProviderChange: (provider: string) => void;
   onVersionClick?: () => void;
@@ -29,7 +27,6 @@ export interface WelcomeScreenProps {
 
 export const WelcomeScreen = memo(function WelcomeScreen({
   currentProvider,
-  currentModelId,
   t,
   onProviderChange,
   onVersionClick,
@@ -44,7 +41,7 @@ export const WelcomeScreen = memo(function WelcomeScreen({
   return (
     <div style={ROOT_STYLE}>
       <div style={LOGO_WRAPPER_STYLE}>
-        <BlinkingLogo provider={currentProvider} modelId={currentModelId} onProviderChange={onProviderChange} />
+        <BlinkingLogo provider={currentProvider} onProviderChange={onProviderChange} />
         <span
           className="version-tag"
           role="button"

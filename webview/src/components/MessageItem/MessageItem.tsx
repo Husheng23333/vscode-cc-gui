@@ -45,7 +45,7 @@ export interface MessageItemProps {
 /** Map provider id to a human-readable label used in UI text. */
 function getProviderDisplayName(providerId?: string): string {
   if (providerId === 'codex') return 'Codex';
-  return 'Claude';
+  return 'AI';
 }
 
 type GroupedBlock =

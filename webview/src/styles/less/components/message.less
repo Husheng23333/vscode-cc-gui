@@ -839,6 +839,22 @@
     color: var(--color-tool-file-link, var(--accent-primary, #4ea1ff));
 }
 
+/* @ file-reference links rendered by CollapsibleTextBlock live in
+   .plain-text-content, not .markdown-content — give them the same
+   treatment: inherit the bubble text color, dotted underline, pointer. */
+.message.user .plain-text-content a.file-link {
+    color: inherit;
+    text-decoration-style: dotted;
+    cursor: pointer;
+}
+
+.message.user .plain-text-content a.file-link:hover {
+    text-decoration-thickness: 2px;
+    opacity: 0.95;
+}
+
+
+
 .markdown-content a.class-link {
     text-decoration-style: dashed;
     color: var(--color-tool-class-link, var(--accent-primary, #4ea1ff));

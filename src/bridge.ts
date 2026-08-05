@@ -40,6 +40,10 @@ import { SlashCommandService } from './bridge/services/SlashCommandService';
 import { SettingsStore } from './bridge/services/SettingsStore';
 import { sanitizeUserMessagePayload } from './bridge/services/userMessageSanitizer';
 import type { SessionTemplate } from './sessionTemplate';
+import type { RuntimeProviderId } from './bridge/types';
+import { isRuntimeProvider } from './cli/cliTools';
+import { CliStatusHandler } from './bridge/handlers/CliStatusHandler';
+import { CliModelsHandler } from './bridge/handlers/CliModelsHandler';
 
 type MessageCallback = (event: string, content: string) => void;
 type CreateTabCallback = () => void;
@@ -57,7 +61,7 @@ export class BridgeServer {
   private _logAppendLine: (value: string) => void;
   private _logAppend: (value: string) => void;
   private _configListener?: vscode.Disposable;
-  private _activeProvider: 'claude' | 'codex' = 'claude';
+  private _activeProvider: RuntimeProviderId = 'claude';
   private _selectedModel: string = '';
   /** request id → text as typed in the input before skill / bridge expansion (for history UI). */
   private _reqIdToUserInputAsTyped = new Map<string, string>();
@@ -71,6 +75,7 @@ export class BridgeServer {
     reject(reason?: any): void;
     chunks: string[];
     timeout: ReturnType<typeof setTimeout>;
+    onProgress?: (partial: string) => void;
   }>();
   private readonly _runtimeContext: RuntimeContextService;
   private readonly _historyService: HistoryService;
@@ -168,7 +173,7 @@ export class BridgeServer {
     this._callbacks.forEach(cb => cb(event, content));
   }
 
-  getActiveProvider(): 'claude' | 'codex' {
+  getActiveProvider(): RuntimeProviderId {
     return this._activeProvider;
   }
 
@@ -208,7 +213,12 @@ export class BridgeServer {
   requestAiText(
     provider: 'claude' | 'codex',
     prompt: string,
-    options: { model?: string; disableThinking?: boolean; streaming?: boolean } = {},
+    options: {
+      model?: string;
+      disableThinking?: boolean;
+      streaming?: boolean;
+      onProgress?: (partial: string) => void;
+    } = {},
   ): Promise<string> {
     if (!this._bridgeProcess || this._bridgeProcess.killed) {
       this._log.appendLine('[BRIDGE] Daemon not running, starting...');
@@ -227,7 +237,7 @@ export class BridgeServer {
       message: prompt,
       text: prompt,
       permissionMode: 'default',
-      streaming: options.streaming ?? false,
+      streaming: options.streaming ?? Boolean(options.onProgress),
       disableThinking: options.disableThinking ?? true,
     };
     if (provider === 'codex') {
@@ -243,7 +253,13 @@ export class BridgeServer {
         this._requestEvents.delete(id);
         reject(new Error('AI text request timed out'));
       }, 120000);
-      this._textRequestResolvers.set(id, { resolve, reject, chunks: [], timeout });
+      this._textRequestResolvers.set(id, {
+        resolve,
+        reject,
+        chunks: [],
+        timeout,
+        onProgress: options.onProgress,
+      });
       this._requestEvents.set(id, 'internal_ai_text_request');
       const msg = JSON.stringify({ id, method, params }) + '\n';
       this._log.appendLine(`[BRIDGE] Sending internal AI text request: id=${id} provider=${provider}`);
@@ -373,6 +389,8 @@ export class BridgeServer {
     dispatcher.register(new McpMarketplaceHandler(bridgeContext));
     dispatcher.register(new SkillHandler(bridgeContext));
     dispatcher.register(new DependencyHandler(bridgeContext));
+    dispatcher.register(new CliStatusHandler(bridgeContext));
+    dispatcher.register(new CliModelsHandler(bridgeContext));
     this._log.appendLine(`[BRIDGE] Registered ${dispatcher.getHandlerCount()} modular handlers`);
     return dispatcher;
   }
@@ -617,7 +635,15 @@ export class BridgeServer {
       this._statusBarItem.hide();
       return;
     }
-    const provider = this._activeProvider === 'codex' ? 'Codex' : 'Claude';
+    const providerLabels: Record<RuntimeProviderId, string> = {
+      claude: 'Claude',
+      codex: 'Codex',
+      grok: 'Grok',
+      kimi: 'Kimi',
+      opencode: 'OpenCode',
+      pi: 'PI',
+    };
+    const provider = providerLabels[this._activeProvider] ?? this._activeProvider;
     const model = this._selectedModel ? ` ${this._selectedModel}` : '';
     const state = status ? ` ${status}` : '';
     this._statusBarItem.text = `$(comment-discussion) ${provider}${model}${state}`;
@@ -780,16 +806,20 @@ export class BridgeServer {
     params.workspacePath = params.workspacePath ?? (effectiveWorkingDirectory || this._workspacePath);
     params.cwd = params.cwd ?? effectiveWorkingDirectory;
 
-    const providerFromPayload = params?.provider;
-    const activeProvider: 'claude' | 'codex' =
-      providerFromPayload === 'codex' || providerFromPayload === 'claude'
-        ? providerFromPayload
+    const providerFromPayload = typeof params?.provider === 'string' ? params.provider : '';
+    const activeProvider: RuntimeProviderId =
+      isRuntimeProvider(providerFromPayload)
+        ? (providerFromPayload as RuntimeProviderId)
         : this._activeProvider;
 
     // Map webview event names → daemon method names
     const METHOD_MAP: Record<string, string> = {
       'send_message':                  `${activeProvider}.send`,
-      'send_message_with_attachments': activeProvider === 'codex' ? 'codex.send' : 'claude.sendWithAttachments',
+      // Attachments only for Claude SDK path; CLI/Codex fall back to plain send.
+      'send_message_with_attachments':
+        activeProvider === 'claude'
+          ? 'claude.sendWithAttachments'
+          : `${activeProvider}.send`,
       'preconnect':                    'claude.preconnect',
       'abort':                         'abort',
       'reset_runtime':                 'claude.resetRuntime',
@@ -819,6 +849,9 @@ export class BridgeServer {
       if (activeProvider === 'codex') {
         params.sandboxMode = params.sandboxMode ?? this.getCodexSandboxMode();
       }
+      // Ensure daemon routing receives the active provider even if the webview
+      // omitted it (CLI providers rely on this for session continuity).
+      params.provider = activeProvider;
     }
 
     const userInputAsTyped =
@@ -1368,10 +1401,12 @@ export class BridgeServer {
         } catch {
           request.chunks.push(rawDelta.trim().replace(/^"|"$/g, ''));
         }
+        this._emitInternalTextProgress(request);
         return true;
       }
       if (line.startsWith('[CONTENT] ')) {
         request.chunks.push(line.slice('[CONTENT] '.length));
+        this._emitInternalTextProgress(request);
         return true;
       }
       if (line.startsWith('[MESSAGE] ')) {
@@ -1379,12 +1414,14 @@ export class BridgeServer {
         const text = this._extractTextFromDaemonMessage(parsed);
         if (text) {
           request.chunks.push(text);
+          this._emitInternalTextProgress(request);
         }
         return true;
       }
       const parsed = this._safeJson<any>(line, null);
       if (parsed?.result && typeof parsed.result === 'string') {
         request.chunks.push(parsed.result);
+        this._emitInternalTextProgress(request);
       }
       return true;
     }
@@ -1402,6 +1439,21 @@ export class BridgeServer {
     }
 
     return true;
+  }
+
+  private _emitInternalTextProgress(request: {
+    chunks: string[];
+    onProgress?: (partial: string) => void;
+  }): void {
+    if (!request.onProgress) return;
+    const partial = this._dedupeTextChunks(request.chunks);
+    if (partial) {
+      try {
+        request.onProgress(partial);
+      } catch {
+        // ignore consumer errors
+      }
+    }
   }
 
   private _extractTextFromDaemonMessage(parsed: any): string {

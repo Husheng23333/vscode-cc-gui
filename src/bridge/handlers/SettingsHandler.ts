@@ -82,7 +82,14 @@ export class SettingsHandler implements BridgeHandler {
     switch (event) {
       case 'set_provider': {
         const provider = content.trim();
-        if (provider === 'claude' || provider === 'codex') {
+        if (
+          provider === 'claude' ||
+          provider === 'codex' ||
+          provider === 'grok' ||
+          provider === 'kimi' ||
+          provider === 'opencode' ||
+          provider === 'pi'
+        ) {
           this.context.callbacks.setActiveProvider(provider);
         }
         return true;

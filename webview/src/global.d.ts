@@ -274,6 +274,18 @@ interface Window {
    */
   updateActiveProvider?: (providerId: string) => void;
 
+  /**
+   * CLI install/version detection payload (Settings → CLI tab)
+   */
+  updateCliStatus?: (json: string) => void;
+
+  /**
+   * Dynamic CLI model catalog (Kimi / OpenCode / PI)
+   */
+  setCliModels?: (
+    dataOrStr: string | { provider?: string; models?: unknown; success?: boolean; error?: string }
+  ) => void;
+
   updateThinkingEnabled?: (json: string) => void;
 
   /**

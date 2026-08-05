@@ -13,7 +13,7 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
-    version: '0.0.2',
+    version: '0.0.2-fix2',
     date: '2026-08-05',
     content: {
       en: `- Add \`enableDebugLog\` setting (default off) and show Webview DevTools only when enabled
