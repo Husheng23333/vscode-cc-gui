@@ -338,6 +338,18 @@ export class SettingsStore {
     return this.state.update('ccg.status_bar_widget_enabled', this.extractBooleanField(content, 'statusBarWidgetEnabled', true));
   }
 
+  /** VS Code setting `ccGui.enableDebugLog` (default false). */
+  getEnableDebugLog(): boolean {
+    return vscode.workspace.getConfiguration('ccGui').get<boolean>('enableDebugLog') === true;
+  }
+
+  setEnableDebugLog(content: string): Thenable<void> {
+    const enabled = this.extractBooleanField(content, 'enableDebugLog', false);
+    return vscode.workspace
+      .getConfiguration('ccGui')
+      .update('enableDebugLog', enabled, vscode.ConfigurationTarget.Global);
+  }
+
   private parseBooleanState(key: string, defaultValue: boolean, jsonField: string): boolean {
     const raw = this.state.getString(`ccg.${key}`, String(defaultValue));
     const parsed = this.parseJson(raw, undefined);

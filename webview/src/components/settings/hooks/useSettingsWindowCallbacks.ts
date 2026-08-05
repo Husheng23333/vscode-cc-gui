@@ -53,6 +53,7 @@ export interface SettingsWindowCallbacksDeps {
   setCommitGenerationEnabled?: (enabled: boolean) => void;
   setAiTitleGenerationEnabled?: (enabled: boolean) => void;
   setStatusBarWidgetEnabled?: (enabled: boolean) => void;
+  setEnableDebugLog?: (enabled: boolean) => void;
   // Sound notification setters
   setSoundNotificationEnabled?: (enabled: boolean) => void;
   setAskUserQuestionNotificationEnabled?: (enabled: boolean) => void;
@@ -358,6 +359,16 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
       }
     };
 
+    // Debug log config callback
+    window.updateEnableDebugLog = (jsonStr: string) => {
+      try {
+        const data = JSON.parse(jsonStr);
+        d().setEnableDebugLog?.(data.enableDebugLog === true);
+      } catch (error) {
+        console.error('[SettingsView] Failed to parse debug log config:', error);
+      }
+    };
+
     window.updateAskUserQuestionNotificationEnabled = (jsonStr: string) => {
       try {
         const data = JSON.parse(jsonStr);
@@ -532,6 +543,7 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
     sendToJava('get_commit_generation_enabled:');
     sendToJava('get_ai_title_generation_enabled:');
     sendToJava('get_status_bar_widget_enabled:');
+    sendToJava('get_enable_debug_log:');
     sendToJava('get_permission_dialog_timeout:');
 
     return () => {
@@ -569,6 +581,7 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
       window.updateCommitGenerationEnabled = undefined;
       window.updateAiTitleGenerationEnabled = undefined;
       window.updateStatusBarWidgetEnabled = undefined;
+      window.updateEnableDebugLog = undefined;
       window.updateAgents = previousUpdateAgents;
       window.agentOperationResult = undefined;
       window.agentImportPreviewResult = undefined;

@@ -193,6 +193,9 @@ const SettingsView = ({
     statusBarWidgetEnabled,
     setStatusBarWidgetEnabled,
     handleStatusBarWidgetEnabledChange,
+    enableDebugLog,
+    setEnableDebugLog,
+    handleEnableDebugLogChange,
     askUserQuestionNotificationEnabled,
     setAskUserQuestionNotificationEnabled,
     handleAskUserQuestionNotificationEnabledChange,
@@ -351,6 +354,7 @@ const SettingsView = ({
     setCommitGenerationEnabled,
     setAiTitleGenerationEnabled,
     setStatusBarWidgetEnabled,
+    setEnableDebugLog,
     setAskUserQuestionNotificationEnabled,
   });
 
@@ -515,6 +519,8 @@ const SettingsView = ({
                 handleStatusBarWidgetEnabledChange(enabled);
                 addToast(t('toast.restartRequired'), 'warning');
               }}
+              enableDebugLog={enableDebugLog}
+              onEnableDebugLogChange={handleEnableDebugLogChange}
               aiTitleGenerationEnabled={aiTitleGenerationEnabled}
               onAiTitleGenerationEnabledChange={handleAiTitleGenerationEnabledChange}
               newSessionConfirmEnabled={!skipNewSessionConfirm}

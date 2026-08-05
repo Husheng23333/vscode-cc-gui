@@ -262,6 +262,12 @@
         "disabled": "Disabled",
         "hint": "When enabled, shows current model and mode info in the IDE status bar (e.g. GUI [Opus] {Auto}). When disabled, the widget is hidden."
       },
+      "debugLog": {
+        "label": "Debug Log",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "hint": "When enabled, writes debug logs to the Output panel channel “CC GUI”. Off by default."
+      },
       "taskCompletionNotification": {
         "label": "Task Completion Notification",
         "enabled": "Enabled",

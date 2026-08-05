@@ -51,6 +51,15 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('ccGui.openDevTools', async () => {
+      // Same gate as view/title visibility: only when debug log is enabled.
+      const enabled =
+        vscode.workspace.getConfiguration('ccGui').get<boolean>('enableDebugLog') === true;
+      if (!enabled) {
+        void vscode.window.showInformationMessage(
+          'Enable “CC GUI: Enable Debug Log” in settings to open Webview Developer Tools.'
+        );
+        return;
+      }
       try {
         await vscode.commands.executeCommand('workbench.action.webview.openDeveloperTools');
       } catch {

@@ -54,6 +54,9 @@ export class BridgeServer {
   private _workspacePath: string;
   private _webview?: vscode.Webview;
   private _log: vscode.OutputChannel;
+  private _logAppendLine: (value: string) => void;
+  private _logAppend: (value: string) => void;
+  private _configListener?: vscode.Disposable;
   private _activeProvider: 'claude' | 'codex' = 'claude';
   private _selectedModel: string = '';
   /** request id → text as typed in the input before skill / bridge expansion (for history UI). */
@@ -86,14 +89,21 @@ export class BridgeServer {
   }>();
   constructor(private readonly context: vscode.ExtensionContext) {
     this._log = vscode.window.createOutputChannel('CC GUI');
-    // Disable Output panel noise: do not auto-show, and drop all append* writes.
-    // Re-enable by setting ENABLE_CCG_OUTPUT_LOG = true when debugging.
-    const ENABLE_CCG_OUTPUT_LOG = false;
-    if (!ENABLE_CCG_OUTPUT_LOG) {
-      this._log.appendLine = () => {};
-      this._log.append = () => {};
-    }
-    // this._log.show(true);
+    // Preserve real writers so we can toggle via settings without recreating the channel.
+    this._logAppendLine = this._log.appendLine.bind(this._log);
+    this._logAppend = this._log.append.bind(this._log);
+    this._applyDebugLogSetting(false);
+    this._configListener = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('ccGui.enableDebugLog')) {
+        this._applyDebugLogSetting(true);
+        // Keep webview toggle in sync when changed from VS Code Settings UI.
+        if (this._webview) {
+          const enabled =
+            vscode.workspace.getConfiguration('ccGui').get<boolean>('enableDebugLog') === true;
+          this._callWebviewJson(this._webview, 'updateEnableDebugLog', { enableDebugLog: enabled });
+        }
+      }
+    });
     this._bridgePath = path.join(context.extensionPath, 'ai-bridge', 'daemon.js');
     this._workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
     this._statusBarWidgetEnabled = context.globalState.get<boolean>('ccg.status_bar_widget_enabled', true);
@@ -1554,7 +1564,33 @@ export class BridgeServer {
     this._usageStatistics.postStatistics(webview);
   }
 
+  /**
+   * Gate Output Channel writes via `ccGui.enableDebugLog` (default: false).
+   * When disabled, append* is a no-op so normal use stays quiet.
+   */
+  private _applyDebugLogSetting(fromConfigChange: boolean): void {
+    const enabled =
+      vscode.workspace.getConfiguration('ccGui').get<boolean>('enableDebugLog') === true;
+    // Drive view/title menu visibility for openDevTools (package.json when clause).
+    void vscode.commands.executeCommand('setContext', 'ccGui.enableDebugLog', enabled);
+    if (enabled) {
+      this._log.appendLine = this._logAppendLine;
+      this._log.append = this._logAppend;
+      if (fromConfigChange) {
+        this._logAppendLine('[CC GUI] Debug log enabled (ccGui.enableDebugLog)');
+        this._log.show(true);
+      }
+    } else {
+      if (fromConfigChange) {
+        this._logAppendLine('[CC GUI] Debug log disabled (ccGui.enableDebugLog)');
+      }
+      this._log.appendLine = () => {};
+      this._log.append = () => {};
+    }
+  }
+
   dispose() {
+    this._configListener?.dispose();
     this._runtimeContext.dispose();
     this._permissionIpc.dispose();
     this._bridgeProcess?.kill();

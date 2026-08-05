@@ -262,6 +262,12 @@
         "disabled": "已关闭",
         "hint": "开启后，在 IDE 右下角状态栏显示当前模型和模式信息（如 GUI [Opus] {自动}）。关闭后隐藏。"
       },
+      "debugLog": {
+        "label": "调试日志",
+        "enabled": "已开启",
+        "disabled": "已关闭",
+        "hint": "开启后，在「输出」面板的「CC GUI」通道输出调试日志，便于排查问题。默认关闭。"
+      },
       "taskCompletionNotification": {
         "label": "任务完成通知",
         "enabled": "已开启",

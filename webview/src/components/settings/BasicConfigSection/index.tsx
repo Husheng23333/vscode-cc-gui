@@ -74,6 +74,9 @@ interface BasicConfigSectionProps {
   // Status bar widget configuration
   statusBarWidgetEnabled?: boolean;
   onStatusBarWidgetEnabledChange?: (enabled: boolean) => void;
+  // Debug log configuration
+  enableDebugLog?: boolean;
+  onEnableDebugLogChange?: (enabled: boolean) => void;
   // AI title generation configuration
   aiTitleGenerationEnabled?: boolean;
   onAiTitleGenerationEnabledChange?: (enabled: boolean) => void;
@@ -168,6 +171,8 @@ const BasicConfigSection = (props: BasicConfigSectionProps) => {
           onCommitGenerationEnabledChange={props.onCommitGenerationEnabledChange}
           statusBarWidgetEnabled={props.statusBarWidgetEnabled}
           onStatusBarWidgetEnabledChange={props.onStatusBarWidgetEnabledChange}
+          enableDebugLog={props.enableDebugLog}
+          onEnableDebugLogChange={props.onEnableDebugLogChange}
           aiTitleGenerationEnabled={props.aiTitleGenerationEnabled}
           onAiTitleGenerationEnabledChange={props.onAiTitleGenerationEnabledChange}
           newSessionConfirmEnabled={props.newSessionConfirmEnabled}
