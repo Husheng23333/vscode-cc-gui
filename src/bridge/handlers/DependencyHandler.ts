@@ -8,6 +8,18 @@ import { NodeDetector } from '../../nodeDetector';
 import { BridgeContext, BridgeHandler, BridgeMessage } from '../types';
 import { callWindowFunction, parseJson, postJson } from './helpers';
 
+interface NpmCommandResult {
+  stdout: string;
+  stderr: string;
+}
+
+interface NpmInvocation {
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  shell: boolean;
+}
+
 export class DependencyHandler implements BridgeHandler {
   readonly supportedEvents = [
     'get_dependency_status',
@@ -142,11 +154,47 @@ export class DependencyHandler implements BridgeHandler {
   private resolveNpm(): { npmPath: string; env: NodeJS.ProcessEnv } {
     const npmPath = NodeDetector.findNpm(this.context.extensionContext) ?? 'npm';
     const env = { ...process.env };
+    for (const key of Object.keys(env)) {
+      if (key.toLowerCase() === 'npm_config_offline') {
+        delete env[key];
+      }
+    }
+    env.NPM_CONFIG_OFFLINE = 'false';
     const npmDir = path.dirname(npmPath);
-    if (npmDir && npmDir !== '.' && !env.PATH?.split(path.delimiter).includes(npmDir)) {
-      env.PATH = `${npmDir}${path.delimiter}${env.PATH ?? ''}`;
+    if (npmDir && npmDir !== '.') {
+      const currentPath = env.PATH ?? env.Path ?? '';
+      if (!currentPath.split(path.delimiter).includes(npmDir)) {
+        const nextPath = `${npmDir}${path.delimiter}${currentPath}`;
+        env.PATH = nextPath;
+        if (process.platform === 'win32') {
+          env.Path = nextPath;
+        }
+      }
     }
     return { npmPath, env };
+  }
+
+  private resolveNpmInvocation(args: string[]): NpmInvocation {
+    const { npmPath, env } = this.resolveNpm();
+    if (process.platform === 'win32' && npmPath.toLowerCase().endsWith('.cmd')) {
+      const nodePath = NodeDetector.find(this.context.extensionContext);
+      const npmCliPath = path.join(path.dirname(npmPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+      if (nodePath && fs.existsSync(npmCliPath)) {
+        return {
+          command: nodePath,
+          args: [npmCliPath, ...args],
+          env,
+          shell: false,
+        };
+      }
+    }
+
+    return {
+      command: process.platform === 'win32' ? path.basename(npmPath) : npmPath,
+      args,
+      env,
+      shell: process.platform === 'win32',
+    };
   }
 
   private installDependency(content: string, webview: vscode.Webview): void {
@@ -163,8 +211,13 @@ export class DependencyHandler implements BridgeHandler {
     const send = (log: string) => postJson(webview, 'dependency_install_progress', { sdkId, log });
     send(`Installing ${requested}...\n`);
     this.cleanupBrokenCodexInstall(sdkId, sdkDir, send);
-    const { npmPath, env } = this.resolveNpm();
-    const proc = cp.spawn(npmPath, ['install', '--ignore-scripts', requested], { cwd: sdkDir, env, shell: false });
+    const invocation = this.resolveNpmInvocation(['install', '--ignore-scripts', requested]);
+    const proc = cp.spawn(invocation.command, invocation.args, {
+      cwd: sdkDir,
+      env: invocation.env,
+      shell: invocation.shell,
+      windowsHide: true,
+    });
     proc.stdout?.on('data', (data: Buffer) => send(data.toString()));
     proc.stderr?.on('data', (data: Buffer) => send(data.toString()));
     proc.on('close', (code) => {
@@ -216,7 +269,8 @@ export class DependencyHandler implements BridgeHandler {
 
     Promise.all(ids.map(async (sdkId) => {
       const local = this.getInstalledVersion(sdkId);
-      const remote = await this.fetchLatestVersion(sdkId);
+      const latestResult = await this.fetchLatestVersion(sdkId);
+      const remote = latestResult.version;
       const hasUpdate = !!local && !!remote && this.compareVersions(local, remote) < 0;
 
       return [sdkId, {
@@ -225,54 +279,110 @@ export class DependencyHandler implements BridgeHandler {
         currentVersion: local,
         latestVersion: remote ?? local ?? '',
         hasUpdate,
-        error: remote ? undefined : 'Failed to fetch latest version',
+        error: remote ? undefined : latestResult.error ?? 'Failed to fetch latest version',
       }];
     })).then((entries) => {
       postJson(webview, 'dependency_update_available', Object.fromEntries(entries));
     });
   }
 
-  private fetchDependencyVersions(sdkId: string): Promise<[string, any]> {
+  private async fetchDependencyVersions(sdkId: string): Promise<[string, any]> {
     const fallbackVersions = this.buildFallbackVersions(sdkId);
-    const { npmPath, env } = this.resolveNpm();
-    return new Promise((resolve) => {
-      cp.execFile(npmPath, ['view', this.packageForSdk(sdkId), 'versions', '--json'], { timeout: 30000, env }, (_err, stdout) => {
-        try {
-          const allVersions = JSON.parse(stdout.trim());
-          const versions = Array.isArray(allVersions) ? allVersions.slice(-20).reverse() : [];
-          resolve([sdkId, {
-            sdkId,
-            versions,
-            latestVersion: versions[0] ?? fallbackVersions[0] ?? '',
-            fallbackVersions,
-            source: 'remote',
-          }]);
-        } catch {
-          resolve([sdkId, {
-            sdkId,
-            versions: fallbackVersions,
-            latestVersion: fallbackVersions[0] ?? '',
-            fallbackVersions,
-            source: 'fallback',
-            error: 'Failed to fetch remote versions',
-          }]);
-        }
+    try {
+      const { stdout } = await this.runNpm([
+        'view',
+        this.packageForSdk(sdkId),
+        'versions',
+        '--json',
+      ]);
+      const allVersions = JSON.parse(stdout.trim());
+      if (!Array.isArray(allVersions)) {
+        throw new Error('npm returned an invalid version list');
+      }
+      const versions = allVersions
+        .filter((version): version is string => typeof version === 'string')
+        .slice(-20)
+        .reverse();
+      return [sdkId, {
+        sdkId,
+        versions,
+        latestVersion: versions[0] ?? fallbackVersions[0] ?? '',
+        fallbackVersions,
+        source: 'remote',
+      }];
+    } catch (error) {
+      const message = this.errorMessage(error);
+      console.warn(`[DependencyHandler] Failed to fetch ${sdkId} versions: ${message}`);
+      return [sdkId, {
+        sdkId,
+        versions: fallbackVersions,
+        latestVersion: fallbackVersions[0] ?? '',
+        fallbackVersions,
+        source: 'fallback',
+        error: message,
+      }];
+    }
+  }
+
+  private async fetchLatestVersion(sdkId: string): Promise<{ version?: string; error?: string }> {
+    try {
+      const { stdout } = await this.runNpm([
+        'view',
+        this.packageForSdk(sdkId),
+        'version',
+        '--json',
+      ]);
+      const parsed = JSON.parse(stdout.trim());
+      if (typeof parsed !== 'string' || !parsed) {
+        throw new Error('npm returned an invalid latest version');
+      }
+      return { version: parsed };
+    } catch (error) {
+      const message = this.errorMessage(error);
+      console.warn(`[DependencyHandler] Failed to fetch latest ${sdkId} version: ${message}`);
+      return { error: message };
+    }
+  }
+
+  private runNpm(args: string[], timeout = 30000): Promise<NpmCommandResult> {
+    const invocation = this.resolveNpmInvocation(args);
+    return new Promise((resolve, reject) => {
+      const proc = cp.spawn(invocation.command, invocation.args, {
+        env: invocation.env,
+        shell: invocation.shell,
+        windowsHide: true,
       });
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        callback();
+      };
+      const timer = setTimeout(() => {
+        proc.kill();
+        finish(() => reject(new Error(`npm command timed out after ${timeout / 1000}s`)));
+      }, timeout);
+
+      proc.stdout?.on('data', (chunk) => { stdout += String(chunk); });
+      proc.stderr?.on('data', (chunk) => { stderr += String(chunk); });
+      proc.on('error', (error) => finish(() => reject(error)));
+      proc.on('close', (code) => finish(() => {
+        if (code === 0) {
+          resolve({ stdout, stderr });
+          return;
+        }
+        const detail = stderr.trim() || stdout.trim() || `exit code ${code}`;
+        reject(new Error(`npm command failed: ${detail}`));
+      }));
     });
   }
 
-  private fetchLatestVersion(sdkId: string): Promise<string | undefined> {
-    const { npmPath, env } = this.resolveNpm();
-    return new Promise((resolve) => {
-      cp.execFile(npmPath, ['view', this.packageForSdk(sdkId), 'version', '--json'], { timeout: 30000, env }, (_err, stdout) => {
-        try {
-          const parsed = JSON.parse(stdout.trim());
-          resolve(typeof parsed === 'string' ? parsed : undefined);
-        } catch {
-          resolve(undefined);
-        }
-      });
-    });
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 
   private getInstalledVersion(sdkId: string): string | undefined {

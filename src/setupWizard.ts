@@ -1,4 +1,5 @@
 import * as cp from 'child_process';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { NodeDetector } from './nodeDetector';
 import {
@@ -160,10 +161,11 @@ export class SetupWizardService {
       async () => {
         await new Promise<void>((resolve) => {
           const npmPath = NodeDetector.findNpm(this.context) ?? 'npm';
-          const proc = cp.spawn(npmPath, ['install', pkg], {
+          const npmCommand = process.platform === 'win32' ? path.basename(npmPath) : npmPath;
+          const proc = cp.spawn(npmCommand, ['install', pkg], {
             cwd: dir,
             env: process.env,
-            shell: false,
+            shell: process.platform === 'win32',
           });
           proc.on('close', () => resolve());
           proc.on('error', () => resolve());

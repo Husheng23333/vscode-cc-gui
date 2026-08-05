@@ -98,3 +98,4 @@ settings.local.json
 .stylelintcache
 .turbo/
 .vite/
+.npm-cache
