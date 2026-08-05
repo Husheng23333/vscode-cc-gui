@@ -543,15 +543,45 @@
 }
 
 .preset-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     padding: 6px 12px;
     border: 1px solid var(--border-secondary);
     border-radius: 4px;
     background: var(--bg-tertiary);
     color: var(--text-secondary);
     font-size: 12px;
+    line-height: 1.2;
     cursor: pointer;
     transition: all 0.2s;
     white-space: nowrap;
+    vertical-align: middle;
+}
+
+.preset-btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    line-height: 0;
+
+    /* Direct SVG icons (lobehub) and custom wrappers (e.g. Xiaomi) */
+    > svg,
+    > span {
+        display: block;
+        flex-shrink: 0;
+        line-height: 0;
+    }
+
+    /* Only size the root SVG; nested SVGs keep their own size prop */
+    > svg {
+        width: 16px;
+        height: 16px;
+    }
 }
 
 .preset-btn:hover {
