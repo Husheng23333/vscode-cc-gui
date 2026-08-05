@@ -2,15 +2,20 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { tmpdir } from 'os';
 import * as vscode from 'vscode';
+import {
+  buildRememberedApproval,
+  sameRememberedApproval,
+  type RememberedApproval,
+} from '../../permissionApprovalUtils';
 
 const REMEMBERED_TOOL_APPROVALS_KEY = 'ccg.remembered_tool_approvals';
 const STALE_PERMISSION_REQUEST_MAX_AGE_MS = 10 * 60 * 1000;
 
-type RememberedApproval = {
+type ToolPermissionRequest = {
+  requestId: string;
   toolName: string;
-  command?: string;
+  inputs: Record<string, unknown>;
   cwd?: string;
-  path?: string;
 };
 
 export class PermissionIpcService implements vscode.Disposable {
@@ -18,6 +23,8 @@ export class PermissionIpcService implements vscode.Disposable {
   private scanInterval?: ReturnType<typeof setInterval>;
   private readonly awaitingUser = new Set<string>();
   private readonly completed = new Set<string>();
+  private readonly pendingRequests = new Map<string, ToolPermissionRequest>();
+  private readonly rememberedApprovals: RememberedApproval[] = [];
   private readonly log: vscode.OutputChannel;
   private readonly getWebview: () => vscode.Webview | undefined;
   private readonly globalState?: vscode.Memento;
@@ -67,6 +74,7 @@ export class PermissionIpcService implements vscode.Disposable {
     }
     this.awaitingUser.clear();
     this.completed.clear();
+    this.pendingRequests.clear();
     try {
       this.watcher?.close();
     } catch {
@@ -95,9 +103,12 @@ export class PermissionIpcService implements vscode.Disposable {
       const responseFile = path.join(dir, `response-${sessionId}-${requestId}.json`);
       const allow = decision.allow === true;
       fs.writeFileSync(responseFile, JSON.stringify({ allow }), 'utf8');
+      const request = this.pendingRequests.get(requestId) ?? this.readRequestRecord(requestId);
       if (allow && decision.remember === true) {
-        this.rememberApprovalForRequest(requestId);
+        this.rememberApprovalForRequest(requestId, request);
       }
+      this.deleteFileQuietly(path.join(dir, `request-${sessionId}-${requestId}.json`), 'answered permission request');
+      this.pendingRequests.delete(requestId);
       this.log.appendLine(`[BRIDGE] permission_decision -> ${path.basename(responseFile)} allow=${allow} remember=${decision.remember === true}`);
     } catch (error) {
       this.log.appendLine(`[BRIDGE] permission_decision failed: ${error instanceof Error ? error.message : error}`);
@@ -189,25 +200,37 @@ export class PermissionIpcService implements vscode.Disposable {
       if (!name.startsWith(prefix) || !name.endsWith('.json')) {
         continue;
       }
-      const data = this.readJsonFile<{ requestId?: string; toolName?: string; inputs?: Record<string, unknown> }>(path.join(dir, name));
+      const filePath = path.join(dir, name);
+      const data = this.readJsonFile<{ requestId?: string; toolName?: string; inputs?: Record<string, unknown>; cwd?: string }>(filePath);
       const requestId = data?.requestId;
       if (!requestId || typeof requestId !== 'string' || !data?.toolName) {
         continue;
       }
       if (this.isStaleRequestFile(path.join(dir, name))) {
         this.completed.add(requestId);
-        this.deleteFileQuietly(path.join(dir, name), 'stale permission request');
+        this.pendingRequests.delete(requestId);
+        this.deleteFileQuietly(filePath, 'stale permission request');
         continue;
       }
       if (this.completed.has(requestId) || this.awaitingUser.has(requestId)) {
         continue;
       }
-      if (this.isRememberedApproval(data.toolName, data.inputs ?? {})) {
+      const request = this.buildRequestRecord(data);
+      const responseName = `response-${sessionId}-${requestId}.json`;
+      if (entries.includes(responseName)) {
         this.completed.add(requestId);
+        this.pendingRequests.delete(requestId);
+        this.deleteFileQuietly(filePath, 'answered permission request');
+        continue;
+      }
+      this.pendingRequests.set(requestId, request);
+      if (this.isRememberedApproval(request.toolName, request.inputs, request.cwd)) {
+        this.completed.add(requestId);
+        this.pendingRequests.delete(requestId);
         try {
           const responseFile = path.join(dir, `response-${sessionId}-${requestId}.json`);
           fs.writeFileSync(responseFile, JSON.stringify({ allow: true }), 'utf8');
-          this.deleteFileQuietly(path.join(dir, name), 'remembered permission request');
+          this.deleteFileQuietly(filePath, 'remembered permission request');
           this.log.appendLine(`[BRIDGE] auto-allowed remembered permission for ${data.toolName} (${requestId})`);
         } catch (error) {
           this.log.appendLine(`[BRIDGE] auto-allow remembered permission failed: ${error}`);
@@ -221,9 +244,11 @@ export class PermissionIpcService implements vscode.Disposable {
           channelId: requestId,
           toolName: data.toolName,
           inputs: data.inputs ?? {},
+          cwd: data.cwd ?? '',
         });
       } catch (error) {
         this.awaitingUser.delete(requestId);
+        this.pendingRequests.delete(requestId);
         this.log.appendLine(`[BRIDGE] showPermissionDialog postMessage failed: ${error}`);
         return;
       }
@@ -325,59 +350,47 @@ export class PermissionIpcService implements vscode.Disposable {
     }
   }
 
-  private rememberApprovalForRequest(requestId: string): void {
+  private rememberApprovalForRequest(requestId: string, request?: ToolPermissionRequest): void {
     if (!this.globalState) {
       return;
     }
-    const requestFile = path.join(this.permissionIpcDir(), `request-${this.sessionIdForPermissionIpc()}-${requestId}.json`);
-    const request = this.readJsonFile<{ toolName?: string; inputs?: Record<string, unknown> }>(requestFile);
-    if (!request?.toolName) {
+    const resolvedRequest = request ?? this.readRequestRecord(requestId);
+    if (!resolvedRequest?.toolName) {
       this.log.appendLine(`[BRIDGE] remember approval skipped: request file missing for ${requestId}`);
       return;
     }
 
-    const nextApproval = this.buildRememberedApproval(request.toolName, request.inputs ?? {});
+    const nextApproval = buildRememberedApproval(
+      resolvedRequest.toolName,
+      resolvedRequest.inputs ?? {},
+      resolvedRequest.cwd,
+    );
     const existing = this.readRememberedApprovals();
-    const deduped = existing.filter((item) => !this.sameRememberedApproval(item, nextApproval));
+    const deduped = existing.filter((item) => !sameRememberedApproval(item, nextApproval));
     deduped.push(nextApproval);
+    this.rememberedApprovals.length = 0;
+    this.rememberedApprovals.push(...deduped);
     void this.globalState.update(REMEMBERED_TOOL_APPROVALS_KEY, deduped);
-    this.log.appendLine(`[BRIDGE] remembered permission for ${request.toolName} (${requestId})`);
-    this.deleteFileQuietly(requestFile, 'approved permission request');
+    this.log.appendLine(`[BRIDGE] remembered permission for ${resolvedRequest.toolName} (${requestId})`);
   }
 
   private readRememberedApprovals(): RememberedApproval[] {
     if (!this.globalState) {
-      return [];
+      return this.rememberedApprovals.slice();
     }
     const raw = this.globalState.get<RememberedApproval[]>(REMEMBERED_TOOL_APPROVALS_KEY, []);
-    return Array.isArray(raw) ? raw.filter((item) => item && typeof item.toolName === 'string') : [];
+    const persisted = Array.isArray(raw) ? raw.filter((item) => item && typeof item.toolName === 'string') : [];
+    if (this.rememberedApprovals.length === 0) {
+      return persisted;
+    }
+    return persisted.concat(
+      this.rememberedApprovals.filter((item) => !persisted.some((existing) => sameRememberedApproval(existing, item))),
+    );
   }
 
-  private buildRememberedApproval(toolName: string, inputs: Record<string, unknown>): RememberedApproval {
-    return {
-      toolName,
-      command: this.asTrimmedString(inputs.command),
-      cwd: this.asTrimmedString(inputs.cwd),
-      path: this.asTrimmedString(inputs.file_path)
-        || this.asTrimmedString(inputs.path)
-        || this.asTrimmedString(inputs.target_file),
-    };
-  }
-
-  private isRememberedApproval(toolName: string, inputs: Record<string, unknown>): boolean {
-    const candidate = this.buildRememberedApproval(toolName, inputs);
-    return this.readRememberedApprovals().some((item) => this.sameRememberedApproval(item, candidate));
-  }
-
-  private sameRememberedApproval(left: RememberedApproval, right: RememberedApproval): boolean {
-    return left.toolName === right.toolName
-      && (left.command || '') === (right.command || '')
-      && (left.cwd || '') === (right.cwd || '')
-      && (left.path || '') === (right.path || '');
-  }
-
-  private asTrimmedString(value: unknown): string {
-    return typeof value === 'string' ? value.trim() : '';
+  private isRememberedApproval(toolName: string, inputs: Record<string, unknown>, cwd?: string): boolean {
+    const candidate = buildRememberedApproval(toolName, inputs, cwd);
+    return this.readRememberedApprovals().some((item) => sameRememberedApproval(item, candidate));
   }
 
   private isStaleRequestFile(filePath: string): boolean {
@@ -398,6 +411,24 @@ export class PermissionIpcService implements vscode.Disposable {
     } catch (error) {
       this.log.appendLine(`[BRIDGE] failed deleting ${label}: ${error}`);
     }
+  }
+
+  private readRequestRecord(requestId: string): ToolPermissionRequest | undefined {
+    const requestFile = path.join(this.permissionIpcDir(), `request-${this.sessionIdForPermissionIpc()}-${requestId}.json`);
+    const data = this.readJsonFile<{ requestId?: string; toolName?: string; inputs?: Record<string, unknown>; cwd?: string }>(requestFile);
+    if (!data?.toolName) {
+      return undefined;
+    }
+    return this.buildRequestRecord(data);
+  }
+
+  private buildRequestRecord(data: { requestId?: string; toolName?: string; inputs?: Record<string, unknown>; cwd?: string }): ToolPermissionRequest {
+    return {
+      requestId: data.requestId ?? '',
+      toolName: data.toolName ?? '',
+      inputs: data.inputs ?? {},
+      cwd: typeof data.cwd === 'string' ? data.cwd.trim() : '',
+    };
   }
 
   private postDialogRequest(

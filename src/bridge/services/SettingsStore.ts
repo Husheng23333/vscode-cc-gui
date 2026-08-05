@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { NodeDetector } from '../../nodeDetector';
+import { isLikelyNodeExecutable } from '../../nodeDetectorUtils';
 import { LanguageConfigPayload, resolveLanguageConfig } from '../../language';
 import { StateStore } from './StateStore';
 
@@ -127,10 +128,11 @@ export class SettingsStore {
   getNodePathPayload(): { path: string; version: string | null; minVersion: number; valid: boolean; error?: string } {
     const configured = vscode.workspace.getConfiguration('ccGui').get<string>('nodePath') ?? '';
     const detected = NodeDetector.find(this.context) ?? '';
-    const nodePath = configured || detected;
+    const configuredNode = configured && isLikelyNodeExecutable(configured) ? configured : '';
+    const nodePath = configuredNode || detected;
     const version = nodePath ? this.detectNodeVersion(nodePath) : null;
     return {
-      path: configured || nodePath,
+      path: nodePath,
       version,
       minVersion: MIN_NODE_MAJOR_VERSION,
       valid: !!nodePath && this.isSupportedNodeVersion(version),

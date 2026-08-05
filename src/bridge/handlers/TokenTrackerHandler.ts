@@ -156,10 +156,12 @@ export class TokenTrackerHandler implements BridgeHandler {
 
   private probeCliVersion(bin: string): string | null {
     try {
-      const result = cp.spawnSync(bin, ['--version'], {
+      const command = process.platform === 'win32' ? path.basename(bin) : bin;
+      const result = cp.spawnSync(command, ['--version'], {
         encoding: 'utf8',
         timeout: 10_000,
         env: this.childEnv(bin),
+        shell: process.platform === 'win32',
       });
       if (result.status === 0 && result.stdout?.trim()) {
         return result.stdout.split('\n')[0]?.trim() || 'unknown';
@@ -198,7 +200,7 @@ export class TokenTrackerHandler implements BridgeHandler {
     await new Promise<void>((resolve, reject) => {
       const proc = cp.spawn(npm, ['install', '-g', TokenTrackerHandler.TT_CLI_PACKAGE], {
         env: this.childEnv(npm),
-        shell: false,
+        shell: process.platform === 'win32',
       });
       let output = '';
       proc.stdout?.on('data', (chunk) => { output += String(chunk); });
@@ -304,11 +306,12 @@ export class TokenTrackerHandler implements BridgeHandler {
   }
 
   private spawnServer(bin: string, port: number): void {
-    const child = cp.spawn(bin, ['serve', '--no-open', '--port', String(port)], {
+    const command = process.platform === 'win32' ? path.basename(bin) : bin;
+    const child = cp.spawn(command, ['serve', '--no-open', '--port', String(port)], {
       env: { ...this.childEnv(bin), TOKENTRACKER_NO_TELEMETRY: '1' },
       detached: true,
       stdio: 'ignore',
-      shell: false,
+      shell: process.platform === 'win32',
     });
     child.unref();
     this.context.log.appendLine(`[TokenTracker] Started tokentracker server on port ${port}`);

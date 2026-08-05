@@ -56,7 +56,7 @@ const mergeDependencyUpdates = (
       hasUpdate: updateInfo.hasUpdate,
       latestVersion: updateInfo.latestVersion,
       lastChecked: new Date().toISOString(),
-      errorMessage: updateInfo.error ?? currentStatus.errorMessage,
+      errorMessage: updateInfo.error,
     };
   });
 
