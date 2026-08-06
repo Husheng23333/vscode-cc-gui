@@ -123,34 +123,15 @@ export function buildCodexCliEnvironment(baseEnv) {
 }
 
 /**
- * Temporarily removes proxy env vars from process.env while running Codex SDK
- * network calls. The SDK ultimately uses Node.js HTTP clients that may read
- * process.env directly even when a sanitized child env is provided.
+ * Run Codex work without inheriting proxy pollution into the CLI child.
+ *
+ * Concurrent multi-window turns must not mutate process.env for the whole
+ * turn duration (that would re-serialize everything). Isolation is done by
+ * `buildCodexCliEnvironment()`, which strips proxy keys from the child env
+ * map passed to spawn. This helper remains as a no-op wrapper for call-sites.
  */
 export async function withCodexProxyEnvSuppressed(fn) {
-  const proxyKeys = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy'];
-  const savedEnv = {};
-  const removedKeys = [];
-
-  for (const key of proxyKeys) {
-    if (typeof process.env[key] === 'string' && process.env[key].length > 0) {
-      savedEnv[key] = process.env[key];
-      removedKeys.push(key);
-      delete process.env[key];
-    }
-  }
-
-  if (removedKeys.length > 0) {
-    logInfo('Codex', `Temporarily removed proxy env vars: ${removedKeys.join(', ')}`);
-  }
-
-  try {
-    return await fn();
-  } finally {
-    for (const [key, value] of Object.entries(savedEnv)) {
-      process.env[key] = value;
-    }
-  }
+  return fn();
 }
 
 export function normalizeCodexPermissionMode(mode) {

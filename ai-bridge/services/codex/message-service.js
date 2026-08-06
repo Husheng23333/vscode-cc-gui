@@ -38,18 +38,43 @@ import { runCodexCliStream } from './codex-cli-runner.js';
 import { runCodexAppServerTurn } from './codex-app-server-runner.js';
 import { resolveCodexMcpServerConfig } from './codex-mcp-admin.js';
 import { saveImageToTemp } from '../claude/attachment-service.js';
+import { getRequestId } from '../../utils/request-context.js';
 
 const CODEX_MODEL_FALLBACKS = new Map([
   ['gpt-5.3-codex', 'gpt-5.5'],
   ['gpt-5.3-codex-spark', 'gpt-5.5'],
 ]);
 
-let currentCodexAbortController = null;
+/** Active Codex turns keyed by daemon request id (multi-window concurrent runs). */
+const activeCodexAbortControllers = new Map();
 
-export async function abortCurrentCodexTurn() {
-  const controller = currentCodexAbortController;
-  if (controller && !controller.signal.aborted) {
-    controller.abort();
+/**
+ * Abort one or more Codex turns.
+ * @param {string[]|undefined|null} targetRequestIds
+ *   - `undefined` / `null`: abort all (legacy unscoped)
+ *   - `[]` or list: abort only those request ids (scoped; empty = abort none)
+ */
+export async function abortCurrentCodexTurn(targetRequestIds) {
+  const ids = Array.isArray(targetRequestIds)
+    ? targetRequestIds.map(String).filter(Boolean)
+    : [...activeCodexAbortControllers.keys()];
+  console.error(
+    '[CCG_DEBUG] abortCurrentCodexTurn',
+    JSON.stringify({
+      mode: Array.isArray(targetRequestIds) ? 'scoped' : 'all',
+      targets: ids,
+      active: [...activeCodexAbortControllers.keys()],
+    }),
+  );
+  for (const id of ids) {
+    const controller = activeCodexAbortControllers.get(id);
+    if (controller && !controller.signal.aborted) {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    }
   }
 }
 
@@ -126,6 +151,10 @@ export async function sendMessage(
 ) {
   let streamStarted = false;
   let streamEnded = false;
+  /** @type {AbortController|null} */
+  let turnAbortController = null;
+  /** Daemon request id for scoped multi-window abort (from AsyncLocalStorage). */
+  const requestId = getRequestId() || `codex-local-${Date.now()}`;
   const emitStreamEndOnce = () => {
     if (!streamStarted || streamEnded) {
       return;
@@ -331,8 +360,9 @@ export async function sendMessage(
     }
 
     const workingDirectory = cwd && cwd.trim() !== '' ? cwd : undefined;
-    const turnAbortController = new AbortController();
-    currentCodexAbortController = turnAbortController;
+    turnAbortController = new AbortController();
+    activeCodexAbortControllers.set(requestId, turnAbortController);
+    console.log('[CCG_DEBUG] Codex turn registered for abort:', JSON.stringify({ requestId }));
 
     const emitMessage = (msg) => {
       console.log('[MESSAGE]', JSON.stringify(msg));
@@ -519,7 +549,7 @@ export async function sendMessage(
     console.error('[SEND_ERROR]', JSON.stringify(errorPayload));
     console.log(JSON.stringify(errorPayload));
   } finally {
-    currentCodexAbortController = null;
+    activeCodexAbortControllers.delete(requestId);
   }
 }
 

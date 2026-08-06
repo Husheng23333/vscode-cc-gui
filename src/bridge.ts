@@ -835,6 +835,30 @@ export class BridgeServer {
       return;
     }
 
+    // Scope abort to this webview's in-flight send requests so multi-window
+    // stop only cancels that window (not every concurrent turn).
+    if (event === 'abort') {
+      const targetRequestIds: string[] = [];
+      for (const [reqId, wv] of this._pendingWebviews.entries()) {
+        if (wv !== webview) continue;
+        const reqEvent = this._requestEvents.get(reqId);
+        if (
+          reqEvent === 'send_message' ||
+          reqEvent === 'send_message_with_attachments' ||
+          this._streamStarted.has(reqId)
+        ) {
+          targetRequestIds.push(reqId);
+        }
+      }
+      params = {
+        ...params,
+        targetRequestIds,
+      };
+      this._log.appendLine(
+        `[BRIDGE] abort scoped to webview requestIds=${targetRequestIds.join(',') || '(none)'}`,
+      );
+    }
+
     this._fillSelectedText(params);
 
     if (params.text !== undefined && params.message === undefined) {
