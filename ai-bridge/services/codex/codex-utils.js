@@ -167,6 +167,27 @@ export function normalizeCodexPermissionMode(mode) {
   return trimmed;
 }
 
+/**
+ * Normalize the UI `streaming` flag for Codex.
+ * - Explicit false-like values → false (final MESSAGE only, no CONTENT_DELTA)
+ * - Explicit true-like values → true
+ * - null/undefined/empty → true (preserve historical progressive path)
+ */
+export function normalizeCodexStreamingFlag(value) {
+  if (value === false || value === 0) return false;
+  if (value === true || value === 1) return true;
+  if (typeof value === 'string') {
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed === 'false' || trimmed === '0' || trimmed === 'off' || trimmed === 'no') {
+      return false;
+    }
+    if (trimmed === 'true' || trimmed === '1' || trimmed === 'on' || trimmed === 'yes') {
+      return true;
+    }
+  }
+  return true;
+}
+
 export function isAutoEditPermissionMode(mode) {
   const normalized = normalizeCodexPermissionMode(mode);
   return normalized === 'acceptEdits';

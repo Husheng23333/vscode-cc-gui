@@ -1192,8 +1192,16 @@ export class BridgeServer {
             const sid = this._lastSessionId.get(msg.id) ?? '';
             const text = this._historyService.extractCodexTextFromContent(parsed.message.content);
             if (parsed.type === 'assistant' && text.trim()) {
-              // Mark that assistant textual content has already streamed for this turn.
-              this._contentStarted.add(msg.id);
+              // Codex non-streaming (or final-only CLI snapshots) may only send
+              // [MESSAGE] without prior [CONTENT_DELTA]. Surface text once so the
+              // webview streaming slot is not left blank.
+              if (!this._contentStarted.has(msg.id)) {
+                this._emitStreamStart(msg.id, webview);
+                this._contentStarted.add(msg.id);
+                webview.postMessage({ type: 'content_delta', content: text });
+              } else {
+                this._contentStarted.add(msg.id);
+              }
               this._latestAssistantPreview.set(msg.id, text.trim());
             }
             if (sid) {
