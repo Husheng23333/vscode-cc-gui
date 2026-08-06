@@ -554,11 +554,22 @@ async function maybeRequestCommandApprovalViaBridge(state, config, { toolUseId, 
   return false;
 }
 
-function emitThinkingDelta(text) {
+function isStreamingEnabled(config) {
+  // Default ON when config omits the flag (unit tests / older callers).
+  return config?.streamingEnabled !== false;
+}
+
+function emitThinkingDelta(text, config) {
+  if (!isStreamingEnabled(config)) {
+    return;
+  }
   process.stdout.write(`[THINKING_DELTA] ${JSON.stringify(text)}\n`);
 }
 
-function emitContentDelta(text) {
+function emitContentDelta(text, config) {
+  if (!isStreamingEnabled(config)) {
+    return;
+  }
   process.stdout.write(`[CONTENT_DELTA] ${JSON.stringify(text)}\n`);
 }
 
@@ -580,7 +591,7 @@ function emitThinkingBlock(state, text) {
   });
 }
 
-function maybeEmitReasoning(state, item) {
+function maybeEmitReasoning(state, item, config) {
   if (!item || item.type !== 'reasoning') return;
   const raw = typeof item.text === 'string' ? item.text : '';
   const text = raw.trim();
@@ -592,8 +603,10 @@ function maybeEmitReasoning(state, item) {
   state.reasoningTextCache.set(stableId, text);
   state.reasoningObserved = true;
   if (delta) {
-    emitThinkingDelta(delta);
+    emitThinkingDelta(delta, config);
   }
+  // Non-streaming: keep a single thinking snapshot MESSAGE for history.
+  // Streaming: still emit the block so turn_messages can capture reasoning.
   emitThinkingBlock(state, text);
 }
 
@@ -625,10 +638,10 @@ async function handleItemCompleted(item, state, config) {
   console.log('[DEBUG] item.completed - type:', item.type);
   console.log('[DEBUG] item.completed - has text:', !!item.text);
   console.log('[DEBUG] item.completed - has agent_message:', !!item.agent_message);
-  maybeEmitReasoning(state, item);
+  maybeEmitReasoning(state, item, config);
 
   if (item.type === 'agent_message') {
-    handleAgentMessage(item, state);
+    handleAgentMessage(item, state, config, { emitSnapshot: true });
   } else if (item.type === 'command_execution') {
     handleCommandExecution(item, state);
   } else if (item.type === 'file_change') {
@@ -640,7 +653,7 @@ async function handleItemCompleted(item, state, config) {
   }
 }
 
-function handleAgentMessage(item, state, { emitSnapshot = true } = {}) {
+function handleAgentMessage(item, state, config, { emitSnapshot = true } = {}) {
   const text = item.text || '';
   console.log('[DEBUG] agent_message text length:', text.length);
   console.log('[DEBUG] agent_message text (first 100 chars):', text.substring(0, 100));
@@ -651,8 +664,10 @@ function handleAgentMessage(item, state, { emitSnapshot = true } = {}) {
   state.assistantTextCache.set(stableId, text);
   if (delta) {
     state.assistantText += delta;
-    emitContentDelta(delta);
+    // Progressive UI path: only when streamingEnabled.
+    emitContentDelta(delta, config);
   }
+  // Final/non-streaming path relies on [MESSAGE] snapshots (and bridge fallback).
   if (emitSnapshot && text && text.trim()) {
     state.emitMessage(textMsg(text));
   }
@@ -751,6 +766,9 @@ function handleMcpToolCall(item, state) {
 export async function processCodexEventStream(events, state, config) {
   let rawEventIndex = 0;
   try {
+    console.log('[CCG_DEBUG] processCodexEventStream start:', JSON.stringify({
+      streamingEnabled: isStreamingEnabled(config),
+    }));
     for await (const event of events) {
       rawEventIndex += 1;
       const rawEventJson = stringifyRawEvent(event);
@@ -802,7 +820,7 @@ export async function processCodexEventStream(events, state, config) {
       }
 
       case 'item.started': {
-        maybeEmitReasoning(state, event.item);
+        maybeEmitReasoning(state, event.item, config);
         if (event.item && event.item.type === 'command_execution') {
           const toolUseId = ensureToolUseId(state, 'started', event.item);
           const command = extractCommand(event.item);
@@ -835,9 +853,11 @@ export async function processCodexEventStream(events, state, config) {
       }
 
       case 'item.updated':
-        maybeEmitReasoning(state, event.item);
+        maybeEmitReasoning(state, event.item, config);
         if (event.item && event.item.type === 'agent_message') {
-          handleAgentMessage(event.item, state, { emitSnapshot: false });
+          // Streaming path: deltas only (no full MESSAGE spam).
+          // Non-streaming: still update caches; snapshot waits for item.completed.
+          handleAgentMessage(event.item, state, config, { emitSnapshot: false });
         }
         await replayMissingFunctionCallsDuringStream(state, config);
         break;

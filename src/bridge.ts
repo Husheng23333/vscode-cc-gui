@@ -835,6 +835,30 @@ export class BridgeServer {
       return;
     }
 
+    // Scope abort to this webview's in-flight send requests so multi-window
+    // stop only cancels that window (not every concurrent turn).
+    if (event === 'abort') {
+      const targetRequestIds: string[] = [];
+      for (const [reqId, wv] of this._pendingWebviews.entries()) {
+        if (wv !== webview) continue;
+        const reqEvent = this._requestEvents.get(reqId);
+        if (
+          reqEvent === 'send_message' ||
+          reqEvent === 'send_message_with_attachments' ||
+          this._streamStarted.has(reqId)
+        ) {
+          targetRequestIds.push(reqId);
+        }
+      }
+      params = {
+        ...params,
+        targetRequestIds,
+      };
+      this._log.appendLine(
+        `[BRIDGE] abort scoped to webview requestIds=${targetRequestIds.join(',') || '(none)'}`,
+      );
+    }
+
     this._fillSelectedText(params);
 
     if (params.text !== undefined && params.message === undefined) {
@@ -1192,8 +1216,16 @@ export class BridgeServer {
             const sid = this._lastSessionId.get(msg.id) ?? '';
             const text = this._historyService.extractCodexTextFromContent(parsed.message.content);
             if (parsed.type === 'assistant' && text.trim()) {
-              // Mark that assistant textual content has already streamed for this turn.
-              this._contentStarted.add(msg.id);
+              // Codex non-streaming (or final-only CLI snapshots) may only send
+              // [MESSAGE] without prior [CONTENT_DELTA]. Surface text once so the
+              // webview streaming slot is not left blank.
+              if (!this._contentStarted.has(msg.id)) {
+                this._emitStreamStart(msg.id, webview);
+                this._contentStarted.add(msg.id);
+                webview.postMessage({ type: 'content_delta', content: text });
+              } else {
+                this._contentStarted.add(msg.id);
+              }
               this._latestAssistantPreview.set(msg.id, text.trim());
             }
             if (sid) {
