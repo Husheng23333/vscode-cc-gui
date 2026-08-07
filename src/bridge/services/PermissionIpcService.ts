@@ -16,6 +16,7 @@ type ToolPermissionRequest = {
   toolName: string;
   inputs: Record<string, unknown>;
   cwd?: string;
+  bridgeRequestId?: string;
 };
 
 export class PermissionIpcService implements vscode.Disposable {
@@ -27,16 +28,36 @@ export class PermissionIpcService implements vscode.Disposable {
   private readonly rememberedApprovals: RememberedApproval[] = [];
   private readonly log: vscode.OutputChannel;
   private readonly getWebview: () => vscode.Webview | undefined;
+  /** Map daemon/bridge request id → owning webview (multi-window routing). */
+  private readonly getWebviewForBridgeRequestId?: (bridgeRequestId: string) => vscode.Webview | undefined;
   private readonly globalState?: vscode.Memento;
 
   constructor(
     log: vscode.OutputChannel,
     getWebview: () => vscode.Webview | undefined,
     globalState?: vscode.Memento,
+    getWebviewForBridgeRequestId?: (bridgeRequestId: string) => vscode.Webview | undefined,
   ) {
     this.log = log;
     this.getWebview = getWebview;
     this.globalState = globalState;
+    this.getWebviewForBridgeRequestId = getWebviewForBridgeRequestId;
+  }
+
+  /**
+   * Prefer the webview that owns the in-flight bridge request; fall back to last webview.
+   */
+  private resolveTargetWebview(bridgeRequestId?: string | null): vscode.Webview | undefined {
+    if (bridgeRequestId && this.getWebviewForBridgeRequestId) {
+      const owned = this.getWebviewForBridgeRequestId(String(bridgeRequestId));
+      if (owned) {
+        return owned;
+      }
+      this.log.appendLine(
+        `[BRIDGE] No webview mapped for bridgeRequestId=${bridgeRequestId}; falling back to default webview`,
+      );
+    }
+    return this.getWebview();
   }
 
   start(): void {
@@ -183,10 +204,6 @@ export class PermissionIpcService implements vscode.Disposable {
   }
 
   private scanToolPermissionRequestFiles(dir: string): void {
-    const webview = this.getWebview();
-    if (!webview) {
-      return;
-    }
     const sessionId = this.sessionIdForPermissionIpc();
     const prefix = `request-${sessionId}-`;
     let entries: string[];
@@ -201,7 +218,13 @@ export class PermissionIpcService implements vscode.Disposable {
         continue;
       }
       const filePath = path.join(dir, name);
-      const data = this.readJsonFile<{ requestId?: string; toolName?: string; inputs?: Record<string, unknown>; cwd?: string }>(filePath);
+      const data = this.readJsonFile<{
+        requestId?: string;
+        toolName?: string;
+        inputs?: Record<string, unknown>;
+        cwd?: string;
+        bridgeRequestId?: string;
+      }>(filePath);
       const requestId = data?.requestId;
       if (!requestId || typeof requestId !== 'string' || !data?.toolName) {
         continue;
@@ -238,6 +261,16 @@ export class PermissionIpcService implements vscode.Disposable {
         continue;
       }
 
+      const webview = this.resolveTargetWebview(data.bridgeRequestId);
+      if (!webview) {
+        // No panel ready yet — retry on next scan without marking awaitingUser.
+        this.pendingRequests.delete(requestId);
+        this.log.appendLine(
+          `[BRIDGE] defer showPermissionDialog for ${data.toolName} (${requestId}) bridgeRequestId=${data.bridgeRequestId ?? '(none)'} (no webview)`,
+        );
+        continue;
+      }
+
       this.awaitingUser.add(requestId);
       try {
         this.postDialogRequest(webview, 'showPermissionDialog', '__pendingPermissionDialogRequests', {
@@ -250,22 +283,29 @@ export class PermissionIpcService implements vscode.Disposable {
         this.awaitingUser.delete(requestId);
         this.pendingRequests.delete(requestId);
         this.log.appendLine(`[BRIDGE] showPermissionDialog postMessage failed: ${error}`);
-        return;
+        continue;
       }
-      this.log.appendLine(`[BRIDGE] showPermissionDialog for ${data.toolName} (${requestId})`);
+      this.log.appendLine(
+        `[BRIDGE] showPermissionDialog for ${data.toolName} (${requestId}) bridgeRequestId=${data.bridgeRequestId ?? '(none)'}`,
+      );
     }
 
-    this.scanAskUserQuestionRequestFiles(dir, entries, sessionId, webview);
-    this.scanPlanApprovalRequestFiles(dir, entries, sessionId, webview);
+    this.scanAskUserQuestionRequestFiles(dir, entries, sessionId);
+    this.scanPlanApprovalRequestFiles(dir, entries, sessionId);
   }
 
-  private scanAskUserQuestionRequestFiles(dir: string, entries: string[], sessionId: string, webview: vscode.Webview): void {
+  private scanAskUserQuestionRequestFiles(dir: string, entries: string[], sessionId: string): void {
     const prefix = `ask-user-question-${sessionId}-`;
     for (const name of entries) {
       if (!name.startsWith(prefix) || !name.endsWith('.json') || name.startsWith(`ask-user-question-response-${sessionId}-`)) {
         continue;
       }
-      const data = this.readJsonFile<{ requestId?: string; toolName?: string; questions?: unknown[] }>(path.join(dir, name));
+      const data = this.readJsonFile<{
+        requestId?: string;
+        toolName?: string;
+        questions?: unknown[];
+        bridgeRequestId?: string;
+      }>(path.join(dir, name));
       const requestId = data?.requestId;
       if (!requestId || typeof requestId !== 'string') {
         continue;
@@ -282,13 +322,22 @@ export class PermissionIpcService implements vscode.Disposable {
         this.deleteFileQuietly(path.join(dir, name), 'stale answered ask-user-question request');
         continue;
       }
+      const webview = this.resolveTargetWebview(data?.bridgeRequestId);
+      if (!webview) {
+        this.log.appendLine(
+          `[BRIDGE] defer showAskUserQuestionDialog (${requestId}) bridgeRequestId=${data?.bridgeRequestId ?? '(none)'} (no webview)`,
+        );
+        continue;
+      }
       this.awaitingUser.add(requestId);
       this.postDialogRequest(webview, 'showAskUserQuestionDialog', '__pendingAskUserQuestionDialogRequests', {
         requestId,
         toolName: data?.toolName ?? 'AskUserQuestion',
         questions: data?.questions ?? [],
       });
-      this.log.appendLine(`[BRIDGE] showAskUserQuestionDialog (${requestId})`);
+      this.log.appendLine(
+        `[BRIDGE] showAskUserQuestionDialog (${requestId}) bridgeRequestId=${data?.bridgeRequestId ?? '(none)'}`,
+      );
       // v0.4.7: optional OS notification when AskUserQuestion appears (opt-in).
       this.maybeNotifyAskUserQuestion(data?.toolName ?? 'AskUserQuestion');
     }
@@ -306,13 +355,20 @@ export class PermissionIpcService implements vscode.Disposable {
     }
   }
 
-  private scanPlanApprovalRequestFiles(dir: string, entries: string[], sessionId: string, webview: vscode.Webview): void {
+  private scanPlanApprovalRequestFiles(dir: string, entries: string[], sessionId: string): void {
     const prefix = `plan-approval-${sessionId}-`;
     for (const name of entries) {
       if (!name.startsWith(prefix) || !name.endsWith('.json') || name.startsWith(`plan-approval-response-${sessionId}-`)) {
         continue;
       }
-      const data = this.readJsonFile<{ requestId?: string; toolName?: string; plan?: string; allowedPrompts?: unknown[]; timestamp?: string }>(path.join(dir, name));
+      const data = this.readJsonFile<{
+        requestId?: string;
+        toolName?: string;
+        plan?: string;
+        allowedPrompts?: unknown[];
+        timestamp?: string;
+        bridgeRequestId?: string;
+      }>(path.join(dir, name));
       const requestId = data?.requestId;
       if (!requestId || typeof requestId !== 'string') {
         continue;
@@ -328,6 +384,13 @@ export class PermissionIpcService implements vscode.Disposable {
         this.deleteFileQuietly(path.join(dir, name), 'stale answered plan-approval request');
         continue;
       }
+      const webview = this.resolveTargetWebview(data?.bridgeRequestId);
+      if (!webview) {
+        this.log.appendLine(
+          `[BRIDGE] defer showPlanApprovalDialog (${requestId}) bridgeRequestId=${data?.bridgeRequestId ?? '(none)'} (no webview)`,
+        );
+        continue;
+      }
       this.awaitingUser.add(requestId);
       this.postDialogRequest(webview, 'showPlanApprovalDialog', '__pendingPlanApprovalDialogRequests', {
         requestId,
@@ -336,7 +399,9 @@ export class PermissionIpcService implements vscode.Disposable {
         allowedPrompts: data?.allowedPrompts ?? [],
         timestamp: data?.timestamp,
       });
-      this.log.appendLine(`[BRIDGE] showPlanApprovalDialog (${requestId})`);
+      this.log.appendLine(
+        `[BRIDGE] showPlanApprovalDialog (${requestId}) bridgeRequestId=${data?.bridgeRequestId ?? '(none)'}`,
+      );
     }
   }
 
@@ -422,12 +487,19 @@ export class PermissionIpcService implements vscode.Disposable {
     return this.buildRequestRecord(data);
   }
 
-  private buildRequestRecord(data: { requestId?: string; toolName?: string; inputs?: Record<string, unknown>; cwd?: string }): ToolPermissionRequest {
+  private buildRequestRecord(data: {
+    requestId?: string;
+    toolName?: string;
+    inputs?: Record<string, unknown>;
+    cwd?: string;
+    bridgeRequestId?: string;
+  }): ToolPermissionRequest {
     return {
       requestId: data.requestId ?? '',
       toolName: data.toolName ?? '',
       inputs: data.inputs ?? {},
       cwd: typeof data.cwd === 'string' ? data.cwd.trim() : '',
+      bridgeRequestId: typeof data.bridgeRequestId === 'string' ? data.bridgeRequestId : undefined,
     };
   }
 

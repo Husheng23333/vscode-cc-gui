@@ -126,7 +126,13 @@ export class BridgeServer {
       () => this._workspacePath,
       (webview, functionName, payload) => this._callWebviewJson(webview, functionName, payload),
     );
-    this._permissionIpc = new PermissionIpcService(this._log, () => this._webview, this.context.globalState);
+    this._permissionIpc = new PermissionIpcService(
+      this._log,
+      () => this._webview,
+      this.context.globalState,
+      // Multi-window: route permission dialogs to the webview that owns the daemon turn.
+      (bridgeRequestId) => this._pendingWebviews.get(bridgeRequestId),
+    );
     this._settingsStore = new SettingsStore(context);
     this._providerStore = new ProviderStore(context, {
       syncProviderToDisk: (providers) => {
@@ -1102,6 +1108,13 @@ export class BridgeServer {
         this._emitStreamStart(msg.id, webview);
       } else if (line === '[STREAM_END]' || line === '[MESSAGE_END]') {
         this._emitStreamEnd(msg.id, webview);
+      } else if (line === '[STREAM_HEARTBEAT]') {
+        // Keep stall watchdog alive during long tool phases with no text deltas
+        // (Codex app-server / multi-step turns). Does not open a new stream.
+        webview.postMessage({
+          type: 'js_eval',
+          content: 'window.onStreamingHeartbeat && window.onStreamingHeartbeat()',
+        });
       } else if (line.startsWith('[CONTENT_DELTA] ')) {
         let delta: string;
         const rawDelta = line.slice('[CONTENT_DELTA] '.length);

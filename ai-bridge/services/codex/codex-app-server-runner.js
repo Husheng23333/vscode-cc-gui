@@ -12,6 +12,7 @@
 import { spawn } from 'child_process';
 import { createInterface } from 'readline';
 import { getCodexCliEntrypoint } from '../../utils/sdk-loader.js';
+import { emitFileChangeItemAsTools } from './codex-file-change-emit.js';
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -74,6 +75,19 @@ export async function runCodexAppServerTurn(options = {}) {
   let deltaCount = 0;
   let turnCompleted = false;
   let turnFailedError = null;
+  let lastHeartbeatAt = 0;
+  /** Track agent message item ids so multi-step turns do not corrupt finalText. */
+  let activeAgentItemId = null;
+  /** Dedupe fileChange → tool_use emissions (patchUpdated + completed). */
+  const emittedFileChangeToolIds = new Set();
+
+  const emitStreamHeartbeat = (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastHeartbeatAt < 5000) return;
+    lastHeartbeatAt = now;
+    // Keep frontend stall watchdog alive during long tool phases (no text deltas).
+    process.stdout.write('[STREAM_HEARTBEAT]\n');
+  };
 
   const killChild = () => {
     if (closed) return;
@@ -249,12 +263,35 @@ export async function runCodexAppServerTurn(options = {}) {
       return;
     }
 
+    // Any item/turn activity means the agent is still working — bump heartbeat
+    // so the webview stall watchdog does not force stream_end mid-turn.
+    if (
+      method === 'item/started' ||
+      method === 'item/completed' ||
+      method === 'turn/started' ||
+      method.startsWith('item/commandExecution/') ||
+      method.startsWith('item/fileChange/') ||
+      method.startsWith('item/mcpToolCall/')
+    ) {
+      emitStreamHeartbeat();
+    }
+
     if (method === 'item/agentMessage/delta') {
+      const itemId = typeof params.itemId === 'string' ? params.itemId : null;
+      // New agent message after tools: visual paragraph break between segments.
+      if (itemId && itemId !== activeAgentItemId) {
+        if (activeAgentItemId != null && finalText) {
+          finalText += '\n\n';
+          onContentDelta?.('\n\n');
+        }
+        activeAgentItemId = itemId;
+      }
       const delta = typeof params.delta === 'string' ? params.delta : '';
       if (delta) {
         deltaCount += 1;
         finalText += delta;
         onContentDelta?.(delta);
+        emitStreamHeartbeat(true);
       }
       return;
     }
@@ -264,23 +301,48 @@ export async function runCodexAppServerTurn(options = {}) {
       method === 'item/reasoning/textDelta'
     ) {
       const delta = typeof params.delta === 'string' ? params.delta : '';
-      if (delta) onThinkingDelta?.(delta);
+      if (delta) {
+        onThinkingDelta?.(delta);
+        emitStreamHeartbeat(true);
+      }
+      return;
+    }
+
+    // Live file patch updates (may arrive before item/completed).
+    if (method === 'item/fileChange/patchUpdated') {
+      emitStreamHeartbeat();
+      const itemId = typeof params.itemId === 'string' ? params.itemId : `fc_${Date.now()}`;
+      const changes = Array.isArray(params.changes) ? params.changes : [];
+      if (changes.length > 0 && typeof onMessage === 'function') {
+        const n = emitFileChangeItemAsTools(
+          { id: itemId, type: 'fileChange', status: 'completed', changes },
+          onMessage,
+          emittedFileChangeToolIds,
+        );
+        if (n > 0) {
+          logDebug(`emitted ${n} file change tool(s) from patchUpdated itemId=${itemId}`);
+        }
+      }
       return;
     }
 
     if (method === 'item/completed') {
       const item = params.item;
       onItemCompleted?.(item);
-      if (item?.type === 'agentMessage' || item?.type === 'agent_message') {
-        const text = item.text || item.message || finalText;
-        if (typeof text === 'string' && text.trim()) {
-          finalText = text;
-          onMessage?.({
-            type: 'assistant',
-            message: { role: 'assistant', content: [{ type: 'text', text }] },
-          });
+      emitStreamHeartbeat();
+      // Map fileChange items → edit/write tool_use for the Edit tab.
+      if (item && (item.type === 'fileChange' || item.type === 'file_change')) {
+        if (typeof onMessage === 'function') {
+          const n = emitFileChangeItemAsTools(item, onMessage, emittedFileChangeToolIds);
+          if (n > 0) {
+            logDebug(`emitted ${n} file change tool(s) from item/completed id=${item.id}`);
+          }
         }
+        return;
       }
+      // Text already streamed via CONTENT_DELTA; skip text-only [MESSAGE]
+      // snapshots (they can open a second empty slot if the stall watchdog
+      // already forced stream_end).
       return;
     }
 

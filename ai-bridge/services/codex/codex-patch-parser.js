@@ -219,6 +219,14 @@ export function parseApplyPatchToOperations(patchText) {
     if (currentKind === 'add') {
       if (line.startsWith('+')) {
         addFileLines.push(line.slice(1));
+      } else if (
+        line
+        && !line.startsWith('***')
+        && !line.startsWith('@@')
+        && line !== '\\ No newline at end of file'
+      ) {
+        // Some Codex patches omit the leading '+' on add-file body lines.
+        addFileLines.push(line.startsWith(' ') ? line.slice(1) : line);
       }
       continue;
     }

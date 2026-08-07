@@ -153,11 +153,19 @@ function extractStrings(input: Record<string, unknown>): { oldString: string; ne
   const oldString =
     (typeof input.old_string === 'string' ? input.old_string : undefined) ??
     (typeof input.oldString === 'string' ? input.oldString : undefined) ??
+    (typeof input.old_text === 'string' ? input.old_text : undefined) ??
+    (typeof input.oldText === 'string' ? input.oldText : undefined) ??
     '';
   const newString =
     (typeof input.new_string === 'string' ? input.new_string : undefined) ??
     (typeof input.newString === 'string' ? input.newString : undefined) ??
+    (typeof input.new_text === 'string' ? input.new_text : undefined) ??
+    (typeof input.newText === 'string' ? input.newText : undefined) ??
     (typeof input.content === 'string' ? input.content : undefined) ?? // Write tool uses 'content'
+    (typeof input.contents === 'string' ? input.contents : undefined) ??
+    (typeof input.file_text === 'string' ? input.file_text : undefined) ??
+    (typeof input.fileText === 'string' ? input.fileText : undefined) ??
+    (typeof input.text === 'string' ? input.text : undefined) ??
     '';
   const replaceAll = typeof input.replace_all === 'boolean' ? input.replace_all : (typeof input.replaceAll === 'boolean' ? input.replaceAll : undefined);
 
@@ -165,20 +173,102 @@ function extractStrings(input: Record<string, unknown>): { oldString: string; ne
 }
 
 /**
- * Determine file status (A = Added, M = Modified)
+ * Resolve +/− line counts. Prefer explicit stats from Codex emitters; fall back
+ * to LCS; then to simple heuristics so write/edit tools never show +0 −0 when
+ * we know content actually changed.
+ */
+function resolveLineStats(
+  input: Record<string, unknown>,
+  toolName: string,
+  oldString: string,
+  newString: string,
+): { additions: number; deletions: number } {
+  const explicitAdd =
+    typeof input.additions === 'number' && Number.isFinite(input.additions)
+      ? Math.max(0, Math.floor(input.additions as number))
+      : null;
+  const explicitDel =
+    typeof input.deletions === 'number' && Number.isFinite(input.deletions)
+      ? Math.max(0, Math.floor(input.deletions as number))
+      : null;
+
+  // Only trust explicit stats when at least one side is non-zero.
+  // Codex emitters often send additions:0/deletions:0 when the diff body is
+  // empty — treating that as authoritative permanently forced the footer to
+  // "+0 -0" and skipped every heuristic below.
+  if (explicitAdd != null || explicitDel != null) {
+    const a = explicitAdd ?? 0;
+    const d = explicitDel ?? 0;
+    if (a > 0 || d > 0) {
+      return { additions: a, deletions: d };
+    }
+  }
+
+  const computed = computeDiffStats(oldString, newString);
+  if (computed.additions > 0 || computed.deletions > 0) {
+    return computed;
+  }
+
+  // Write / create with content but LCS saw empty-empty or equal
+  if (WRITE_TOOL_NAMES.has(toolName) || (!oldString && newString)) {
+    const text = newString || '';
+    const lines = text.length === 0 ? 0 : text.split('\n').length;
+    if (lines > 0 || text.length > 0) {
+      return { additions: Math.max(lines, 1), deletions: 0 };
+    }
+  }
+
+  // Pure delete
+  if (oldString && !newString) {
+    return { additions: 0, deletions: Math.max(1, oldString.split('\n').length) };
+  }
+
+  // Non-identical strings still produced 0 (rare LCS edge) — count exclusive lines
+  if (oldString && newString && oldString !== newString) {
+    const oldLines = oldString.split('\n');
+    const newLines = newString.split('\n');
+    const oldSet = new Set(oldLines);
+    const newSet = new Set(newLines);
+    let additions = 0;
+    let deletions = 0;
+    for (const line of newLines) {
+      if (!oldSet.has(line)) additions += 1;
+    }
+    for (const line of oldLines) {
+      if (!newSet.has(line)) deletions += 1;
+    }
+    if (additions > 0 || deletions > 0) {
+      return { additions, deletions };
+    }
+    return { additions: 1, deletions: 1 };
+  }
+
+  // Successful file-modify tool with path only / empty payload (common for
+  // Codex streaming fileChange with sparse diffs). Never leave +0 −0.
+  if (WRITE_TOOL_NAMES.has(toolName)) {
+    return { additions: 1, deletions: 0 };
+  }
+  // edit / edit_file / replace_string / …
+  return { additions: 1, deletions: 0 };
+}
+
+/**
+ * Determine file status (A = Added, M = Modified).
+ *
+ * IMPORTANT: Only mark A for true create/write tools.
+ * Codex streaming edits often ship with empty old_string (only + lines in the
+ * diff). Treating that as "new file" made Undo / 回撤全部 call fs.delete() and
+ * wipe the whole file instead of reversing the patch.
  */
 function determineFileStatus(operations: EditOperation[]): FileChangeStatus {
   if (operations.length === 0) return 'M';
 
   const firstOp = operations[0];
-  // Write/create_file tools indicate a new file
+  // Write/create_file tools indicate a brand-new file → undo deletes the file.
   if (WRITE_TOOL_NAMES.has(normalizeToolName(firstOp.toolName))) {
     return 'A';
   }
-  // If first operation has empty oldString, it's likely a new file
-  if (firstOp.oldString === '' && firstOp.newString !== '') {
-    return 'A';
-  }
+  // edit / edit_file / replace_string always reverse via string replace (M).
   return 'M';
 }
 
@@ -239,7 +329,7 @@ export function useFileChanges({
         if (!isSuccessfulResult(result)) return;
 
         const { oldString, newString, replaceAll } = extractStrings(input);
-        const { additions, deletions } = computeDiffStats(oldString, newString);
+        const { additions, deletions } = resolveLineStats(input, toolName, oldString, newString);
         const lineInfo = getToolLineInfo(input, undefined, result);
 
         const operation: EditOperation = {
