@@ -6,6 +6,7 @@ import { writeFileSync, readFileSync, existsSync, unlinkSync, readdirSync, mkdir
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
+import { getRequestId } from './utils/request-context.js';
 
 // ========== Debug logging ==========
 export function debugLog(tag, message, data = null) {
@@ -132,7 +133,8 @@ export async function requestAskUserQuestionAnswers(input) {
       toolName: 'AskUserQuestion',
       questions: input.questions || [],
       timestamp: new Date().toISOString(),
-      cwd: process.cwd()
+      cwd: process.cwd(),
+      bridgeRequestId: getRequestId() || undefined,
     };
 
     debugLog('ASK_USER_QUESTION_FILE_WRITE', `Writing question request file`, { requestFile, responseFile });
@@ -232,7 +234,8 @@ export async function requestPlanApproval(input) {
       plan,
       allowedPrompts,
       timestamp: new Date().toISOString(),
-      cwd: process.cwd()
+      cwd: process.cwd(),
+      bridgeRequestId: getRequestId() || undefined,
     };
 
     debugLog('PLAN_APPROVAL_FILE_WRITE', `Writing plan approval request file`, { requestFile, responseFile });
@@ -332,12 +335,16 @@ export async function requestPermissionFromJava(toolName, input) {
     const requestFile = join(PERMISSION_DIR, `request-${SESSION_ID}-${requestId}.json`);
     const responseFile = join(PERMISSION_DIR, `response-${SESSION_ID}-${requestId}.json`);
 
+    // Route the UI dialog to the webview that owns this daemon turn (multi-window).
+    const bridgeRequestId = getRequestId() || undefined;
+
     const requestData = {
       requestId,
       toolName,
       inputs: input,
       timestamp: new Date().toISOString(),
-      cwd: process.cwd()
+      cwd: process.cwd(),
+      bridgeRequestId,
     };
 
     debugLog('FILE_WRITE', `Writing request file`, { requestFile, responseFile });

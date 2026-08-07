@@ -187,13 +187,53 @@ function parseEditItem(item: { name?: string; input?: ToolInput; result?: ToolRe
   const oldString =
     (typeof input.old_string === 'string' ? input.old_string : undefined) ??
     (typeof input.oldString === 'string' ? input.oldString : undefined) ??
+    (typeof input.old_text === 'string' ? input.old_text : undefined) ??
+    (typeof input.oldText === 'string' ? input.oldText : undefined) ??
     '';
   const newString =
     (typeof input.new_string === 'string' ? input.new_string : undefined) ??
     (typeof input.newString === 'string' ? input.newString : undefined) ??
+    (typeof input.new_text === 'string' ? input.new_text : undefined) ??
+    (typeof input.newText === 'string' ? input.newText : undefined) ??
+    (typeof input.content === 'string' ? input.content : undefined) ??
+    (typeof input.contents === 'string' ? input.contents : undefined) ??
+    (typeof input.file_text === 'string' ? input.file_text : undefined) ??
+    (typeof input.fileText === 'string' ? input.fileText : undefined) ??
+    (typeof input.text === 'string' ? input.text : undefined) ??
     '';
 
-  const { additions, deletions } = computeDiffStats(oldString, newString);
+  const explicitAdd =
+    typeof input.additions === 'number' && Number.isFinite(input.additions)
+      ? Math.max(0, Math.floor(input.additions))
+      : null;
+  const explicitDel =
+    typeof input.deletions === 'number' && Number.isFinite(input.deletions)
+      ? Math.max(0, Math.floor(input.deletions))
+      : null;
+  const computed = computeDiffStats(oldString, newString);
+  // Ignore explicit 0/0 — same trap as useFileChanges (Codex empty diff body).
+  let additions =
+    explicitAdd != null && (explicitAdd > 0 || (explicitDel != null && explicitDel > 0))
+      ? explicitAdd
+      : computed.additions;
+  let deletions =
+    explicitDel != null && (explicitDel > 0 || (explicitAdd != null && explicitAdd > 0))
+      ? explicitDel
+      : computed.deletions;
+  if (additions === 0 && deletions === 0) {
+    if (!oldString && newString) {
+      additions = Math.max(1, newString.split('\n').length);
+    } else if (oldString && !newString) {
+      deletions = Math.max(1, oldString.split('\n').length);
+    } else if (oldString && newString && oldString !== newString) {
+      additions = 1;
+      deletions = 1;
+    } else {
+      // path-only edit/write — never leave +0 −0 on a completed file op
+      additions = 1;
+      deletions = 0;
+    }
+  }
   const lineInfo = getToolLineInfo(input, target, result);
   const isCompleted = result !== undefined && result !== null;
   const isError = isCompleted && result?.is_error === true;

@@ -33,20 +33,25 @@
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: var(--text-primary);
+  /* Unselected — same muted secondary language as dialog "取消" */
+  color: var(--text-secondary);
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.15s ease, color 0.15s ease;
   flex: 1;
   justify-content: center;
 
-  &:hover {
+  &:hover:not(.active) {
     background: var(--bg-hover);
+    color: var(--text-primary);
   }
 
+  /* Selected — same solid primary as dialog "授权并启用" */
   &.active {
     background: var(--button-primary-background, #0078d4);
     color: #ffffff;
+    font-weight: 500;
   }
 }
 
