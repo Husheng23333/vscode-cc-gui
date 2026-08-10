@@ -446,7 +446,12 @@ export class BridgeServer {
 
     switch (event) {
       case 'debug_log':
-        this._log.appendLine(`[WEBVIEW] ${content}`);
+        // UI-surfaced failures must always hit Output (even when enableDebugLog is off).
+        if (typeof content === 'string' && content.includes('[UI_SEND_ERROR]')) {
+          this._forceLog(`[WEBVIEW] ${content}`);
+        } else {
+          this._log.appendLine(`[WEBVIEW] ${content}`);
+        }
         break;
 
       // ── Slash commands / agents / MCP (pass to ai-bridge) ─────────────────
@@ -705,6 +710,8 @@ export class BridgeServer {
   private _reqId = 0;
   private _pendingWebviews = new Map<string, vscode.Webview>();
   private _requestEvents = new Map<string, string>();
+  /** request id → runtime provider that owned the turn (for provider-scoped history writes). */
+  private _requestProvider = new Map<string, RuntimeProviderId>();
   private _streamStarted = new Set<string>();
   private _contentStarted = new Set<string>();
   private _inThinking = new Set<string>();
@@ -712,6 +719,38 @@ export class BridgeServer {
    *  Flushed to the webview as 'turn_messages' just before stream_end, so the frontend
    *  can patch tool_use / tool_result blocks that may have been missed during streaming. */
   private _turnMessageBuffer = new Map<string, any[]>();
+
+  /**
+   * Always write to the CC GUI Output channel, even when enableDebugLog is off.
+   * Used for user-facing failures so diagnostics are never silently dropped.
+   */
+  private _forceLog(line: string): void {
+    try {
+      this._logAppendLine(line);
+    } catch {
+      // ignore output channel failures
+    }
+  }
+
+  /**
+   * Deliver a send failure to the webview chat UI and always log it.
+   * Dual delivery (postMessage + js_eval) covers handler-registration races.
+   */
+  private _postSendError(webview: vscode.Webview, payload: string, requestId?: string): void {
+    const content = typeof payload === 'string' ? payload : String(payload ?? 'Unknown error');
+    const preview = content.length > 800 ? `${content.slice(0, 800)}…` : content;
+    this._forceLog(`[CCG_ERROR]${requestId ? ` id=${requestId}` : ''} ${preview}`);
+    // When debug is on, also go through the gated logger for continuity in the stream.
+    this._log.appendLine(`[CCG_ERROR] send_error posted${requestId ? ` id=${requestId}` : ''} len=${content.length}`);
+
+    webview.postMessage({ type: 'send_error', content });
+    // Backup path: call the window handler directly if the type-map path is missed.
+    const escaped = JSON.stringify(content);
+    webview.postMessage({
+      type: 'js_eval',
+      content: `try{window.onSendError&&window.onSendError(${escaped});}catch(e){console.error('[CCG] onSendError failed',e);}`,
+    });
+  }
 
   private _emitStreamStart(id: string, webview: vscode.Webview) {
     if (!this._streamStarted.has(id)) {
@@ -723,9 +762,16 @@ export class BridgeServer {
   }
 
   private _emitStreamEnd(id: string, webview: vscode.Webview) {
+    // Idempotent: STREAM_END line and msg.done both call this. After the first
+    // delivery, request maps are cleared — a second call must not re-post stream_end.
+    if (!this._streamStarted.has(id) && !this._turnMessageBuffer.has(id) && !this._pendingWebviews.has(id)) {
+      return;
+    }
+
     // Flush turn message buffer BEFORE sending stream_end so the webview can
     // patch tool_use / tool_result blocks before it finalises the assistant message.
     const turnMessages = this._turnMessageBuffer.get(id);
+    const shouldPostStreamEnd = this._streamStarted.has(id) || (turnMessages && turnMessages.length > 0);
     if (turnMessages && turnMessages.length > 0) {
       const usage = this._lastUsage.get(id);
       if (usage && turnMessages.some((message) => message?.type === 'assistant')) {
@@ -750,7 +796,6 @@ export class BridgeServer {
       webview.postMessage({ type: 'turn_messages', content: JSON.stringify(this._turnMessageBuffer.get(id) ?? turnMessages) });
     }
     this._turnMessageBuffer.delete(id);
-    this._log.appendLine(`[STREAM] id=${id} → stream_end posted to webview`);
 
     this._streamStarted.delete(id);
     this._contentStarted.delete(id);
@@ -758,14 +803,44 @@ export class BridgeServer {
     this._lastModel.delete(id);
     this._lastSessionId.delete(id);
     this._updateStatusBarItem('Idle');
-    webview.postMessage({ type: 'stream_end' });
-    this._notifyTaskCompletion(id);
+    if (shouldPostStreamEnd) {
+      this._log.appendLine(`[STREAM] id=${id} → stream_end posted to webview`);
+      webview.postMessage({ type: 'stream_end' });
+      this._notifyTaskCompletion(id);
+    }
     this._lastUsage.delete(id);
     this._lastEpoch.delete(id);
-    this._pendingWebviews.delete(id);
-    this._requestEvents.delete(id);
+    // Keep _pendingWebviews / _requestEvents until msg.done so late SEND_ERROR
+    // (emitted after STREAM_END in some paths) can still resolve the request webview.
+    // Final cleanup happens in _cleanupRequest / done branch below via _finishRequest.
     this._latestAssistantPreview.delete(id);
     this._suppressTaskCompletionNotification.delete(id);
+  }
+
+  /** Drop request-scoped maps after the turn is fully finished (done envelope). */
+  private _finishRequest(id: string): void {
+    this._pendingWebviews.delete(id);
+    this._requestEvents.delete(id);
+    this._requestProvider.delete(id);
+    this._streamStarted.delete(id);
+    this._contentStarted.delete(id);
+    this._inThinking.delete(id);
+    this._turnMessageBuffer.delete(id);
+    this._lastUsage.delete(id);
+    this._lastEpoch.delete(id);
+    this._lastModel.delete(id);
+    this._lastSessionId.delete(id);
+    this._latestAssistantPreview.delete(id);
+    this._suppressTaskCompletionNotification.delete(id);
+  }
+
+  /** Prefer request-scoped webview; fall back to active panel after stream_end cleanup. */
+  private _resolveWebview(requestId?: string): vscode.Webview | undefined {
+    if (requestId) {
+      const pending = this._pendingWebviews.get(requestId);
+      if (pending) return pending;
+    }
+    return this._webview;
   }
 
   /**
@@ -920,6 +995,9 @@ export class BridgeServer {
 
     this._pendingWebviews.set(id, webview);
     this._requestEvents.set(id, event);
+    if (event === 'send_message' || event === 'send_message_with_attachments') {
+      this._requestProvider.set(id, activeProvider);
+    }
     const msg = JSON.stringify({ id, method, params }) + '\n';
       if (!isHeartbeat) {
         this._log.appendLine(`[BRIDGE] Sending to daemon: id=${id} method=${method} msg_len=${msg.length}`);
@@ -1084,8 +1162,47 @@ export class BridgeServer {
       return;
     }
 
-    const webview = msg.id ? this._pendingWebviews.get(msg.id) : this._webview;
-    if (!webview) return;
+    // Prefer request-scoped webview; fall back to active panel after STREAM_END
+    // clears _pendingWebviews (Codex often emits SEND_ERROR after STREAM_END).
+    const webview = this._resolveWebview(msg.id);
+    if (!webview) {
+      if (
+        msg.stderr !== undefined
+        || (typeof msg.line === 'string' && (msg.line.includes('[SEND_ERROR]') || msg.line.includes('"success":false')))
+      ) {
+        this._forceLog(`[CCG_ERROR] drop: no webview for id=${msg.id ?? ''} (send_error lost)`);
+      }
+      return;
+    }
+
+    // Tagged stderr (e.g. [SEND_ERROR]) must still reach the UI. Daemon routes
+    // console.error to msg.stderr; without this branch config/auth failures are
+    // only visible in the log panel and the chat appears to "flash then stop".
+    if (msg.stderr !== undefined) {
+      const stderrLine = String(msg.stderr);
+      // Always log stderr that looks like a failure (not gated by enableDebugLog).
+      if (
+        stderrLine.includes('[SEND_ERROR]')
+        || stderrLine.includes('Error loading config')
+        || stderrLine.includes('ERROR')
+        || /error/i.test(stderrLine)
+      ) {
+        this._forceLog(`[BRIDGE] AI stderr: ${stderrLine.slice(0, 600)}`);
+      } else {
+        this._log.appendLine(`[BRIDGE] Internal AI stderr: ${stderrLine.slice(0, 400)}`);
+      }
+      const sendErrorIdx = stderrLine.indexOf('[SEND_ERROR] ');
+      if (sendErrorIdx >= 0) {
+        const payload = stderrLine.slice(sendErrorIdx + '[SEND_ERROR] '.length).trim();
+        if (payload) {
+          this._postSendError(webview, payload, msg.id);
+        }
+      }
+      // Continue — a request may also emit stdout lines in the same envelope.
+      if (msg.line === undefined && !msg.done) {
+        return;
+      }
+    }
 
     // Streaming line events
     if (msg.line !== undefined) {
@@ -1241,8 +1358,16 @@ export class BridgeServer {
               }
               this._latestAssistantPreview.set(msg.id, text.trim());
             }
+            // Codex history cache is provider-specific. Grok/Claude/etc. also emit
+            // [MESSAGE] with session ids — writing them here incorrectly lists those
+            // turns under Codex history when the user switches providers.
             if (sid) {
-              if (text || this._historyService.extractCodexBlocksFromContent(parsed.message.content).length > 0) {
+              const requestProvider =
+                this._requestProvider.get(msg.id) ?? this._activeProvider;
+              if (
+                requestProvider === 'codex'
+                && (text || this._historyService.extractCodexBlocksFromContent(parsed.message.content).length > 0)
+              ) {
                 this._historyService.appendCodexHistoryMessage(
                   sid,
                   parsed.type === 'assistant' ? 'assistant' : 'user',
@@ -1336,7 +1461,7 @@ export class BridgeServer {
         webview.postMessage({ type: 'message_data', content: payload });
       } else if (line.startsWith('[SEND_ERROR] ') || line.startsWith('[ERROR] ')) {
         const payload = line.replace(/^\[[A-Z_]+\] /, '');
-        webview.postMessage({ type: 'send_error', content: payload });
+        this._postSendError(webview, payload, msg.id);
       } else if (line.startsWith('[USAGE] ')) {
         const payload = line.slice('[USAGE] '.length);
         webview.postMessage({ type: 'usage_data', content: payload });
@@ -1362,6 +1487,35 @@ export class BridgeServer {
           this._usageStatistics.postUsageUpdate(webview, inputTokens);
         } catch { /* ignore */ }
       } else if (!line.startsWith('[')) {
+        // Daemon request-result envelopes (no protocol tag) must never become chat text.
+        // Codex/Claude print e.g. {"success":true,"threadId":"...","result":"3","transport":"app-server"}
+        // at end of turn for demux — showing them as content_delta leaks JSON into the UI.
+        const trimmedBare = line.trim();
+        if (trimmedBare.startsWith('{') && trimmedBare.includes('"success"')) {
+          try {
+            const parsedBare = JSON.parse(trimmedBare) as {
+              success?: unknown;
+              error?: unknown;
+              threadId?: unknown;
+              sessionId?: unknown;
+              result?: unknown;
+              transport?: unknown;
+              details?: unknown;
+            };
+            if (parsedBare && typeof parsedBare === 'object' && 'success' in parsedBare) {
+              if (parsedBare.success === false) {
+                this._postSendError(webview, trimmedBare, msg.id);
+              } else {
+                this._log.appendLine(
+                  `[STREAM] id=${msg.id} swallow success envelope transport=${String(parsedBare.transport ?? '')}`,
+                );
+              }
+              return;
+            }
+          } catch {
+            // fall through to content routing
+          }
+        }
         // Bare text line — route to thinking or content based on current state
         this._emitStreamStart(msg.id, webview);
         if (this._inThinking.has(msg.id)) {
@@ -1392,7 +1546,7 @@ export class BridgeServer {
           this._cleanupRequest(msg.id);
           return;
         }
-        webview.postMessage({ type: 'send_error', content: JSON.stringify(msg.error ?? 'Unknown error') });
+        this._postSendError(webview, JSON.stringify(msg.error ?? 'Unknown error'), msg.id);
       } else {
         const sid = this._lastSessionId.get(msg.id);
         if (sid) {
@@ -1409,6 +1563,8 @@ export class BridgeServer {
         this._cleanupRequest(msg.id);
       } else {
         this._emitStreamEnd(msg.id, webview);
+        // STREAM_END keeps pending webview for late SEND_ERROR; done is the final envelope.
+        this._finishRequest(msg.id);
       }
     }
   }
@@ -1625,6 +1781,7 @@ export class BridgeServer {
     this._lastEpoch.delete(id);
     this._pendingWebviews.delete(id);
     this._requestEvents.delete(id);
+    this._requestProvider.delete(id);
     this._latestAssistantPreview.delete(id);
     this._assistantTurnBuffer.delete(id);
   }

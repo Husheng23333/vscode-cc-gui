@@ -541,13 +541,18 @@ export async function sendMessage(
     }));
 
   } catch (error) {
-    emitStreamEndOnce();
     console.error('[DEBUG] Error:', error.message);
     console.error('[DEBUG] Error stack:', error.stack);
 
     const errorPayload = buildErrorPayload(error);
-    console.error('[SEND_ERROR]', JSON.stringify(errorPayload));
-    console.log(JSON.stringify(errorPayload));
+    // Mirror Claude: stderr for diagnostics, stdout [SEND_ERROR] for UI, bare JSON for demux.
+    // IMPORTANT: emit SEND_ERROR *before* STREAM_END. The bridge drops request-scoped
+    // webview mapping on stream_end, so a late send_error never reaches the chat UI.
+    const serialized = JSON.stringify(errorPayload);
+    console.error('[SEND_ERROR]', serialized);
+    console.log(`[SEND_ERROR] ${serialized}`);
+    console.log(serialized);
+    emitStreamEndOnce();
   } finally {
     activeCodexAbortControllers.delete(requestId);
   }

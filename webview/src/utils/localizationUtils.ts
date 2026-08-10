@@ -18,6 +18,7 @@ export function createLocalizeMessage(t: TFunction): (text: string) => string {
       // Codex error messages
       'Codex authentication error:': t('aiBridge.codexAuthError'),
       'Codex network error:': t('aiBridge.codexNetworkError'),
+      'Codex configuration error:': t('aiBridge.codexConfigError'),
       'Codex error:': t('aiBridge.codexError'),
       // Permission related
       'User did not provide answers': t('aiBridge.userDidNotProvideAnswers'),
@@ -101,7 +102,19 @@ export function createLocalizeMessage(t: TFunction): (text: string) => string {
       .replace(/Tip: Codex requires a valid OpenAI API Key/g, t('aiBridge.codexAuthTip'))
       .replace(/Please check:\n1\. Is the network connection working\n2\. If using a proxy, please confirm proxy configuration\n3\. Is the firewall blocking the connection/g,
         t('aiBridge.codexNetworkErrorChecks'))
-      .replace(/Please check network connection and Codex configuration/g, t('aiBridge.codexErrorCheck'));
+      .replace(/Please check network connection and Codex configuration/g, t('aiBridge.codexErrorCheck'))
+      .replace(
+        /Cause: a key is defined more than once in ~\/\.codex\/config\.toml \(for example model_provider\)\.\nFix: open the file and keep only one definition of each top-level key, then retry\./g,
+        t('aiBridge.codexConfigDuplicateKeyTip'),
+      )
+      .replace(
+        /Cause: custom model_providers cannot use built-in IDs such as "openai"\.\nFix: rename your provider, for example:\n {2}model_provider = "openai-custom"\n {2}\[model_providers\.openai-custom\]\nBoth names must match\. Do not use \[model_providers\.openai\]\./g,
+        t('aiBridge.codexConfigReservedProviderTip'),
+      )
+      .replace(
+        /Cause: Codex failed to load ~\/\.codex\/config\.toml\.\nFix: open the file, correct the syntax\/keys reported above, then retry\.\nTip: custom Base URL providers must use a non-reserved provider id \(not "openai"\)\./g,
+        t('aiBridge.codexConfigGenericTip'),
+      );
 
     // Handle API error messages
     result = result

@@ -567,6 +567,42 @@ describe('useWindowCallbacks integration', () => {
     expect(opts.setStatus).not.toHaveBeenCalled();
   });
 
+  it('onSendError appends a chat error message and clears loading', () => {
+    let messages: ClaudeMessage[] = [
+      { type: 'user', content: '1' },
+      { type: 'assistant', content: '', isStreaming: true },
+    ];
+    const setMessages = vi.fn((updater: unknown) => {
+      if (typeof updater === 'function') {
+        messages = (updater as (prev: ClaudeMessage[]) => ClaudeMessage[])(messages);
+      } else {
+        messages = updater as ClaudeMessage[];
+      }
+    });
+    const isStreamingRef = { current: true };
+    const opts = createOptions({ setMessages, isStreamingRef });
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.onSendError!(
+        JSON.stringify({
+          success: false,
+          error: 'Codex configuration error:\n- Error message: reserved built-in provider',
+        }),
+      );
+    });
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0].type).toBe('user');
+    expect(messages[1].type).toBe('error');
+    // t() mock returns i18n keys; ensure the error bubble still carries the original detail.
+    expect(String(messages[1].content)).toContain('reserved built-in provider');
+    expect(isStreamingRef.current).toBe(false);
+    expect(opts.setLoading).toHaveBeenCalledWith(false);
+    expect(opts.setStreamingActive).toHaveBeenCalledWith(false);
+    expect(opts.addToast).toHaveBeenCalled();
+  });
+
   // ===== clearMessages resets all transient UI state =====
 
   it('clearMessages resets streaming refs, loading, thinking, and status', () => {

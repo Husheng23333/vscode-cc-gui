@@ -81,6 +81,23 @@ export function registerWindowCallbacks(
   registerPermissionCallbacks(options);
   registerAgentAndSelectionCallbacks(options);
 
+  // Drain events that arrived before React handlers were registered (first paint race).
+  // Without this, early send_error / stream_* can be buffered forever and never shown.
+  try {
+    const buffered = (window as unknown as { __preMountStreamBuffer?: Array<{ fn?: string; data?: unknown }> }).__preMountStreamBuffer;
+    if (Array.isArray(buffered) && buffered.length > 0) {
+      (window as unknown as { __preMountStreamBuffer?: unknown }).__preMountStreamBuffer = undefined;
+      for (const item of buffered) {
+        const fnName = item?.fn;
+        if (typeof fnName === 'string' && typeof (window as unknown as Record<string, unknown>)[fnName] === 'function') {
+          (window as unknown as Record<string, (data?: unknown) => void>)[fnName](item.data);
+        }
+      }
+    }
+  } catch {
+    // ignore buffer drain failures
+  }
+
   window.onSubagentHistoryLoaded = (json: string) => {
     try {
       if (!options.setSubagentHistories) return;

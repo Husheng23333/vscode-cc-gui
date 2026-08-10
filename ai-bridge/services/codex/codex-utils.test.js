@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeCodexStreamingFlag, normalizeRequestedSandboxMode } from './codex-utils.js';
+import {
+  buildErrorPayload,
+  isCodexConfigError,
+  normalizeCodexStreamingFlag,
+  normalizeRequestedSandboxMode,
+} from './codex-utils.js';
 
 test('normalizeRequestedSandboxMode accepts valid Codex sandbox modes', () => {
   assert.equal(normalizeRequestedSandboxMode('read-only'), 'read-only');
@@ -33,4 +38,34 @@ test('normalizeCodexStreamingFlag accepts explicit true/false-like values', () =
   assert.equal(normalizeCodexStreamingFlag('false'), false);
   assert.equal(normalizeCodexStreamingFlag('0'), false);
   assert.equal(normalizeCodexStreamingFlag('off'), false);
+});
+
+test('isCodexConfigError detects config.toml failures', () => {
+  assert.equal(isCodexConfigError('Error loading config.toml: duplicate key'), true);
+  assert.equal(
+    isCodexConfigError('model_providers contains reserved built-in provider IDs: `openai`'),
+    true,
+  );
+  assert.equal(isCodexConfigError('fetch failed'), false);
+});
+
+test('buildErrorPayload surfaces reserved provider config guidance', () => {
+  const payload = buildErrorPayload(
+    new Error(
+      'Error loading config.toml: model_providers contains reserved built-in provider IDs: `openai`. Built-in providers cannot be overridden. Rename your custom provider (for example, `openai-custom`).',
+    ),
+  );
+  assert.equal(payload.success, false);
+  assert.equal(payload.details.isConfigError, true);
+  assert.match(payload.error, /Codex configuration error:/);
+  assert.match(payload.error, /openai-custom/);
+  assert.doesNotMatch(payload.error, /Please check network connection and Codex configuration/);
+});
+
+test('buildErrorPayload surfaces duplicate key config guidance', () => {
+  const payload = buildErrorPayload(
+    new Error('Error loading config.toml:\nC:\\Users\\Kele\\.codex\\config.toml:6:1: duplicate key'),
+  );
+  assert.equal(payload.details.isConfigError, true);
+  assert.match(payload.error, /defined more than once/);
 });

@@ -683,6 +683,17 @@ interface Window {
   onMessage?: (json: string) => void;
 
   /**
+   * Send failure callback — surfaces backend errors as a chat error message.
+   * Payload is usually JSON: `{ success: false, error: "..." }`.
+   */
+  onSendError?: (payload?: string) => void;
+
+  /** Last send_error text shown (debounce duplicate multi-path delivery). */
+  __lastSendErrorText?: string;
+  /** Timestamp of last send_error UI surface. */
+  __lastSendErrorAt?: number;
+
+  /**
    * Stream start callback - called when streaming begins
    */
   onStreamStart?: (mode?: string | boolean) => void;
