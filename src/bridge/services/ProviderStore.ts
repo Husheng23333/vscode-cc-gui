@@ -131,10 +131,19 @@ export class ProviderStore {
       nextProviders[id] = sanitizeStoredProvider({ ...provider, id });
     }
 
+    // Prefer the provider marked isActive. When every provider is inactive
+    // (switch_provider { id: '__disabled__' } / revoke local settings auth),
+    // clear current — do NOT fall back to the previous section.current, or the
+    // revoke button appears to do nothing.
+    const hasActive = providers.some((provider: any) => provider?.isActive === true);
     const requestedCurrentId = providers.find((provider: any) => provider?.isActive)?.id;
-    let currentId = typeof requestedCurrentId === 'string' ? requestedCurrentId : section.current;
-    if (typeof currentId !== 'string') {
+    let currentId: string;
+    if (!hasActive) {
       currentId = '';
+    } else if (typeof requestedCurrentId === 'string') {
+      currentId = requestedCurrentId;
+    } else {
+      currentId = typeof section.current === 'string' ? section.current : '';
     }
     if (
       currentId &&

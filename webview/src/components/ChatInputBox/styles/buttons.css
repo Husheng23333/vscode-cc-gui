@@ -43,6 +43,7 @@
   color: white;
   cursor: pointer;
   transition: background 0.15s, opacity 0.15s;
+  flex-shrink: 0;
 }
 
 .submit-button:hover:not(:disabled) {

@@ -15,6 +15,18 @@ export function isRuntimeProvider(providerId: string | null | undefined): boolea
   return providerId === 'claude' || providerId === 'codex' || isCliOnlyProvider(providerId);
 }
 
+/** Providers with a first-class local history reader in HistoryService. */
+export const HISTORY_SUPPORTED_PROVIDERS = new Set<string>(['claude', 'codex', 'grok']);
+
+/**
+ * True when the history panel can list/load sessions for this runtime.
+ * Kimi / OpenCode / PI chat works, but they have no local history index yet —
+ * they must not fall through to Claude/Codex session stores.
+ */
+export function hasLocalHistorySupport(providerId: string | null | undefined): boolean {
+  return !!providerId && HISTORY_SUPPORTED_PROVIDERS.has(providerId);
+}
+
 export interface CliToolStatus {
   id: CliToolId;
   name: string;

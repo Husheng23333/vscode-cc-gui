@@ -121,7 +121,7 @@ export interface HistorySessionSummary {
   lastTimestamp?: string;
   isFavorited?: boolean;
   favoritedAt?: number;
-  provider?: string; // 'claude' or 'codex'
+  provider?: string; // 'claude' | 'codex' | 'grok' | …
   fileSize?: number;
   entrypoint?: string; // Session entrypoint: 'cli', 'sdk-cli', 'claude-vscode', etc.
 }
@@ -132,6 +132,13 @@ export interface HistoryData {
   sessions?: HistorySessionSummary[];
   total?: number;
   favorites?: Record<string, { favoritedAt: number }>;
+  /**
+   * True when the active runtime (e.g. kimi / opencode / pi) has no local
+   * history reader yet — the panel should show an empty/unsupported state
+   * rather than another provider's sessions.
+   */
+  historyUnsupported?: boolean;
+  provider?: string;
 }
 
 // File changes types
