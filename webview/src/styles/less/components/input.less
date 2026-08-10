@@ -4,6 +4,16 @@
     background: var(--bg-chat);
     border-top: 1px solid var(--bg-tertiary);
     flex-shrink: 0;
+    min-width: 0;
+    /* Let the chat box size within the panel without clipping the send button */
+    overflow: visible;
+}
+
+.input-area .chat-input-box {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .input-container {

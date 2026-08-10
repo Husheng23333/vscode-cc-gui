@@ -422,12 +422,19 @@ const HistoryView = ({ historyData, currentProvider, currentSessionId, onLoadSes
 
     // If there are no sessions at all
     if (!searchQuery.trim() && sessions.length === 0) {
+      const unsupported = Boolean(historyData?.historyUnsupported);
       return (
         <div className="messages-container" style={CENTER_BLOCK_FULL_HEIGHT_STYLE}>
           <div style={EMPTY_TEXT_STYLE}>
             <div style={EMPTY_ICON_STYLE}>📭</div>
-            <div>{t('history.noSessions')}</div>
-            <div style={EMPTY_HINT_STYLE}>{t('history.noSessionsDesc')}</div>
+            <div>{unsupported ? t('history.unsupportedTitle') : t('history.noSessions')}</div>
+            <div style={EMPTY_HINT_STYLE}>
+              {unsupported
+                ? t('history.unsupportedDesc', {
+                    provider: historyData?.provider || currentProvider || 'CLI',
+                  })
+                : t('history.noSessionsDesc')}
+            </div>
           </div>
         </div>
       );

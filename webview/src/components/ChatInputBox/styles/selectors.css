@@ -71,88 +71,57 @@
   transition: max-width 0.2s ease, opacity 0.2s ease, margin 0.2s ease;
 }
 
-/* Container query for Claude: hide text when narrow (< 400px) */
-@container button-area (max-width: 350px) {
-  .button-area[data-provider="claude"] .selector-button-text {
+/* Compact selector chrome when the toolbar is tight (all providers).
+ * Codex especially has mode + model + reasoning + fast-mode, so the
+ * send button was being pushed past the rounded right edge. */
+@container button-area (max-width: 450px) {
+  .button-area .selector-button-text {
     max-width: 0;
     opacity: 0;
     overflow: hidden;
     margin: 0;
   }
 
-  .button-area[data-provider="claude"] .selector-button {
+  .button-area .selector-button {
     gap: 2px;
     padding: 4px 6px;
     min-width: 28px;
+    flex-shrink: 0;
   }
 
-  .button-area[data-provider="claude"] .selector-button > .codicon-chevron-up,
-  .button-area[data-provider="claude"] .selector-button > .codicon-chevron-down {
+  .button-area .selector-button > .codicon-chevron-up,
+  .button-area .selector-button > .codicon-chevron-down {
     display: none;
   }
 }
 
-/* Container query for Codex: hide text when narrow (< 350px) */
-@container button-area (max-width: 380px) {
-  .button-area[data-provider="codex"] .selector-button-text {
-    max-width: 0;
-    opacity: 0;
-    overflow: hidden;
-    margin: 0;
-  }
-
-  .button-area[data-provider="codex"] .selector-button {
-    gap: 2px;
-    padding: 4px 6px;
-    min-width: 28px;
-  }
-
-  .button-area[data-provider="codex"] .selector-button > .codicon-chevron-up,
-  .button-area[data-provider="codex"] .selector-button > .codicon-chevron-down {
-    display: none;
+/* Even tighter: slightly smaller hit targets */
+@container button-area (max-width: 320px) {
+  .button-area .selector-button {
+    padding: 4px 5px;
+    min-width: 26px;
   }
 }
 
 /* Fallback for browsers without container query support */
 @supports not (container-type: inline-size) {
-  /* Claude fallback: 550px */
-  @media (max-width: 500px) {
-    .button-area[data-provider="claude"] .selector-button-text {
+  @media (max-width: 560px) {
+    .button-area .selector-button-text {
       max-width: 0;
       opacity: 0;
       overflow: hidden;
       margin: 0;
     }
 
-    .button-area[data-provider="claude"] .selector-button {
+    .button-area .selector-button {
       gap: 2px;
       padding: 4px 6px;
       min-width: 28px;
+      flex-shrink: 0;
     }
 
-    .button-area[data-provider="claude"] .selector-button > .codicon-chevron-up,
-    .button-area[data-provider="claude"] .selector-button > .codicon-chevron-down {
-      display: none;
-    }
-  }
-
-  /* Codex fallback: 500px */
-  @media (max-width: 550px) {
-    .button-area[data-provider="codex"] .selector-button-text {
-      max-width: 0;
-      opacity: 0;
-      overflow: hidden;
-      margin: 0;
-    }
-
-    .button-area[data-provider="codex"] .selector-button {
-      gap: 2px;
-      padding: 4px 6px;
-      min-width: 28px;
-    }
-
-    .button-area[data-provider="codex"] .selector-button > .codicon-chevron-up,
-    .button-area[data-provider="codex"] .selector-button > .codicon-chevron-down {
+    .button-area .selector-button > .codicon-chevron-up,
+    .button-area .selector-button > .codicon-chevron-down {
       display: none;
     }
   }
