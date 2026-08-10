@@ -165,6 +165,10 @@ export class NodeProcessHandler implements BridgeHandler {
   private providerForCommand(command: string): string | undefined {
     if (command.includes('codex')) return 'codex';
     if (command.includes('claude')) return 'claude';
+    if (command.includes('grok')) return 'grok';
+    if (command.includes('kimi')) return 'kimi';
+    if (command.includes('opencode')) return 'opencode';
+    if (/\bpi\b/.test(command) || command.includes(' pi ')) return 'pi';
     return undefined;
   }
 

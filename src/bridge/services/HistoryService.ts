@@ -7,6 +7,7 @@ import { loadCodexHistoryRowsFromFile, summarizeCodexHistoryRows, transformCodex
 import { imageBlockFromLocalPath, restoreClaudeImageReferencesInContent } from './claudeImageRestore';
 import { codemossConfigPath, readCodemossConfigFile, writeCodemossConfigFile } from './codemossJsonStore';
 import { codexImageTagRegex, imagePathFromCodexImageTagMatch, stripCodexInlineImageTags as stripCodexInlineImageTagsText } from './codexImageTags';
+import { GrokHistoryReader } from './GrokHistoryReader';
 
 const USER_INPUT_BY_SESSION_KEY = 'ccg.userInputBySession';
 /** Legacy migration source only — favorites now live in the shared FAVORITES_FILE. Never written to again. */
@@ -379,6 +380,10 @@ export class HistoryService {
       this.loadCodexHistoryData(webview);
       return;
     }
+    if (provider === 'grok') {
+      this.loadGrokHistoryData(webview);
+      return;
+    }
     const projectsDir = this.getClaudeProjectsDir();
     const favorites = this.getFavorites();
 
@@ -500,6 +505,47 @@ export class HistoryService {
     this.loadHistoryData(provider, webview);
   }
 
+  private loadGrokHistoryData(webview: vscode.Webview): void {
+    try {
+      const favorites = this.getFavorites();
+      const reader = new GrokHistoryReader();
+      const workspace = this.getWorkspacePath();
+      const result = reader.getSessionsForProject(workspace);
+      const sessions = (result.sessions || []).map((session) => ({
+        sessionId: session.sessionId,
+        title: session.title,
+        messageCount: session.messageCount,
+        lastTimestamp: new Date(session.lastTimestamp).toISOString(),
+        firstTimestamp: new Date(session.firstTimestamp).toISOString(),
+        cwd: session.cwd,
+        provider: 'grok',
+        isFavorited: Boolean(favorites[session.sessionId]),
+        fileSize: session.fileSize,
+      }));
+      webview.postMessage({
+        type: 'history_data',
+        content: JSON.stringify({
+          success: result.success,
+          sessions,
+          total: sessions.length,
+          favorites,
+          error: result.error,
+        }),
+      });
+    } catch (error: any) {
+      this.log.appendLine(`[BRIDGE] loadGrokHistoryData error: ${error?.message || error}`);
+      webview.postMessage({
+        type: 'history_data',
+        content: JSON.stringify({
+          success: false,
+          sessions: [],
+          total: 0,
+          error: String(error?.message || error),
+        }),
+      });
+    }
+  }
+
   loadSession(sessionId: string, provider: string | undefined, webview: vscode.Webview): void {
     if (!this.isValidSessionId(sessionId)) {
       this.log.appendLine(`[BRIDGE] loadSession rejected invalid sessionId="${sessionId}"`);
@@ -507,13 +553,27 @@ export class HistoryService {
       return;
     }
 
-    const normalizedProvider = provider === 'codex' || provider === 'claude' ? provider : undefined;
+    const normalizedProvider = provider === 'codex' || provider === 'claude' || provider === 'grok' ? provider : undefined;
     this.log.appendLine(`[BRIDGE] loadSession called: sessionId="${sessionId}" provider="${normalizedProvider ?? 'auto'}"`);
+
+    if (normalizedProvider === 'grok') {
+      try {
+        const reader = new GrokHistoryReader();
+        const messages = reader.getSessionMessages(sessionId, this.getWorkspacePath());
+        this.log.appendLine(`[BRIDGE] loadSession: loaded ${messages.length} messages from grok history`);
+        webview.postMessage({ type: 'session_messages', content: JSON.stringify(messages) });
+        return;
+      } catch (e: any) {
+        this.log.appendLine(`[BRIDGE] loadSession grok error: ${e?.message || e}`);
+        webview.postMessage({ type: 'session_messages', content: JSON.stringify([]) });
+        return;
+      }
+    }
 
     const projectsDir = this.getClaudeProjectsDir();
     this.log.appendLine(`[BRIDGE] loadSession projectsDir="${projectsDir}" exists=${fs.existsSync(projectsDir)}`);
     try {
-      if (normalizedProvider !== 'codex' && fs.existsSync(projectsDir)) {
+      if (normalizedProvider !== 'codex' && normalizedProvider !== 'grok' && fs.existsSync(projectsDir)) {
         for (const projectDir of this.getClaudeProjectDirsToScan(projectsDir)) {
           const filePath = path.join(projectsDir, projectDir, `${sessionId}.jsonl`);
           if (!fs.existsSync(filePath)) continue;
@@ -994,7 +1054,18 @@ export class HistoryService {
     return true;
   }
 
+  private deleteGrokSession(sessionId: string): boolean {
+    try {
+      return new GrokHistoryReader().deleteSession(sessionId, this.getWorkspacePath());
+    } catch (e: any) {
+      this.log.appendLine(`[HISTORY] deleteGrokSession failed: ${e?.message || e}`);
+      return false;
+    }
+  }
+
   private deleteSessionFiles(sessionId: string): boolean {
+    // Best-effort: remove matching Grok session if present.
+    this.deleteGrokSession(sessionId);
     if (!this.isValidSessionId(sessionId)) {
       this.log.appendLine(`[BRIDGE] deleteSessionFiles rejected invalid sessionId="${sessionId}"`);
       return false;

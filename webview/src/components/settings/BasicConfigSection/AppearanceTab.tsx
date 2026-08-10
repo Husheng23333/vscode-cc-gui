@@ -55,6 +55,32 @@ const USER_MSG_LIGHT_PRESETS = [
 
 const DEFAULT_DARK_USER_MSG = '#005fb8';
 const DEFAULT_LIGHT_USER_MSG = '#0078d4';
+
+const CHAT_BAR_DARK_PRESETS = [
+  { color: '#252526', label: 'Default' },
+  { color: '#1a1b26', label: 'Tokyo Night' },
+  { color: '#282c34', label: 'One Dark' },
+  { color: '#2b2d30', label: 'JetBrains' },
+  { color: '#0d1117', label: 'GitHub Dark' },
+  { color: '#1e1f29', label: 'Dracula' },
+  { color: '#262335', label: 'SynthWave' },
+  { color: '#292d3e', label: 'Palenight' },
+];
+
+const CHAT_BAR_LIGHT_PRESETS = [
+  { color: '#f3f3f3', label: 'Default' },
+  { color: '#fafafa', label: 'Soft White' },
+  { color: '#f5f5f5', label: 'Light Gray' },
+  { color: '#faf4ed', label: 'Rose Pine' },
+  { color: '#f6f8fa', label: 'GitHub Light' },
+  { color: '#fffbf0', label: 'Warm' },
+  { color: '#f0f4f8', label: 'Cool Blue' },
+  { color: '#f5f0eb', label: 'Solarized' },
+];
+
+const DEFAULT_DARK_CHAT_BAR = '#252526';
+const DEFAULT_LIGHT_CHAT_BAR = '#f3f3f3';
+
 const UI_FONT_SELECT_ID = 'settings-ui-font-select';
 const UI_FONT_CUSTOM_PATH_ID = 'settings-ui-font-custom-path';
 const CODE_FONT_SELECT_ID = 'settings-code-font-select';
@@ -116,6 +142,8 @@ export interface AppearanceTabProps {
   onChatBgColorChange?: (color: string) => void;
   userMsgColor?: string;
   onUserMsgColorChange?: (color: string) => void;
+  chatBarColor?: string;
+  onChatBarColorChange?: (color: string) => void;
   diffTheme?: DiffThemeMode;
   onDiffThemeChange?: (theme: DiffThemeMode) => void;
 }
@@ -138,14 +166,18 @@ const AppearanceTab = ({
   onChatBgColorChange = () => {},
   userMsgColor = '',
   onUserMsgColorChange = () => {},
+  chatBarColor = '',
+  onChatBarColorChange = () => {},
   diffTheme = 'follow',
   onDiffThemeChange = () => {},
 }: AppearanceTabProps) => {
   const { t, i18n } = useTranslation();
   const colorInputRef = useRef<HTMLInputElement>(null);
   const userMsgColorInputRef = useRef<HTMLInputElement>(null);
+  const chatBarColorInputRef = useRef<HTMLInputElement>(null);
   const [hexInput, setHexInput] = useState(chatBgColor || '');
   const [userMsgHexInput, setUserMsgHexInput] = useState(userMsgColor || '');
+  const [chatBarHexInput, setChatBarHexInput] = useState(chatBarColor || '');
   const [selectedUiFontOption, setSelectedUiFontOption] = useState(() => {
     if (!uiFontConfig || uiFontConfig.mode === 'followEditor') return 'followEditor';
     return 'customFile';
@@ -169,6 +201,10 @@ const AppearanceTab = ({
   useEffect(() => {
     setUserMsgHexInput(userMsgColor || '');
   }, [userMsgColor]);
+
+  useEffect(() => {
+    setChatBarHexInput(chatBarColor || '');
+  }, [chatBarColor]);
 
   useEffect(() => {
     if (!uiFontConfig || uiFontConfig.mode === 'followEditor') {
@@ -211,6 +247,9 @@ const AppearanceTab = ({
 
   const defaultUserMsgColor = resolvedTheme === 'light' ? DEFAULT_LIGHT_USER_MSG : DEFAULT_DARK_USER_MSG;
   const userMsgPresets = resolvedTheme === 'light' ? USER_MSG_LIGHT_PRESETS : USER_MSG_DARK_PRESETS;
+
+  const defaultChatBarColor = resolvedTheme === 'light' ? DEFAULT_LIGHT_CHAT_BAR : DEFAULT_DARK_CHAT_BAR;
+  const chatBarPresets = resolvedTheme === 'light' ? CHAT_BAR_LIGHT_PRESETS : CHAT_BAR_DARK_PRESETS;
 
   const handlePresetClick = (color: string) => {
     if (color === defaultBgColor) {
@@ -260,9 +299,38 @@ const AppearanceTab = ({
     onUserMsgColorChange('');
   };
 
+  const handleChatBarPresetClick = (color: string) => {
+    if (color === defaultChatBarColor) {
+      onChatBarColorChange('');
+    } else {
+      onChatBarColorChange(color);
+    }
+  };
+
+  const handleChatBarColorInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onChatBarColorChange(e.target.value);
+  };
+
+  const handleChatBarHexInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setChatBarHexInput(value);
+    if (/^#[0-9a-fA-F]{6}$/.test(value)) {
+      onChatBarColorChange(value);
+    }
+  };
+
+  const handleResetChatBarColor = () => {
+    onChatBarColorChange('');
+  };
+
   const isUserMsgPresetActive = (presetColor: string) => {
     if (presetColor === defaultUserMsgColor && !userMsgColor) return true;
     return userMsgColor.toLowerCase() === presetColor.toLowerCase();
+  };
+
+  const isChatBarPresetActive = (presetColor: string) => {
+    if (presetColor === defaultChatBarColor && !chatBarColor) return true;
+    return chatBarColor.toLowerCase() === presetColor.toLowerCase();
   };
 
   const isPresetActive = (presetColor: string) => {
@@ -705,6 +773,83 @@ const AppearanceTab = ({
         <small className={styles.formHint}>
           <span className="codicon codicon-info" />
           <span>{t('settings.basic.chatBgColor.hint')}</span>
+        </small>
+      </div>
+
+      
+      {/* Shared chat header and status bar color */}
+      <div className={styles.bgColorSection}>
+        <div className={styles.fieldHeader}>
+          <span className="codicon codicon-layout" />
+          <span className={styles.fieldLabel}>{t('settings.basic.chatBarColor.label')}</span>
+        </div>
+
+        <div className={styles.colorPresets}>
+          {chatBarPresets.map((preset) => (
+            <div
+              key={preset.color}
+              className={`${styles.colorSwatch} ${isChatBarPresetActive(preset.color) ? styles.active : ''}`}
+              onClick={() => handleChatBarPresetClick(preset.color)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handleChatBarPresetClick(preset.color);
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              title={preset.label}
+              aria-label={preset.label}
+            >
+              <div
+                className={styles.colorSwatchInner}
+                style={getSwatchStyle(preset.color)}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className={styles.customColorRow}>
+          <span className={styles.customColorLabel}>{t('settings.basic.chatBarColor.custom')}</span>
+          <div
+            className={styles.colorPickerWrapper}
+            onClick={() => chatBarColorInputRef.current?.click()}
+          >
+            <div
+              className={styles.colorPickerPreview}
+              style={getSwatchStyle(chatBarColor || defaultChatBarColor)}
+            />
+            <input
+              ref={chatBarColorInputRef}
+              type="color"
+              className={styles.colorPickerInput}
+              value={chatBarColor || defaultChatBarColor}
+              onChange={handleChatBarColorInputChange}
+            />
+          </div>
+          <input
+            type="text"
+            className={styles.hexInput}
+            value={chatBarHexInput}
+            onChange={handleChatBarHexInputChange}
+            placeholder="#000000"
+            maxLength={7}
+          />
+          {chatBarColor && (
+            <button
+              className={styles.resetBtn}
+              onClick={handleResetChatBarColor}
+              title={t('settings.basic.chatBarColor.reset')}
+            >
+              <span className="codicon codicon-discard" />
+              {t('settings.basic.chatBarColor.reset')}
+            </button>
+          )}
+        </div>
+
+        <small className={styles.formHint}>
+          <span className="codicon codicon-info" />
+          <span>{t('settings.basic.chatBarColor.hint')}</span>
         </small>
       </div>
 

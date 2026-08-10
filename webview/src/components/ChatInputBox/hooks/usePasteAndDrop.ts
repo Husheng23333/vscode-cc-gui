@@ -2,6 +2,11 @@ import { useCallback, useEffect } from 'react';
 import type { Attachment } from '../types.js';
 import { generateId } from '../utils/generateId.js';
 import { insertTextAtCursor } from '../utils/selectionUtils.js';
+import {
+  collectDropPathPayload,
+  isAbsoluteFsPath,
+} from '../utils/dropPathUtils.js';
+import { resolveDropPathsWithHost } from '../../../utils/bridge.js';
 import { perfTimer } from '../../../utils/debug.js';
 
 declare global {
@@ -197,26 +202,79 @@ export function usePasteAndDrop({
   }, []);
 
   /**
-   * Handle drop event - detect images and file paths
+   * Insert one or more file path references (@path) into the editable.
+   */
+  const insertFilePathReferences = useCallback(
+    (filePaths: string[]) => {
+      if (!editableRef.current || filePaths.length === 0) return;
+
+      for (const rawPath of filePaths) {
+        const filePath = rawPath.trim();
+        if (!filePath) continue;
+
+        const fileName = filePath.split(/[/\\]/).pop() || filePath;
+        pathMappingRef.current.set(fileName, filePath);
+        pathMappingRef.current.set(filePath, filePath);
+
+        const textToInsert = (filePath.startsWith('@') ? filePath : `@${filePath}`) + ' ';
+        const selection = window.getSelection();
+
+        if (selection && selection.rangeCount > 0 && editableRef.current.contains(selection.anchorNode)) {
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          const textNode = document.createTextNode(textToInsert);
+          range.insertNode(textNode);
+          range.setStartAfter(textNode);
+          range.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        } else if (editableRef.current) {
+          const textNode = document.createTextNode(textToInsert);
+          editableRef.current.appendChild(textNode);
+          const range = document.createRange();
+          range.setStartAfter(textNode);
+          range.collapse(true);
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }
+      }
+
+      closeAllCompletions();
+      const newText = getTextContent();
+      setHasContent(!!newText.trim());
+      adjustHeight();
+      onInput?.(newText);
+      setTimeout(() => {
+        renderFileTags();
+      }, 50);
+    },
+    [
+      editableRef,
+      pathMappingRef,
+      getTextContent,
+      adjustHeight,
+      renderFileTags,
+      setHasContent,
+      onInput,
+      closeAllCompletions,
+    ]
+  );
+
+  /**
+   * Handle drop event - detect images and file paths (VS Code explorer / OS files).
    */
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
 
-      // First get text content (file path)
-      const text = e.dataTransfer?.getData('text/plain');
-
-      // Then check file objects
       const files = e.dataTransfer?.files;
 
-      // Check if there are actual image file objects
+      // Prefer image file objects as attachments
       let hasImageFile = false;
       if (files && files.length > 0) {
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
-
-          // Only process image files
           if (file.type.startsWith('image/')) {
             hasImageFile = true;
             const reader = new FileReader();
@@ -235,7 +293,6 @@ export function usePasteAndDrop({
                 mediaType: file.type || 'image/png',
                 data: base64,
               };
-
               setInternalAttachments((prev) => [...prev, attachment]);
             };
             reader.readAsDataURL(file);
@@ -243,87 +300,48 @@ export function usePasteAndDrop({
         }
       }
 
-      // If there are image files, don't process text
       if (hasImageFile) {
         return;
       }
 
-      // No image files, process text (file path or other text)
-      if (text && text.trim()) {
-        // Extract file path and add to path mapping
-        const filePath = text.trim();
-        const fileName = filePath.split(/[/\\]/).pop() || filePath;
+      // Collect drop candidates, then resolve to absolute OS paths on the extension host.
+      // Webviews often only get bare names (e.g. "python3.txt") — that is not enough for
+      // the model to open the file, especially across Mac vs Windows path conventions.
+      const payload = collectDropPathPayload(e.dataTransfer);
+      const hasCandidates =
+        payload.uris.length > 0 ||
+        payload.names.length > 0 ||
+        payload.texts.length > 0 ||
+        payload.absolutePaths.length > 0;
 
-        // Add path to pathMappingRef to make it a "valid reference"
-        pathMappingRef.current.set(fileName, filePath);
-        pathMappingRef.current.set(filePath, filePath);
-
-        // Auto-add @ prefix (if not already present), and add space to trigger rendering
-        const textToInsert = (text.startsWith('@') ? text : `@${text}`) + ' ';
-
-        // Get current cursor position
-        const selection = window.getSelection();
-        if (selection && selection.rangeCount > 0 && editableRef.current) {
-          // Ensure cursor is inside input box
-          if (editableRef.current.contains(selection.anchorNode)) {
-            // Use modern API to insert text
-            const range = selection.getRangeAt(0);
-            range.deleteContents();
-            const textNode = document.createTextNode(textToInsert);
-            range.insertNode(textNode);
-
-            // Move cursor after inserted text
-            range.setStartAfter(textNode);
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
-          } else {
-            // Cursor not inside input box, append to end
-            // Use appendChild instead of innerText to avoid breaking existing file tags
-            const textNode = document.createTextNode(textToInsert);
-            editableRef.current.appendChild(textNode);
-
-            // Move cursor to end
-            const range = document.createRange();
-            range.setStartAfter(textNode);
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
-          }
-        } else {
-          // No selection, append to end
-          if (editableRef.current) {
-            const textNode = document.createTextNode(textToInsert);
-            editableRef.current.appendChild(textNode);
-          }
-        }
-
-        // Close all completion menus
-        closeAllCompletions();
-
-        // Directly trigger state update, don't call handleInput (avoid re-detecting completion)
-        const newText = getTextContent();
-        setHasContent(!!newText.trim());
-        adjustHeight();
-        onInput?.(newText);
-
-        // Immediately render file tags (don't wait for space)
-        setTimeout(() => {
-          renderFileTags();
-        }, 50);
+      if (!hasCandidates) {
+        return;
       }
+
+      // Fast path: already have absolute paths and nothing ambiguous to resolve
+      const onlyAbsolute =
+        payload.absolutePaths.length > 0 &&
+        payload.names.length === 0 &&
+        payload.texts.every((t) => isAbsoluteFsPath(t)) &&
+        payload.uris.length === 0;
+
+      if (onlyAbsolute) {
+        insertFilePathReferences(payload.absolutePaths);
+        return;
+      }
+
+      resolveDropPathsWithHost(payload, (resolved) => {
+        if (resolved.length > 0) {
+          insertFilePathReferences(resolved);
+          return;
+        }
+        // Host found nothing — only insert absolute client paths if any; never bare names alone
+        if (payload.absolutePaths.length > 0) {
+          insertFilePathReferences(payload.absolutePaths);
+        }
+      });
     },
-    [
-      editableRef,
-      pathMappingRef,
-      getTextContent,
-      adjustHeight,
-      renderFileTags,
-      setHasContent,
-      setInternalAttachments,
-      onInput,
-      closeAllCompletions,
-    ]
+    [setInternalAttachments, insertFilePathReferences]
   );
 
   // Listen for image paste events dispatched from Java side (when clipboard has image but no text)

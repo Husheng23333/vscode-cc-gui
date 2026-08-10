@@ -156,10 +156,12 @@ export class TokenTrackerHandler implements BridgeHandler {
 
   private probeCliVersion(bin: string): string | null {
     try {
-      const result = cp.spawnSync(bin, ['--version'], {
+      const command = process.platform === 'win32' ? path.basename(bin) : bin;
+      const result = cp.spawnSync(command, ['--version'], {
         encoding: 'utf8',
         timeout: 10_000,
         env: this.childEnv(bin),
+        shell: process.platform === 'win32',
       });
       if (result.status === 0 && result.stdout?.trim()) {
         return result.stdout.split('\n')[0]?.trim() || 'unknown';
@@ -193,16 +195,72 @@ export class TokenTrackerHandler implements BridgeHandler {
     return process.platform === 'win32' ? 'npm.cmd' : 'npm';
   }
 
+  /**
+   * TokenTracker only needs @mongodb-js/zstd when Node cannot decode zstd
+   * itself. Node 24 provides the native zstd API, so installing the native
+   * addon on Windows is unnecessary and can fail when its GitHub prebuild
+   * download times out (the fallback script requires bash).
+   */
+  private nodeSupportsNativeZstd(nodePath: string | undefined): boolean {
+    const executable = nodePath || process.execPath;
+    try {
+      const result = cp.spawnSync(
+        executable,
+        ['-e', "const zlib = require('zlib'); process.exit(typeof zlib.zstdDecompressSync === 'function' ? 0 : 1)"],
+        { timeout: 5_000, windowsHide: true },
+      );
+      return result.status === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  private formatInstallOutput(output: string): string {
+    const normalized = output.replace(/\r/g, '').trim();
+    if (!normalized) return 'npm returned no diagnostic output';
+    // npm prints the useful `npm error` lines at the end after dependency
+    // progress logs. Keep the message bounded for the webview error panel.
+    const maxLength = 2_000;
+    return normalized.length > maxLength
+      ? `...${normalized.slice(-maxLength)}`
+      : normalized;
+  }
+
+  private decodeProcessOutput(chunks: Buffer[]): string {
+    const buffer = Buffer.concat(chunks);
+    const utf8 = buffer.toString('utf8');
+    if (!utf8.includes('\uFFFD')) return utf8;
+    try {
+      // cmd.exe commonly uses the system GBK code page on Chinese Windows.
+      // Decode that byte stream only when UTF-8 decoding produced replacements.
+      return new TextDecoder('gb18030').decode(buffer);
+    } catch {
+      return utf8;
+    }
+  }
+
   private async installCli(): Promise<Record<string, unknown>> {
     const npm = this.resolveNpmBin();
+    const nodePath = NodeDetector.find(this.context.extensionContext);
+    const args = ['install', '-g', TokenTrackerHandler.TT_CLI_PACKAGE];
+    if (process.platform === 'win32' && this.nodeSupportsNativeZstd(nodePath)) {
+      // Node 24+ has zlib.zstdDecompressSync, while zstd's Windows install
+      // fallback invokes bash. Skipping lifecycle scripts avoids that fragile
+      // native build without removing any runtime capability.
+      args.push('--ignore-scripts');
+    }
     await new Promise<void>((resolve, reject) => {
-      const proc = cp.spawn(npm, ['install', '-g', TokenTrackerHandler.TT_CLI_PACKAGE], {
+      const proc = cp.spawn(npm, args, {
         env: this.childEnv(npm),
-        shell: false,
+        shell: process.platform === 'win32',
+        windowsHide: true,
       });
-      let output = '';
-      proc.stdout?.on('data', (chunk) => { output += String(chunk); });
-      proc.stderr?.on('data', (chunk) => { output += String(chunk); });
+      const outputChunks: Buffer[] = [];
+      const collectOutput = (chunk: Buffer | string) => {
+        outputChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      };
+      proc.stdout?.on('data', collectOutput);
+      proc.stderr?.on('data', collectOutput);
       const timer = setTimeout(() => {
         proc.kill();
         reject(new Error('tokentracker-cli install timed out after 180s'));
@@ -210,7 +268,11 @@ export class TokenTrackerHandler implements BridgeHandler {
       proc.on('close', (code) => {
         clearTimeout(timer);
         if (code === 0) resolve();
-        else reject(new Error(`tokentracker-cli install failed with exit code ${code}: ${output.slice(0, 300)}`));
+        else reject(new Error(
+          `tokentracker-cli install failed with exit code ${code}: ${this.formatInstallOutput(
+            this.decodeProcessOutput(outputChunks),
+          )}`,
+        ));
       });
       proc.on('error', (error) => {
         clearTimeout(timer);
@@ -304,11 +366,13 @@ export class TokenTrackerHandler implements BridgeHandler {
   }
 
   private spawnServer(bin: string, port: number): void {
-    const child = cp.spawn(bin, ['serve', '--no-open', '--port', String(port)], {
+    const command = process.platform === 'win32' ? path.basename(bin) : bin;
+    const child = cp.spawn(command, ['serve', '--no-open', '--port', String(port)], {
       env: { ...this.childEnv(bin), TOKENTRACKER_NO_TELEMETRY: '1' },
       detached: true,
       stdio: 'ignore',
-      shell: false,
+      shell: process.platform === 'win32',
+      windowsHide: true,
     });
     child.unref();
     this.context.log.appendLine(`[TokenTracker] Started tokentracker server on port ${port}`);

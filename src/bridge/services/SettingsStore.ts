@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { NodeDetector } from '../../nodeDetector';
+import { isLikelyNodeExecutable } from '../../nodeDetectorUtils';
 import { LanguageConfigPayload, resolveLanguageConfig } from '../../language';
 import { StateStore } from './StateStore';
 
@@ -127,10 +128,11 @@ export class SettingsStore {
   getNodePathPayload(): { path: string; version: string | null; minVersion: number; valid: boolean; error?: string } {
     const configured = vscode.workspace.getConfiguration('ccGui').get<string>('nodePath') ?? '';
     const detected = NodeDetector.find(this.context) ?? '';
-    const nodePath = configured || detected;
+    const configuredNode = configured && isLikelyNodeExecutable(configured) ? configured : '';
+    const nodePath = configuredNode || detected;
     const version = nodePath ? this.detectNodeVersion(nodePath) : null;
     return {
-      path: configured || nodePath,
+      path: nodePath,
       version,
       minVersion: MIN_NODE_MAJOR_VERSION,
       valid: !!nodePath && this.isSupportedNodeVersion(version),
@@ -336,6 +338,18 @@ export class SettingsStore {
 
   setStatusBarWidgetEnabled(content: string): Thenable<void> {
     return this.state.update('ccg.status_bar_widget_enabled', this.extractBooleanField(content, 'statusBarWidgetEnabled', true));
+  }
+
+  /** VS Code setting `ccGui.enableDebugLog` (default false). */
+  getEnableDebugLog(): boolean {
+    return vscode.workspace.getConfiguration('ccGui').get<boolean>('enableDebugLog') === true;
+  }
+
+  setEnableDebugLog(content: string): Thenable<void> {
+    const enabled = this.extractBooleanField(content, 'enableDebugLog', false);
+    return vscode.workspace
+      .getConfiguration('ccGui')
+      .update('enableDebugLog', enabled, vscode.ConfigurationTarget.Global);
   }
 
   private parseBooleanState(key: string, defaultValue: boolean, jsonField: string): boolean {

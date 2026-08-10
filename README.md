@@ -8,6 +8,36 @@ A 100% open-source GUI for Claude Code CLI and Codex, shipped as a VS Code exten
 
 ---
 
+## Build and Package the VSIX
+
+From the project root:
+
+```bash
+npm install
+cd webview && npm install && cd ..
+cd ai-bridge && npm install && cd ..
+npm run build
+npm exec --yes --package=@vscode/vsce -- vsce package
+```
+
+The generated file is named `vscode-cc-gui-<version>.vsix` in the project root. Install it in VS Code with:
+
+```bash
+code --install-extension ./vscode-cc-gui-0.1.0.vsix
+```
+
+### Repair a broken global `vsce` command
+
+If a global `vsce` install is broken, reinstall it:
+
+```bash
+npm uninstall -g @vscode/vsce
+npm install -g @vscode/vsce
+vsce package
+```
+
+---
+
 ## License
 
 [MIT](./LICENSE)

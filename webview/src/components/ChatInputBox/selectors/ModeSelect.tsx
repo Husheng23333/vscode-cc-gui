@@ -37,8 +37,9 @@ export const ModeSelect = ({ value, onChange, provider }: ModeSelectProps) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const modeOptions = useMemo(() => {
-    if (provider === 'codex') {
-      // Codex supports default/acceptEdits/bypassPermissions; plan mode is not exposed yet.
+    if (provider === 'codex' || provider === 'grok' || provider === 'kimi'
+      || provider === 'opencode' || provider === 'pi') {
+      // Codex / CLI providers: plan mode is not exposed.
       return AVAILABLE_MODES.filter((mode) => mode.id !== 'plan');
     }
     return AVAILABLE_MODES;

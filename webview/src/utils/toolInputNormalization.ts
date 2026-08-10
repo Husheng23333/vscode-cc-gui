@@ -141,16 +141,49 @@ export function normalizeToolInput(name: string | undefined, input: ToolInput | 
     };
   }
 
-  if (normalizedName === 'write_file') {
+  if (normalizedName === 'write_file' || normalizedName === 'write' || normalizedName === 'create_file') {
     return {
       ...inputRecord,
       file_path:
         (typeof inputRecord.file_path === 'string' ? inputRecord.file_path : undefined) ??
         (typeof inputRecord.filePath === 'string' ? inputRecord.filePath : undefined) ??
         (typeof inputRecord.path === 'string' ? inputRecord.path : undefined),
+      content:
+        (typeof inputRecord.content === 'string' ? inputRecord.content : undefined) ??
+        (typeof inputRecord.contents === 'string' ? inputRecord.contents : undefined) ??
+        (typeof inputRecord.file_text === 'string' ? inputRecord.file_text : undefined) ??
+        (typeof inputRecord.fileText === 'string' ? inputRecord.fileText : undefined) ??
+        (typeof inputRecord.new_string === 'string' ? inputRecord.new_string : undefined) ??
+        (typeof inputRecord.newString === 'string' ? inputRecord.newString : undefined) ??
+        (typeof inputRecord.text === 'string' ? inputRecord.text : undefined),
       new_string:
         (typeof inputRecord.new_string === 'string' ? inputRecord.new_string : undefined) ??
         (typeof inputRecord.newString === 'string' ? inputRecord.newString : undefined) ??
+        (typeof inputRecord.content === 'string' ? inputRecord.content : undefined) ??
+        (typeof inputRecord.contents === 'string' ? inputRecord.contents : undefined) ??
+        (typeof inputRecord.file_text === 'string' ? inputRecord.file_text : undefined) ??
+        (typeof inputRecord.fileText === 'string' ? inputRecord.fileText : undefined) ??
+        (typeof inputRecord.text === 'string' ? inputRecord.text : undefined),
+    };
+  }
+
+  if (normalizedName === 'edit' || normalizedName === 'replace_string' || normalizedName === 'write_to_file') {
+    return {
+      ...inputRecord,
+      file_path:
+        (typeof inputRecord.file_path === 'string' ? inputRecord.file_path : undefined) ??
+        (typeof inputRecord.filePath === 'string' ? inputRecord.filePath : undefined) ??
+        (typeof inputRecord.path === 'string' ? inputRecord.path : undefined),
+      old_string:
+        (typeof inputRecord.old_string === 'string' ? inputRecord.old_string : undefined) ??
+        (typeof inputRecord.oldString === 'string' ? inputRecord.oldString : undefined) ??
+        (typeof inputRecord.old_text === 'string' ? inputRecord.old_text : undefined) ??
+        (typeof inputRecord.oldText === 'string' ? inputRecord.oldText : undefined),
+      new_string:
+        (typeof inputRecord.new_string === 'string' ? inputRecord.new_string : undefined) ??
+        (typeof inputRecord.newString === 'string' ? inputRecord.newString : undefined) ??
+        (typeof inputRecord.new_text === 'string' ? inputRecord.new_text : undefined) ??
+        (typeof inputRecord.newText === 'string' ? inputRecord.newText : undefined) ??
         (typeof inputRecord.content === 'string' ? inputRecord.content : undefined),
     };
   }

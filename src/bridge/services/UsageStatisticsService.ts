@@ -106,12 +106,32 @@ export class UsageStatisticsService {
     return { cost };
   }
 
-  postUsageUpdate(webview: vscode.Webview, inputTokens: number): void {
+  postUsageUpdate(
+    webview: vscode.Webview,
+    inputTokens: number,
+    options?: { maxTokens?: number; model?: string; provider?: string },
+  ): void {
+    const maxTokens = this.resolveMaxTokens(options);
     webview.postMessage({ type: 'usage_update', content: JSON.stringify({
-      percentage: Math.min(100, (inputTokens / 200000) * 100),
+      percentage: Math.min(100, maxTokens > 0 ? (inputTokens / maxTokens) * 100 : 0),
       usedTokens: inputTokens,
-      maxTokens: 200000,
+      maxTokens,
     })});
+  }
+
+  private resolveMaxTokens(options?: { maxTokens?: number; model?: string; provider?: string }): number {
+    if (typeof options?.maxTokens === 'number' && options.maxTokens > 0) {
+      return options.maxTokens;
+    }
+    try {
+      // Lazy require to avoid circular imports at module load time.
+      const { getCustomContextWindow } = require('./customContextWindowStore') as typeof import('./customContextWindowStore');
+      const provider = options?.provider || 'codex';
+      const model = options?.model || '';
+      const custom = model ? getCustomContextWindow(provider, model) : undefined;
+      if (typeof custom === 'number' && custom > 0) return custom;
+    } catch { /* ignore */ }
+    return 200000;
   }
 
   postStatistics(webview: vscode.Webview): void {

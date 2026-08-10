@@ -19,6 +19,9 @@ export class DiffHandler implements BridgeHandler {
         await this.diffService.showDiff(content);
         return true;
       case 'show_editable_diff':
+        // Edit panel "diff" button: compare before/after AI change (not Apply/Reject dialog).
+        await this.diffService.showFileChangeDiff(content);
+        return true;
       case 'show_interactive_diff':
         await this.diffService.showInteractiveDiff(content, webview);
         return true;

@@ -2,7 +2,7 @@
   "name": "vscode-cc-gui",
   "displayName": "CC GUI（Claude and Codex）",
   "description": "Independent open-source GUI for Claude Code CLI and Codex (unofficial)",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "MossX",
   "author": {
     "name": "MossX"
@@ -175,7 +175,7 @@
         },
         {
           "command": "ccGui.openDevTools",
-          "when": "view == ccGui.mainView || view == ccGui.secondaryView",
+          "when": "ccGui.enableDebugLog && (view == ccGui.mainView || view == ccGui.secondaryView)",
           "group": "navigation"
         }
       ]
@@ -206,6 +206,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically sync active editor file context to Claude"
+        },
+        "ccGui.enableDebugLog": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable CC GUI debug logging. Logs appear in View → Output → CC GUI. Also available under CC GUI Settings → Basic → Behavior. Off by default."
         }
       }
     }

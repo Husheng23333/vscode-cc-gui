@@ -219,6 +219,17 @@
   cursor: not-allowed !important;
 }
 
+.provider-beta-badge {
+  margin-left: auto;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--vscode-badge-foreground, #fff);
+  background: var(--vscode-badge-background, #0078d4);
+  opacity: 0.9;
+}
+
 .selector-divider {
   height: 1px;
   background: var(--dropdown-border);

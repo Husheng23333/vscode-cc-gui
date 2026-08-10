@@ -32,13 +32,15 @@ function tagLines(captured, tag) {
   return captured.filter((line) => line.startsWith(tag));
 }
 
-function makeConfig() {
+function makeConfig(overrides = {}) {
   return {
     cwd: undefined,
     threadId: null,
     threadOptions: {},
     normalizedPermissionMode: 'default',
     turnAbortController: new AbortController(),
+    streamingEnabled: true,
+    ...overrides,
   };
 }
 
@@ -63,7 +65,7 @@ test('Codex item.updated agent_message emits incremental content deltas before c
         },
       ]),
       state,
-      makeConfig(),
+      makeConfig({ streamingEnabled: true }),
     );
   });
 
@@ -81,6 +83,57 @@ test('Codex item.updated agent_message emits incremental content deltas before c
       content: [{ type: 'text', text: 'Hello' }],
     },
   });
+});
+
+test('Codex streamingEnabled=false suppresses CONTENT_DELTA but still emits final MESSAGE', async () => {
+  const emittedMessages = [];
+  const state = createInitialEventState((message) => emittedMessages.push(message));
+
+  const captured = await captureStdout(async () => {
+    await processCodexEventStream(
+      eventsFrom([
+        {
+          type: 'item.updated',
+          item: { id: 'msg-1', type: 'agent_message', text: 'Hel' },
+        },
+        {
+          type: 'item.updated',
+          item: { id: 'msg-1', type: 'agent_message', text: 'Hello' },
+        },
+        {
+          type: 'item.completed',
+          item: { id: 'msg-1', type: 'agent_message', text: 'Hello' },
+        },
+      ]),
+      state,
+      makeConfig({ streamingEnabled: false }),
+    );
+  });
+
+  const deltaLines = tagLines(captured, '[CONTENT_DELTA]');
+  assert.equal(deltaLines.length, 0, 'non-streaming must not emit CONTENT_DELTA');
+  assert.equal(state.assistantText, 'Hello');
+  assert.equal(emittedMessages.length, 1);
+  assert.equal(emittedMessages[0]?.message?.content?.[0]?.text, 'Hello');
+});
+
+test('Codex item.completed-only still emits CONTENT_DELTA when streaming is on', async () => {
+  const state = createInitialEventState(() => {});
+  const captured = await captureStdout(async () => {
+    await processCodexEventStream(
+      eventsFrom([
+        {
+          type: 'item.completed',
+          item: { id: 'msg-final', type: 'agent_message', text: 'done' },
+        },
+      ]),
+      state,
+      makeConfig({ streamingEnabled: true }),
+    );
+  });
+  const deltaLines = tagLines(captured, '[CONTENT_DELTA]');
+  assert.equal(deltaLines.length, 1);
+  assert.match(deltaLines[0], /"done"/);
 });
 
 test('Codex event_msg user_message emits sanitized user content for history cache', async () => {

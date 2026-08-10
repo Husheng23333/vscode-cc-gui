@@ -35,7 +35,8 @@ export async function handleCodexCommand(command, args, stdinData) {
           openedFiles,
           fileTags,
           agentPrompt,
-          attachments  // Image attachments (local_image format)
+          attachments,  // Image attachments (local_image format)
+          streaming,    // UI streaming toggle (same field as Claude)
         } = stdinData;
         await codexSendMessage(
           message,
@@ -51,7 +52,8 @@ export async function handleCodexCommand(command, args, stdinData) {
           openedFiles || null,
           fileTags || null,
           agentPrompt || null,
-          codexSandboxMode || sandboxMode || null
+          codexSandboxMode || sandboxMode || null,
+          streaming
         );
       } else {
         await codexSendMessage(args[0], args[1], args[2], args[3], args[4]);

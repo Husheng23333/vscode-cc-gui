@@ -26,7 +26,8 @@
     "minutes": "m",
     "optional": "Optional",
     "collapse": "Collapse",
-    "expand": "Expand"
+    "expand": "Expand",
+    "gotIt": "Got it"
   },
   "chat": {
     "sendMessage": "Send message to {{provider}}",
@@ -91,7 +92,7 @@
     "attachmentFile": "[Attachment: {{fileName}}]",
     "unknownFile": "Unknown file",
     "attachmentsUploaded": "[Attachments Uploaded]",
-    "streamingConnected": "{{provider}} connected, understanding your question",
+    "streamingConnected": "AI connected, understanding your question",
     "showEarlierMessages": "Show {{count}} earlier messages",
     "totalDuration": "This reply took",
     "tokenUsage": "{{input}} in / {{output}} out",
@@ -262,6 +263,12 @@
         "disabled": "Disabled",
         "hint": "When enabled, shows current model and mode info in the IDE status bar (e.g. GUI [Opus] {Auto}). When disabled, the widget is hidden."
       },
+      "debugLog": {
+        "label": "Debug Log",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "hint": "When enabled, writes debug logs to the Output panel channel “CC GUI”. Off by default."
+      },
       "taskCompletionNotification": {
         "label": "Task Completion Notification",
         "enabled": "Enabled",
@@ -278,7 +285,7 @@
       "permissionDialogTimeout": {
         "label": "Permission & Question Dialog Timeout",
         "unit": "seconds",
-        "hint": "Set the timeout for Claude question dialogs and permission request dialogs (30~3600 seconds). After timeout, the dialog will close automatically and Claude will continue."
+        "hint": "Set the timeout for AI question dialogs and permission request dialogs (30~3600 seconds). After timeout, the dialog will close automatically and AI will continue."
       },
       "chatBgColor": {
         "label": "Chat Background",
@@ -341,7 +348,13 @@
         "label": "Ask User Question Notification",
         "enabled": "Enabled",
         "disabled": "Disabled",
-        "hint": "When enabled, shows a system notification when Claude asks you a question, so you won't miss it. When disabled, no notification appears."
+        "hint": "When enabled, shows a system notification when AI asks you a question, so you won't miss it. When disabled, no notification appears."
+      },
+      "chatBarColor": {
+        "label": "Chat bar color",
+        "custom": "Custom",
+        "reset": "Reset",
+        "hint": "Applies to the chat header and status bar. Leave empty to follow the theme default."
       }
     },
     "providers": "Provider Management",
@@ -352,7 +365,8 @@
     },
     "providerTab": {
       "claude": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "cli": "CLI"
     },
     "pluginModels": {
       "title": "Custom Models",
@@ -378,7 +392,14 @@
       "configuredSectionDesc": "Models from the active Claude provider/settings.json are already in the selector. Only pricing can be changed here.",
       "configuredEditHint": "This model is managed by the active Claude provider/settings.json. Only pricing can be changed here.",
       "customSectionTitle": "Custom models",
-      "editPricing": "Edit pricing"
+      "editPricing": "Edit pricing",
+      "contextWindow": {
+        "label": "Context window (K tokens)",
+        "placeholder": "e.g. 200 for 200K",
+        "hint": "Optional. Enter thousands of tokens (200 = 200,000). Codex only.",
+        "invalidValue": "Maximum context must be a positive integer in K units",
+        "summary": "Context: {{value}} tokens"
+      }
     },
     "dependencies": "SDK Dependencies",
     "dependenciesDesc": "Manage AI SDK dependency installations and updates",
@@ -946,7 +967,57 @@
         "confirmExport": "Confirm Export"
       }
     },
-    "configure": "Configure"
+    "configure": "Configure",
+    "cli": {
+      "hint": "These CLIs must be installed and configured in your system terminal. The plugin only detects installation status and version — it will never install them for you. Confirm each CLI works in the terminal before coming back here to use it.",
+      "refresh": "Re-check",
+      "retry": "Retry",
+      "loading": "Checking CLI installation status…",
+      "loadFailed": "Detection failed. Please try again.",
+      "status": {
+        "installed": "Installed",
+        "notInstalled": "Not installed"
+      },
+      "viewInstallGuide": "Install guide",
+      "howToInstall": "View install guide",
+      "copy": "Copy",
+      "copied": "Copied to clipboard",
+      "copyFailed": "Failed to copy",
+      "tools": {
+        "grok": {
+          "name": "Grok CLI",
+          "description": "xAI Grok terminal coding agent"
+        },
+        "kimi": {
+          "name": "Kimi CLI",
+          "description": "Moonshot Kimi Code CLI"
+        },
+        "opencode": {
+          "name": "OpenCode",
+          "description": "Open-source terminal AI coding agent"
+        },
+        "pi": {
+          "name": "PI CLI",
+          "description": "Minimal terminal coding agent with multi-provider model support"
+        }
+      },
+      "installDialog": {
+        "title": "Install {{name}}",
+        "lead": "Install {{name}} in your system terminal first and make sure `{{binary}}` is available, then come back and click Re-check. This plugin will not run the installer for you.",
+        "stepOpenTerminal": "Open your system terminal (Terminal / iTerm / PowerShell, etc.)",
+        "stepRunCommand": "Copy and run the install command below",
+        "stepVerify": "After install, run `{{binary}} --version` to verify",
+        "stepReturn": "Return here and click Re-check",
+        "primaryCommand": "Recommended install command (macOS / Linux)",
+        "windowsCommand": "Windows (PowerShell)",
+        "altCommand": "Alternative install method",
+        "openDocs": "Open official docs"
+      },
+      "listTitle": "Local CLI tools",
+      "summary": "{{installed}} / {{total}} installed",
+      "moreComingSoon": "More coming soon",
+      "copyPath": "Copy path"
+    }
   },
   "history": {
     "title": "History",
@@ -1048,7 +1119,7 @@
     "timeoutWarning": "Please answer soon, dialog will close in {{seconds}} seconds"
   },
   "askUserQuestion": {
-    "title": "Claude has some questions for you",
+    "title": "AI has some questions for you",
     "progress": "Question {{current}} / {{total}}",
     "multiSelectHint": "You can select multiple options",
     "cancel": "Cancel",
@@ -1065,10 +1136,10 @@
   },
   "planApproval": {
     "title": "Plan Ready for Approval",
-    "subtitle": "Claude has finished planning and is ready to execute.",
+    "subtitle": "AI has finished planning and is ready to execute.",
     "requestedPermissions": "Requested Permissions",
     "executionMode": "Execution Mode",
-    "executionModeDescription": "Select how Claude should execute the plan:",
+    "executionModeDescription": "Select how AI should execute the plan:",
     "approve": "Approve & Execute",
     "reject": "Reject",
     "toApprove": "to approve",
@@ -1292,7 +1363,7 @@
         "title": "Key Features",
         "toolExtension": {
           "label": "Tool Extension",
-          "description": "Add capabilities like file system and network access to Claude"
+          "description": "Add capabilities like file system and network access to AI"
         },
         "dataConnection": {
           "label": "Data Connection",
@@ -1443,13 +1514,13 @@
     "noSubagents": "No subagents running",
     "noFileChanges": "No file changes",
     "blockedBy": "Blocked by: {{ids}}",
-    "showDiff": "Show Diff",
+    "showDiff": "Show diff (before AI ↔ current)",
     "expand": "Expand status panel",
     "collapse": "Collapse status panel",
-    "undoChanges": "Undo Changes",
+    "undoChanges": "Undo AI changes to this file",
     "undoConfirmTitle": "Undo File Changes",
     "undoWillDelete": "This file was newly created. Undo will delete this file.",
-    "undoWillRestore": "This will restore the file to its state before Claude's modifications.",
+    "undoWillRestore": "This will restore the file to its state before AI's modifications.",
     "undoCannotUndo": "This action cannot be undone.",
     "confirmUndo": "Confirm Undo",
     "undoSuccess": "Undone changes to {{fileName}}",
@@ -1510,7 +1581,7 @@
       "title": "What are Skills?",
       "overview": {
         "title": "Overview",
-        "description": "Skills are dynamically loaded instruction sets, scripts, and resource folders that enhance Claude's performance for specific tasks. Skills teach Claude how to complete particular tasks in a repeatable way, such as creating documents using company brand guidelines, analyzing data following organization-specific workflows, or automating personal tasks."
+        "description": "Skills are dynamically loaded instruction sets, scripts, and resource folders that enhance AI's performance for specific tasks. Skills teach AI how to complete particular tasks in a repeatable way, such as creating documents using company brand guidelines, analyzing data following organization-specific workflows, or automating personal tasks."
       },
       "structure": {
         "title": "Skill Structure",
@@ -1543,7 +1614,7 @@
         "title": "Usage Tips",
         "item1": "Ensure Skill directory contains a valid SKILL.md file",
         "item2": "Skill names must use lowercase letters, numbers, and hyphens (hyphen-case)",
-        "item3": "Skills automatically take effect in Claude sessions after loading",
+        "item3": "Skills automatically take effect in AI sessions after loading",
         "item4": "Control individual Skill status with enable/disable toggles",
         "item5": "Mention Skill name in chat to use it, e.g., \"Use the pdf skill to extract form fields\""
       },
@@ -1724,7 +1795,14 @@
     },
     "searchPlaceholder": "Search models",
     "noModelsFound": "No models found",
-    "hiddenModelCount": "+ {{count}} more models. Type to search."
+    "hiddenModelCount": "+ {{count}} more models. Type to search.",
+    "grok": {
+      "grok45": {
+        "label": "Grok 4.5",
+        "description": "xAI Grok 4.5"
+      }
+    },
+    "cliLoadFailed": "Failed to load models. Click to retry."
   },
   "modes": {
     "default": {
@@ -1782,6 +1860,20 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "grok": {
+      "label": "Grok CLI"
+    },
+    "kimi": {
+      "label": "Kimi CLI"
+    },
+    "pi": {
+      "label": "PI CLI"
+    },
+    "beta": {
+      "badge": "Beta",
+      "title": "Beta Feature",
+      "message": "This feature is still in Beta. If you encounter any bugs, please report them to the author promptly."
     }
   },
   "promptEnhancer": {

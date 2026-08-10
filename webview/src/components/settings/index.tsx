@@ -102,6 +102,8 @@ const SettingsView = ({
     chatBgColor,
     setChatBgColor,
     userMsgColor,
+    chatBarColor,
+    setChatBarColor,
     setUserMsgColor,
     diffTheme,
     setDiffTheme,
@@ -193,6 +195,9 @@ const SettingsView = ({
     statusBarWidgetEnabled,
     setStatusBarWidgetEnabled,
     handleStatusBarWidgetEnabledChange,
+    enableDebugLog,
+    setEnableDebugLog,
+    handleEnableDebugLogChange,
     askUserQuestionNotificationEnabled,
     setAskUserQuestionNotificationEnabled,
     handleAskUserQuestionNotificationEnabledChange,
@@ -351,6 +356,7 @@ const SettingsView = ({
     setCommitGenerationEnabled,
     setAiTitleGenerationEnabled,
     setStatusBarWidgetEnabled,
+    setEnableDebugLog,
     setAskUserQuestionNotificationEnabled,
   });
 
@@ -499,6 +505,8 @@ const SettingsView = ({
               onAutoOpenFileEnabledChange={handleAutoOpenFileEnabledChange}
               chatBgColor={chatBgColor}
               onChatBgColorChange={setChatBgColor}
+              chatBarColor={chatBarColor}
+              onChatBarColorChange={setChatBarColor}
               userMsgColor={userMsgColor}
               onUserMsgColorChange={setUserMsgColor}
               diffTheme={diffTheme}
@@ -515,6 +523,8 @@ const SettingsView = ({
                 handleStatusBarWidgetEnabledChange(enabled);
                 addToast(t('toast.restartRequired'), 'warning');
               }}
+              enableDebugLog={enableDebugLog}
+              onEnableDebugLogChange={handleEnableDebugLogChange}
               aiTitleGenerationEnabled={aiTitleGenerationEnabled}
               onAiTitleGenerationEnabledChange={handleAiTitleGenerationEnabledChange}
               newSessionConfirmEnabled={!skipNewSessionConfirm}

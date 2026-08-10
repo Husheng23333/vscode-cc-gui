@@ -64,6 +64,8 @@ export class SettingsHandler implements BridgeHandler {
     'set_commit_generation_enabled',
     'get_status_bar_widget_enabled',
     'set_status_bar_widget_enabled',
+    'get_enable_debug_log',
+    'set_enable_debug_log',
     'get_ai_title_generation_enabled',
     'set_ai_title_generation_enabled',
     'get_ask_user_question_notification_enabled',
@@ -80,7 +82,14 @@ export class SettingsHandler implements BridgeHandler {
     switch (event) {
       case 'set_provider': {
         const provider = content.trim();
-        if (provider === 'claude' || provider === 'codex') {
+        if (
+          provider === 'claude' ||
+          provider === 'codex' ||
+          provider === 'grok' ||
+          provider === 'kimi' ||
+          provider === 'opencode' ||
+          provider === 'pi'
+        ) {
           this.context.callbacks.setActiveProvider(provider);
         }
         return true;
@@ -328,6 +337,19 @@ export class SettingsHandler implements BridgeHandler {
         this.context.callbacks.updateStatusBarWidgetEnabled(this.store.getStatusBarWidgetEnabled());
         callWindowFunction(webview, 'updateStatusBarWidgetEnabled', {
           statusBarWidgetEnabled: this.store.getStatusBarWidgetEnabled(),
+        });
+        return true;
+
+      case 'get_enable_debug_log':
+        callWindowFunction(webview, 'updateEnableDebugLog', {
+          enableDebugLog: this.store.getEnableDebugLog(),
+        });
+        return true;
+      case 'set_enable_debug_log':
+        await this.store.setEnableDebugLog(content);
+        // BridgeServer also reacts via onDidChangeConfiguration → _applyDebugLogSetting.
+        callWindowFunction(webview, 'updateEnableDebugLog', {
+          enableDebugLog: this.store.getEnableDebugLog(),
         });
         return true;
 

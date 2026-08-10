@@ -117,7 +117,13 @@ export function ChatInputBoxHeader({
             {sdkStatusLoading
               ? t('chat.sdkStatusLoading')
               : t('chat.sdkNotInstalled', {
-                  provider: currentProvider === 'codex' ? 'Codex' : 'Claude Code',
+                  provider:
+                    currentProvider === 'codex' ? 'Codex'
+                      : currentProvider === 'grok' ? 'Grok CLI'
+                        : currentProvider === 'kimi' ? 'Kimi CLI'
+                          : currentProvider === 'opencode' ? 'OpenCode'
+                            : currentProvider === 'pi' ? 'PI CLI'
+                              : 'Claude Code',
                 })}
           </span>
           {!sdkStatusLoading && (

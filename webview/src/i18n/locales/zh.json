@@ -26,7 +26,8 @@
     "minutes": "分",
     "optional": "可选",
     "collapse": "收起",
-    "expand": "展开"
+    "expand": "展开",
+    "gotIt": "知道了"
   },
   "chat": {
     "sendMessage": "给 {{provider}} 发送消息",
@@ -91,7 +92,7 @@
     "attachmentFile": "[附件: {{fileName}}]",
     "unknownFile": "未知文件",
     "attachmentsUploaded": "[已上传附件]",
-    "streamingConnected": "{{provider}} 已成功连接，正在理解问题",
+    "streamingConnected": "AI 已成功连接，正在理解问题",
     "showEarlierMessages": "显示之前的 {{count}} 条消息",
     "totalDuration": "本次耗时",
     "tokenUsage": "输入 {{input}} / 输出 {{output}}",
@@ -262,6 +263,12 @@
         "disabled": "已关闭",
         "hint": "开启后，在 IDE 右下角状态栏显示当前模型和模式信息（如 GUI [Opus] {自动}）。关闭后隐藏。"
       },
+      "debugLog": {
+        "label": "调试日志",
+        "enabled": "已开启",
+        "disabled": "已关闭",
+        "hint": "开启后，在「输出」面板的「CC GUI」通道输出调试日志，便于排查问题。默认关闭。"
+      },
       "taskCompletionNotification": {
         "label": "任务完成通知",
         "enabled": "已开启",
@@ -278,7 +285,7 @@
       "permissionDialogTimeout": {
         "label": "权限与提问对话框超时时间",
         "unit": "秒",
-        "hint": "设置 Claude 提问对话框和权限请求对话框的超时时间（30~3600 秒）。超时后对话框将自动关闭，Claude 会继续执行。"
+        "hint": "设置 AI 提问对话框和权限请求对话框的超时时间（30~3600 秒）。超时后对话框将自动关闭，AI 会继续执行。"
       },
       "chatBgColor": {
         "label": "聊天背景色",
@@ -341,7 +348,13 @@
         "label": "询问用户提醒通知",
         "enabled": "已开启",
         "disabled": "已关闭",
-        "hint": "开启后，当 Claude 向你提问时显示系统通知提醒，避免错过。关闭后不显示通知。"
+        "hint": "开启后，当 AI 向你提问时显示系统通知提醒，避免错过。关闭后不显示通知。"
+      },
+      "chatBarColor": {
+        "label": "聊天栏颜色",
+        "custom": "自定义",
+        "reset": "重置",
+        "hint": "作用于聊天顶部栏与状态栏。留空则跟随主题默认色。"
       }
     },
     "providers": "供应商管理",
@@ -352,7 +365,8 @@
     },
     "providerTab": {
       "claude": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "cli": "CLI"
     },
     "pluginModels": {
       "title": "自定义模型",
@@ -378,7 +392,14 @@
       "configuredSectionDesc": "这些模型来自当前 Claude 供应商或 settings.json，已经会显示在模型选择器中。这里仅可修改价格。",
       "configuredEditHint": "此模型由当前 Claude 供应商或 settings.json 管理，只能在这里修改价格。",
       "customSectionTitle": "自定义模型",
-      "editPricing": "编辑价格"
+      "editPricing": "编辑价格",
+      "contextWindow": {
+        "label": "上下文窗口（K tokens）",
+        "placeholder": "例如 200 表示 200K",
+        "hint": "可选。以千 tokens 为单位（200 = 200,000）。仅 Codex。",
+        "invalidValue": "上下文窗口必须是正整数（单位 K）",
+        "summary": "上下文：{{value}} tokens"
+      }
     },
     "dependencies": "SDK 依赖",
     "dependenciesDesc": "管理 AI SDK 依赖包的安装和更新",
@@ -951,7 +972,57 @@
         "confirmExport": "确认导出"
       }
     },
-    "configure": "配置"
+    "configure": "配置",
+    "cli": {
+      "hint": "以下 CLI 需在系统终端自行安装并完成配置。插件只负责检测是否已安装及版本号，不会替你自动安装。请先在终端确认可正常使用，再回到此处使用。",
+      "refresh": "重新检测",
+      "retry": "重试",
+      "loading": "正在检测 CLI 安装状态…",
+      "loadFailed": "检测失败，请重试",
+      "status": {
+        "installed": "已安装",
+        "notInstalled": "未安装"
+      },
+      "viewInstallGuide": "查看安装方式",
+      "howToInstall": "查看安装说明",
+      "copy": "复制",
+      "copied": "已复制到剪贴板",
+      "copyFailed": "复制失败",
+      "tools": {
+        "grok": {
+          "name": "Grok CLI",
+          "description": "xAI Grok 终端编码助手"
+        },
+        "kimi": {
+          "name": "Kimi CLI",
+          "description": "月之暗面 Kimi Code CLI"
+        },
+        "opencode": {
+          "name": "OpenCode",
+          "description": "开源终端 AI 编码代理"
+        },
+        "pi": {
+          "name": "PI CLI",
+          "description": "极简终端编码代理，支持多提供商模型"
+        }
+      },
+      "installDialog": {
+        "title": "安装 {{name}}",
+        "lead": "请先在系统终端中安装 {{name}}，确保命令 `{{binary}}` 可用后，再回到这里点击「重新检测」。本插件不会替你执行安装。",
+        "stepOpenTerminal": "打开系统终端（Terminal / iTerm / PowerShell 等）",
+        "stepRunCommand": "复制并运行下方安装命令",
+        "stepVerify": "安装完成后执行 `{{binary}} --version` 确认成功",
+        "stepReturn": "回到本页点击「重新检测」",
+        "primaryCommand": "推荐安装命令（macOS / Linux）",
+        "windowsCommand": "Windows（PowerShell）",
+        "altCommand": "备选安装方式",
+        "openDocs": "打开官方文档"
+      },
+      "listTitle": "本地 CLI 工具",
+      "summary": "{{installed}} / {{total}} 已安装",
+      "moreComingSoon": "即将支持更多",
+      "copyPath": "复制路径"
+    }
   },
   "history": {
     "title": "历史会话",
@@ -1053,7 +1124,7 @@
     "timeoutWarning": "请尽快回答，对话框将在 {{seconds}} 秒后自动关闭"
   },
   "askUserQuestion": {
-    "title": "Claude 有一些问题想问你",
+    "title": "AI 有一些问题想问你",
     "progress": "问题 {{current}} / {{total}}",
     "multiSelectHint": "可以选择多个选项",
     "cancel": "取消",
@@ -1070,10 +1141,10 @@
   },
   "planApproval": {
     "title": "计划已准备就绪",
-    "subtitle": "Claude 已完成规划，准备执行。",
+    "subtitle": "AI 已完成规划，准备执行。",
     "requestedPermissions": "请求的权限",
     "executionMode": "执行模式",
-    "executionModeDescription": "选择 Claude 执行计划的方式：",
+    "executionModeDescription": "选择 AI 执行计划的方式：",
     "approve": "批准并执行",
     "reject": "拒绝",
     "toApprove": "批准",
@@ -1297,7 +1368,7 @@
         "title": "主要特性",
         "toolExtension": {
           "label": "工具扩展",
-          "description": "为 Claude 添加文件系统、网络访问等能力"
+          "description": "为 AI 添加文件系统、网络访问等能力"
         },
         "dataConnection": {
           "label": "数据连接",
@@ -1448,13 +1519,13 @@
     "noSubagents": "暂无子代理运行",
     "noFileChanges": "暂无文件改动",
     "blockedBy": "被阻塞: {{ids}}",
-    "showDiff": "查看差异",
+    "showDiff": "查看差异（改动前 ↔ 当前）",
     "expand": "展开状态面板",
     "collapse": "收起状态面板",
-    "undoChanges": "撤销更改",
+    "undoChanges": "撤销此文件的 AI 改动",
     "undoConfirmTitle": "撤销文件更改",
     "undoWillDelete": "此文件是新创建的，撤销将删除该文件。",
-    "undoWillRestore": "将恢复此文件到 Claude 修改之前的状态。",
+    "undoWillRestore": "将恢复此文件到 AI 修改之前的状态。",
     "undoCannotUndo": "此操作无法撤销。",
     "confirmUndo": "确认撤销",
     "undoSuccess": "已撤销 {{fileName}} 的更改",
@@ -1515,7 +1586,7 @@
       "title": "什么是 Skills?",
       "overview": {
         "title": "概述",
-        "description": "Skills 是 Claude 动态加载的指令、脚本和资源文件夹，用于提升特定任务的表现。Skills 可以教会 Claude 以可重复的方式完成特定任务，比如使用公司品牌指南创建文档、按照组织特定的工作流分析数据，或自动化个人任务。"
+        "description": "Skills 是 AI 动态加载的指令、脚本和资源文件夹，用于提升特定任务的表现。Skills 可以教会 AI 以可重复的方式完成特定任务，比如使用公司品牌指南创建文档、按照组织特定的工作流分析数据，或自动化个人任务。"
       },
       "structure": {
         "title": "Skill 结构",
@@ -1548,7 +1619,7 @@
         "title": "使用提示",
         "item1": "确保 Skill 目录包含有效的 SKILL.md 文件",
         "item2": "Skill 名称必须使用小写字母、数字和连字符（hyphen-case）",
-        "item3": "Skill 加载后会在 Claude 会话中自动生效",
+        "item3": "Skill 加载后会在 AI 会话中自动生效",
         "item4": "可以通过启用/禁用开关控制单个 Skill 的状态",
         "item5": "在聊天中提及 Skill 名称即可使用，如：\"使用 pdf skill 提取表单字段\""
       },
@@ -1729,7 +1800,14 @@
     },
     "searchPlaceholder": "搜索模型",
     "noModelsFound": "未找到模型",
-    "hiddenModelCount": "+ 还有 {{count}} 个模型。输入以搜索。"
+    "hiddenModelCount": "+ 还有 {{count}} 个模型。输入以搜索。",
+    "grok": {
+      "grok45": {
+        "label": "Grok 4.5",
+        "description": "xAI Grok 4.5"
+      }
+    },
+    "cliLoadFailed": "加载模型失败，点击重试"
   },
   "modes": {
     "default": {
@@ -1787,6 +1865,20 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "grok": {
+      "label": "Grok CLI"
+    },
+    "kimi": {
+      "label": "Kimi CLI"
+    },
+    "pi": {
+      "label": "PI CLI"
+    },
+    "beta": {
+      "badge": "Beta",
+      "title": "Beta 功能",
+      "message": "此功能仍处于 Beta 阶段。如果遇到使用 Bug，请及时反馈给作者。"
     }
   },
   "promptEnhancer": {

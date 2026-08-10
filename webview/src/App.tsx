@@ -170,11 +170,22 @@ const App = () => {
   } = useModelProviderState({ addToast, t });
 
   // ── Global drag event interception ──
+  // Block accidental external file drops on the rest of the webview (which can
+  // navigate / show a no-op). Chat input (.chat-input-box) is a deliberate drop
+  // zone and must keep receiving dragover/drop events.
   useEffect(() => {
     const preventExternalDrop = (e: DragEvent) => {
       const types = Array.from(e.dataTransfer?.types ?? []);
-      const isExternalDrop = types.includes('Files') || types.includes('text/uri-list');
+      const isExternalDrop =
+        types.includes('Files') ||
+        types.includes('text/uri-list') ||
+        types.includes('application/vnd.code.uri-list') ||
+        types.includes('resourceurls');
       if (!isExternalDrop) return;
+      const target = e.target;
+      if (target instanceof Element && target.closest('.chat-input-box')) {
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
     };

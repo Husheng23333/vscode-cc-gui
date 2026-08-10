@@ -85,6 +85,7 @@ export interface UseSettingsBasicActionsReturn {
   commitGenerationEnabled: boolean;
   aiTitleGenerationEnabled: boolean;
   statusBarWidgetEnabled: boolean;
+  enableDebugLog: boolean;
   taskCompletionNotificationEnabled: boolean;
   askUserQuestionNotificationEnabled: boolean;
   detailedOutputEnabled: boolean;
@@ -119,6 +120,7 @@ export interface UseSettingsBasicActionsReturn {
   handleCommitGenerationEnabledChange: (enabled: boolean) => void;
   handleAiTitleGenerationEnabledChange: (enabled: boolean) => void;
   handleStatusBarWidgetEnabledChange: (enabled: boolean) => void;
+  handleEnableDebugLogChange: (enabled: boolean) => void;
   handleTaskCompletionNotificationEnabledChange: (enabled: boolean) => void;
   handleAskUserQuestionNotificationEnabledChange: (enabled: boolean) => void;
   handleDetailedOutputEnabledChange: (enabled: boolean) => void;
@@ -172,6 +174,7 @@ export interface UseSettingsBasicActionsReturn {
   /** @internal */ setCommitGenerationEnabled: (enabled: boolean) => void;
   /** @internal */ setAiTitleGenerationEnabled: (enabled: boolean) => void;
   /** @internal */ setStatusBarWidgetEnabled: (enabled: boolean) => void;
+  /** @internal */ setEnableDebugLog: (enabled: boolean) => void;
   /** @internal */ setTaskCompletionNotificationEnabled: (enabled: boolean) => void;
   /** @internal */ setAskUserQuestionNotificationEnabled: (enabled: boolean) => void;
   /** @internal */ setCommitAiConfig: (config: CommitAiConfig) => void;
@@ -284,6 +287,9 @@ export function useSettingsBasicActions({
 
   // Status bar widget toggle (default: true)
   const [statusBarWidgetEnabled, setStatusBarWidgetEnabled] = useState<boolean>(true);
+
+  // Debug log toggle (default: false — quiet by default)
+  const [enableDebugLog, setEnableDebugLog] = useState<boolean>(false);
 
   // Task completion notification toggle (default: false, opt-in feature)
   const [taskCompletionNotificationEnabled, setTaskCompletionNotificationEnabled] = useState<boolean>(false);
@@ -507,6 +513,13 @@ export function useSettingsBasicActions({
     setStatusBarWidgetEnabled(enabled);
     const payload = { statusBarWidgetEnabled: enabled };
     sendToJava(`set_status_bar_widget_enabled:${JSON.stringify(payload)}`);
+  }, []);
+
+  // Debug log toggle change handler
+  const handleEnableDebugLogChange = useCallback((enabled: boolean) => {
+    setEnableDebugLog(enabled);
+    const payload = { enableDebugLog: enabled };
+    sendToJava(`set_enable_debug_log:${JSON.stringify(payload)}`);
   }, []);
 
   // Task completion notification toggle change handler
@@ -736,6 +749,9 @@ export function useSettingsBasicActions({
     statusBarWidgetEnabled,
     setStatusBarWidgetEnabled,
     handleStatusBarWidgetEnabledChange,
+    enableDebugLog,
+    setEnableDebugLog,
+    handleEnableDebugLogChange,
     taskCompletionNotificationEnabled,
     setTaskCompletionNotificationEnabled,
     handleTaskCompletionNotificationEnabledChange,

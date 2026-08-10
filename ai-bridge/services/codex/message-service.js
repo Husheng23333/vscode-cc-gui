@@ -23,6 +23,7 @@ import {
   logDebug, logInfo, logWarn,
   ensureCodexSdk,
   normalizeCodexPermissionMode,
+  normalizeCodexStreamingFlag,
   normalizeRequestedSandboxMode,
   resolveSandboxModeOverride,
   resolveApprovalPolicyOverride,
@@ -34,20 +35,46 @@ import { collectAgentsInstructions } from './codex-agents-loader.js';
 import { createInitialEventState, processCodexEventStream } from './codex-event-handler.js';
 import { buildContextAppend } from '../context-append.js';
 import { runCodexCliStream } from './codex-cli-runner.js';
+import { runCodexAppServerTurn } from './codex-app-server-runner.js';
 import { resolveCodexMcpServerConfig } from './codex-mcp-admin.js';
 import { saveImageToTemp } from '../claude/attachment-service.js';
+import { getRequestId } from '../../utils/request-context.js';
 
 const CODEX_MODEL_FALLBACKS = new Map([
   ['gpt-5.3-codex', 'gpt-5.5'],
   ['gpt-5.3-codex-spark', 'gpt-5.5'],
 ]);
 
-let currentCodexAbortController = null;
+/** Active Codex turns keyed by daemon request id (multi-window concurrent runs). */
+const activeCodexAbortControllers = new Map();
 
-export async function abortCurrentCodexTurn() {
-  const controller = currentCodexAbortController;
-  if (controller && !controller.signal.aborted) {
-    controller.abort();
+/**
+ * Abort one or more Codex turns.
+ * @param {string[]|undefined|null} targetRequestIds
+ *   - `undefined` / `null`: abort all (legacy unscoped)
+ *   - `[]` or list: abort only those request ids (scoped; empty = abort none)
+ */
+export async function abortCurrentCodexTurn(targetRequestIds) {
+  const ids = Array.isArray(targetRequestIds)
+    ? targetRequestIds.map(String).filter(Boolean)
+    : [...activeCodexAbortControllers.keys()];
+  console.error(
+    '[CCG_DEBUG] abortCurrentCodexTurn',
+    JSON.stringify({
+      mode: Array.isArray(targetRequestIds) ? 'scoped' : 'all',
+      targets: ids,
+      active: [...activeCodexAbortControllers.keys()],
+    }),
+  );
+  for (const id of ids) {
+    const controller = activeCodexAbortControllers.get(id);
+    if (controller && !controller.signal.aborted) {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    }
   }
 }
 
@@ -103,6 +130,7 @@ async function normalizeCodexAttachments(attachments) {
  * @param {Array} fileTags - Explicit @file/@terminal/@service tags (optional)
  * @param {string} agentPrompt - Agent prompt (optional)
  * @param {string} requestedSandboxMode - Explicit Codex sandbox mode from settings (optional)
+ * @param {boolean|string|null} streaming - UI streaming toggle; when true emit [CONTENT_DELTA]/[THINKING_DELTA]
  */
 export async function sendMessage(
   message,
@@ -118,10 +146,15 @@ export async function sendMessage(
   openedFiles = null,
   fileTags = null,
   agentPrompt = null,
-  requestedSandboxMode = null
+  requestedSandboxMode = null,
+  streaming = null
 ) {
   let streamStarted = false;
   let streamEnded = false;
+  /** @type {AbortController|null} */
+  let turnAbortController = null;
+  /** Daemon request id for scoped multi-window abort (from AsyncLocalStorage). */
+  const requestId = getRequestId() || `codex-local-${Date.now()}`;
   const emitStreamEndOnce = () => {
     if (!streamStarted || streamEnded) {
       return;
@@ -132,6 +165,8 @@ export async function sendMessage(
 
   try {
     const normalizedPermissionMode = normalizeCodexPermissionMode(permissionMode || 'default');
+    // Default ON when omitted so historical callers keep progressive UI path.
+    const streamingEnabled = normalizeCodexStreamingFlag(streaming);
 
     const requestedModel = typeof model === 'string' ? model.trim() : '';
     const effectiveModel = CODEX_MODEL_FALLBACKS.get(requestedModel) || requestedModel;
@@ -147,6 +182,8 @@ export async function sendMessage(
       requestedModel: requestedModel || undefined,
       reasoningEffort,
       serviceTier,
+      streaming,
+      streamingEnabled,
       hasBaseUrl: !!baseUrl,
       hasApiKey: !!apiKey,
       attachmentsCount: attachments?.length || 0,
@@ -155,6 +192,10 @@ export async function sendMessage(
       hasAgentPrompt: !!agentPrompt,
       requestedSandboxMode: requestedSandboxMode || ''
     });
+    console.log('[CCG_DEBUG] Codex streaming flag:', JSON.stringify({
+      raw: streaming,
+      streamingEnabled,
+    }));
 
     console.log('[MESSAGE_START]');
 
@@ -319,24 +360,9 @@ export async function sendMessage(
     }
 
     const workingDirectory = cwd && cwd.trim() !== '' ? cwd : undefined;
-    const turnAbortController = new AbortController();
-    currentCodexAbortController = turnAbortController;
-    const events = await withCodexProxyEnvSuppressed(async () => runCodexCliStream(
-      runInput,
-      codexOptions,
-      threadOptions,
-      {
-        threadId: isResumingThread ? threadId : '',
-        signal: turnAbortController.signal,
-        cwd: workingDirectory
-      }
-    ));
-    console.log('[STREAM_START]');
-    streamStarted = true;
-
-    // ============================================================
-    // 7. Delegate Event Processing to codex-event-handler
-    // ============================================================
+    turnAbortController = new AbortController();
+    activeCodexAbortControllers.set(requestId, turnAbortController);
+    console.log('[CCG_DEBUG] Codex turn registered for abort:', JSON.stringify({ requestId }));
 
     const emitMessage = (msg) => {
       console.log('[MESSAGE]', JSON.stringify(msg));
@@ -344,24 +370,138 @@ export async function sendMessage(
 
     const state = createInitialEventState(emitMessage);
 
-    const config = {
-      cwd: workingDirectory,
-      threadId,
-      threadOptions,
-      normalizedPermissionMode,
-      turnAbortController,
-      onTurnCompleted: emitStreamEndOnce,
-      onTurnFailed: emitStreamEndOnce
-    };
+    // Prefer app-server for progressive text when streaming is on (Codex-only).
+    // On failure, fall back to exec --json so behavior stays reliable.
+    let usedTransport = 'exec-json';
+    let appServerResult = null;
 
-    await processCodexEventStream(events, state, config);
+    console.log('[STREAM_START]');
+    streamStarted = true;
+
+    if (streamingEnabled) {
+      let appServerDeltaEmitted = false;
+      try {
+        console.log('[CCG_DEBUG] Codex transport: trying app-server for progressive deltas');
+        appServerResult = await withCodexProxyEnvSuppressed(async () =>
+          runCodexAppServerTurn({
+            input: runInput,
+            threadId: isResumingThread ? threadId : '',
+            cwd: workingDirectory,
+            model: effectiveModel || undefined,
+            effort: reasoningEffort || undefined,
+            approvalPolicy: threadOptions.approvalPolicy || 'never',
+            sandboxMode: threadOptions.sandboxMode || undefined,
+            cliEnv: codexOptions.env,
+            signal: turnAbortController.signal,
+            onThreadId: (tid) => {
+              state.currentThreadId = tid;
+              console.log('[THREAD_ID]', tid);
+            },
+            onContentDelta: (delta) => {
+              if (!delta) return;
+              appServerDeltaEmitted = true;
+              state.assistantText += delta;
+              state.finalResponse = state.assistantText;
+              process.stdout.write(`[CONTENT_DELTA] ${JSON.stringify(delta)}\n`);
+            },
+            onThinkingDelta: (delta) => {
+              if (!delta) return;
+              state.reasoningObserved = true;
+              process.stdout.write(`[THINKING_DELTA] ${JSON.stringify(delta)}\n`);
+            },
+            onMessage: (msg) => {
+              emitMessage(msg);
+            },
+            onUsage: (usage) => {
+              const totalInput = usage.input_tokens || usage.inputTokens || 0;
+              const cached = usage.cached_input_tokens || usage.cachedInputTokens || 0;
+              const claudeUsage = {
+                input_tokens: Math.max(0, totalInput - cached),
+                output_tokens: usage.output_tokens || usage.outputTokens || 0,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: cached,
+              };
+              emitMessage({
+                type: 'result',
+                subtype: 'usage',
+                is_error: false,
+                usage: claudeUsage,
+                session_id: state.currentThreadId,
+              });
+            },
+          })
+        );
+        usedTransport = 'app-server';
+        if (appServerResult?.threadId) {
+          state.currentThreadId = appServerResult.threadId;
+        }
+        if (appServerResult?.finalText) {
+          state.finalResponse = appServerResult.finalText;
+          if (!state.assistantText) {
+            state.assistantText = appServerResult.finalText;
+          }
+        }
+        console.log('[CCG_DEBUG] Codex app-server turn ok:', JSON.stringify({
+          deltaCount: appServerResult?.deltaCount ?? 0,
+          textLen: (appServerResult?.finalText || '').length,
+          threadId: state.currentThreadId || '',
+        }));
+      } catch (appServerError) {
+        if (appServerDeltaEmitted) {
+          // Already streamed partial text to the UI — do not restart on exec path.
+          throw appServerError;
+        }
+        console.warn(
+          '[CCG_DEBUG] Codex app-server failed before first delta, falling back to exec-json:',
+          appServerError?.message || appServerError,
+        );
+        usedTransport = 'exec-json-fallback';
+        state.assistantText = '';
+        state.finalResponse = '';
+        state.assistantTextCache.clear();
+      }
+    }
+
+    if (usedTransport !== 'app-server') {
+      // ============================================================
+      // 7. exec --json event stream (default / fallback)
+      // ============================================================
+      console.log('[CCG_DEBUG] Codex transport:', usedTransport);
+      const events = await withCodexProxyEnvSuppressed(async () =>
+        runCodexCliStream(runInput, codexOptions, threadOptions, {
+          threadId: isResumingThread ? threadId : '',
+          signal: turnAbortController.signal,
+          cwd: workingDirectory,
+        })
+      );
+
+      const config = {
+        cwd: workingDirectory,
+        threadId,
+        threadOptions,
+        normalizedPermissionMode,
+        turnAbortController,
+        streamingEnabled,
+        onTurnCompleted: emitStreamEndOnce,
+        onTurnFailed: emitStreamEndOnce,
+      };
+
+      console.log('[CCG_DEBUG] Codex event stream config:', JSON.stringify({
+        streamingEnabled: config.streamingEnabled,
+        hasThreadId: !!config.threadId,
+        transport: usedTransport,
+      }));
+
+      await processCodexEventStream(events, state, config);
+    }
+
     emitStreamEndOnce();
 
     // ============================================================
     // 8. Completion Phase
     // ============================================================
 
-    if (!state.reasoningObserved) {
+    if (!state.reasoningObserved && usedTransport !== 'app-server') {
       console.warn('[THINKING_HINT]', 'Codex did not return reasoning items. If you still cannot see the thinking process, please refer to docs/codex/docs/config.md for hide_agent_reasoning/show_raw_agent_reasoning settings, and ensure your OpenAI account has been verified.');
     }
 
@@ -378,6 +518,9 @@ export async function sendMessage(
         '- Checking the command outputs above for your answer'
       ].join('\n');
 
+      if (streamingEnabled) {
+        process.stdout.write(`[CONTENT_DELTA] ${JSON.stringify(noResponseMsg)}\n`);
+      }
       emitMessage({
         type: 'assistant',
         message: {
@@ -386,13 +529,15 @@ export async function sendMessage(
         }
       });
       state.finalResponse = noResponseMsg;
+      state.assistantText = noResponseMsg;
     }
 
     console.log('[MESSAGE_END]');
     console.log(JSON.stringify({
       success: true,
       threadId: state.currentThreadId,
-      result: state.finalResponse
+      result: state.finalResponse,
+      transport: usedTransport,
     }));
 
   } catch (error) {
@@ -404,7 +549,7 @@ export async function sendMessage(
     console.error('[SEND_ERROR]', JSON.stringify(errorPayload));
     console.log(JSON.stringify(errorPayload));
   } finally {
-    currentCodexAbortController = null;
+    activeCodexAbortControllers.delete(requestId);
   }
 }
 

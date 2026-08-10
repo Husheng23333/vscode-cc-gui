@@ -501,8 +501,8 @@
   transition: all 0.2s ease;
 
   &.active {
-    border-color: #0078d4;
-    box-shadow: 0 0 0 1px rgba(0, 120, 212, 0.1);
+    border-color: var(--button-primary-background, #0078d4);
+    box-shadow: 0 0 0 1px rgba(0, 120, 212, 0.12);
   }
 
   .drag-sort-card();
@@ -546,28 +546,31 @@
   flex-shrink: 0;
 }
 
+/*
+ * Align with Claude dialog actions (btnPrimary / btnCancel):
+ * - Primary: solid blue fill + white text
+ * - Secondary / revoke: neutral outline, muted text
+ */
 .useButton {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
-  border-radius: 20px;
+  padding: 6px 14px;
+  border-radius: 6px;
   border: none;
   background: var(--button-primary-background, #0078d4);
   color: #ffffff;
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
-  transition: all 0.2s;
+  transition: background 0.15s ease;
 
   &:hover {
     background: var(--button-primary-hover-background, #0063b1);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   }
-  
+
   &:active {
-    transform: translateY(0);
+    opacity: 0.92;
   }
 }
 
@@ -575,23 +578,24 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
-  border-radius: 20px;
-  border: 1px solid color-mix(in srgb, #c2410c 45%, transparent);
-  background: color-mix(in srgb, #c2410c 14%, transparent);
-  color: #f97316;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border-primary);
+  background: transparent;
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
-  transition: all 0.2s;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 
   &:hover {
-    background: color-mix(in srgb, #c2410c 22%, transparent);
-    transform: translateY(-1px);
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--border-secondary, var(--border-primary));
   }
 
   &:active {
-    transform: translateY(0);
+    opacity: 0.92;
   }
 }
 
@@ -599,10 +603,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
-  border-radius: 8px;
-  background: var(--bg-tertiary);
-  color: var(--text-tertiary);
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--button-primary-background, #0078d4);
+  background: color-mix(in srgb, var(--button-primary-background, #0078d4) 16%, transparent);
+  color: var(--button-primary-background, #0078d4);
   font-size: 12px;
   font-weight: 500;
   cursor: default;

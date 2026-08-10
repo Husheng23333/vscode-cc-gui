@@ -117,13 +117,12 @@ export function collectUnresolvedToolUseIds(
  * auto-recovers by forcing the stream-end cleanup.  This guards against the
  * backend onStreamEnd signal being silently dropped by JCEF.
  *
- * Set to 60s to avoid false positives during long tool execution phases
- * (e.g., command execution, file operations) where no content deltas arrive
- * but the backend is still actively processing.  The backend heartbeat
- * mechanism in StreamMessageCoalescer keeps __lastStreamActivityAt bumped
- * via periodic updateMessages re-pushes.
+ * Set to 3 minutes to avoid false positives during long tool execution phases
+ * (e.g., Codex multi-step turns with command/file ops) where no content deltas
+ * arrive but the backend is still actively processing. Codex app-server also
+ * emits [STREAM_HEARTBEAT] to bump __lastStreamActivityAt during those phases.
  */
-const STREAM_STALL_TIMEOUT_MS = 60_000;
+const STREAM_STALL_TIMEOUT_MS = 180_000;
 const STREAM_STALL_CHECK_INTERVAL_MS = 5_000;
 
 export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): void {

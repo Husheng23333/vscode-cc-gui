@@ -14,6 +14,7 @@ export class FileHandler implements BridgeHandler {
     'get_workspace_path',
     'list_files',
     'resolve_file_path',
+    'resolve_drop_paths',
     'get_linkify_capabilities',
     'open_class',
   ] as const;
@@ -49,6 +50,21 @@ export class FileHandler implements BridgeHandler {
           resolvedPath: this.resolveDisplayPath(content),
         });
         return true;
+      case 'resolve_drop_paths': {
+        const payload = parseJson<{
+          requestId?: string;
+          uris?: string[];
+          names?: string[];
+          texts?: string[];
+          absolutePaths?: string[];
+        }>(content, {});
+        const paths = await this.resolveDropPaths(payload);
+        callWindowFunction(webview, 'onDropPathsResolved', {
+          requestId: payload.requestId ?? '',
+          paths,
+        });
+        return true;
+      }
       case 'get_linkify_capabilities':
         callWindowFunction(webview, 'updateLinkifyCapabilities', {
           openFile: true,
@@ -229,6 +245,144 @@ export class FileHandler implements BridgeHandler {
       return path.relative(workspacePath, filePath).replace(/\\/g, '/');
     }
     return filePath;
+  }
+
+  /**
+   * Resolve drag-drop candidates to absolute OS paths.
+   * Uses vscode.Uri.fsPath so Mac (`/Users/...`) and Windows (`C:\...`) stay correct.
+   */
+  private async resolveDropPaths(payload: {
+    uris?: string[];
+    names?: string[];
+    texts?: string[];
+    absolutePaths?: string[];
+  }): Promise<string[]> {
+    const out: string[] = [];
+    const push = (value: string | undefined | null) => {
+      const p = String(value ?? '').trim();
+      if (!p) return;
+      // Prefer native separators from path.normalize
+      const normalized = path.normalize(p);
+      if (!out.includes(normalized)) out.push(normalized);
+    };
+
+    for (const uri of payload.uris ?? []) {
+      const fsPath = this.uriStringToFsPath(uri);
+      if (fsPath) push(fsPath);
+    }
+
+    for (const abs of payload.absolutePaths ?? []) {
+      const fsPath = this.uriStringToFsPath(abs) ?? abs;
+      if (path.isAbsolute(fsPath) || /^[A-Za-z]:[\\/]/.test(fsPath)) {
+        push(fsPath);
+      }
+    }
+
+    for (const text of payload.texts ?? []) {
+      const t = String(text ?? '').trim();
+      if (!t) continue;
+      if (t.startsWith('file:') || t.includes('://')) {
+        const fsPath = this.uriStringToFsPath(t);
+        if (fsPath) push(fsPath);
+        continue;
+      }
+      if (path.isAbsolute(t) || /^[A-Za-z]:[\\/]/.test(t)) {
+        push(t);
+        continue;
+      }
+      // Relative path under workspace
+      const workspacePath = this.context.getWorkspacePath();
+      if (workspacePath) {
+        const candidate = path.resolve(workspacePath, t);
+        if (fs.existsSync(candidate)) {
+          push(candidate);
+          continue;
+        }
+      }
+      // Fall through as bare-ish name for findFiles
+      const base = path.basename(t);
+      if (base) {
+        const found = await this.findWorkspacePathByName(base);
+        if (found) push(found);
+      }
+    }
+
+    for (const name of payload.names ?? []) {
+      const n = String(name ?? '').trim();
+      if (!n) continue;
+      if (path.isAbsolute(n) || /^[A-Za-z]:[\\/]/.test(n) || n.startsWith('file:')) {
+        const fsPath = this.uriStringToFsPath(n) ?? n;
+        push(fsPath);
+        continue;
+      }
+      const found = await this.findWorkspacePathByName(n);
+      if (found) {
+        push(found);
+      } else {
+        // Last resort: workspace-relative join (may not exist — still better than bare name alone)
+        const workspacePath = this.context.getWorkspacePath();
+        if (workspacePath) {
+          push(path.join(workspacePath, n));
+        }
+      }
+    }
+
+    this.context.log.appendLine(
+      `[FILE] resolve_drop_paths in uris=${(payload.uris ?? []).length} names=${(payload.names ?? []).length} ` +
+        `texts=${(payload.texts ?? []).length} abs=${(payload.absolutePaths ?? []).length} → ${out.length} path(s)`,
+    );
+    return out;
+  }
+
+  private uriStringToFsPath(value: string): string | null {
+    const raw = String(value ?? '').trim();
+    if (!raw) return null;
+    try {
+      if (raw.startsWith('file:') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) {
+        const uri = vscode.Uri.parse(raw);
+        if (uri.scheme === 'file') return uri.fsPath;
+        // vscode-remote / other schemes: still surface fsPath when available
+        if (uri.fsPath) return uri.fsPath;
+      }
+    } catch {
+      // fall through
+    }
+    if (path.isAbsolute(raw) || /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('\\\\')) {
+      return raw;
+    }
+    return null;
+  }
+
+  private async findWorkspacePathByName(fileName: string): Promise<string | null> {
+    const base = path.basename(fileName);
+    if (!base || base === '.' || base === '..') return null;
+    const workspacePath = this.context.getWorkspacePath();
+    if (!workspacePath) return null;
+
+    // Exact path under workspace root
+    const direct = path.join(workspacePath, base);
+    if (fs.existsSync(direct)) return direct;
+
+    try {
+      // Escape glob special chars in the file name
+      const escaped = base.replace(/([{}[\]*?\\])/g, '[$1]');
+      const found = await vscode.workspace.findFiles(
+        `**/${escaped}`,
+        '{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/build/**}',
+        10,
+      );
+      if (found.length === 0) return null;
+      if (found.length === 1) return found[0].fsPath;
+
+      // Prefer shortest path under workspace (closest match)
+      found.sort((a, b) => a.fsPath.length - b.fsPath.length);
+      return found[0].fsPath;
+    } catch (error) {
+      this.context.log.appendLine(
+        `[FILE] findWorkspacePathByName failed name="${base}": ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
   }
 
   private async openClass(content: string): Promise<void> {

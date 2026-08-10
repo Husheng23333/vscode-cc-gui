@@ -28,6 +28,10 @@ import path from 'node:path';
 import { createInterface } from 'readline';
 import { handleClaudeCommand } from './channels/claude-channel.js';
 import { handleCodexCommand } from './channels/codex-channel.js';
+import { handleGrokCommand } from './channels/grok-channel.js';
+import { handleKimiCommand } from './channels/kimi-channel.js';
+import { handleOpenCodeCommand } from './channels/opencode-channel.js';
+import { handlePiCommand } from './channels/pi-channel.js';
 import { loadClaudeSdk, isClaudeSdkAvailable } from './utils/sdk-loader.js';
 import {
   sendMessagePersistent,
@@ -42,6 +46,7 @@ import {
 import { abortCurrentCodexTurn } from './services/codex/message-service.js';
 import { isWebviewControlledEnvVar, isDangerousEnvVar } from './config/api-config.js';
 import { cleanupStaleTempImages } from './services/claude/attachment-service.js';
+import { requestContext, getRequestId } from './utils/request-context.js';
 
 // =============================================================================
 // Network Environment Setup (must run before any HTTPS connection)
@@ -62,7 +67,28 @@ const DAEMON_VERSION = '1.0.0';
 // State
 // =============================================================================
 
-let activeRequestId = null;
+/**
+ * Per-request async context so concurrent turns (multi-window / multi-tab)
+ * can tag stdout/stderr with the correct request id.
+ * Previously a single global `activeRequestId` forced full serialization.
+ */
+/** @type {Set<string>} */
+const activeRequestIds = new Set();
+
+function getActiveRequestId() {
+  return getRequestId();
+}
+
+// Serialize process.env mutations only (not the whole request). Concurrent
+// turns that never touch params.env run fully in parallel.
+let envMutationChain = Promise.resolve();
+function withProcessEnvLock(fn) {
+  const run = envMutationChain.then(() => fn());
+  // Keep the chain alive even if fn rejects
+  envMutationChain = run.then(() => {}, () => {});
+  return run;
+}
+
 let isDaemonMode = true;
 let sdkPreloaded = false;
 
@@ -201,9 +227,10 @@ function sendDaemonEvent(event, data = {}) {
 process.stdout.write = function (chunk, encoding, callback) {
   // Convert Buffer to string if needed
   const text = typeof chunk === 'string' ? chunk : chunk.toString(encoding || 'utf8');
+  const activeRequestId = getActiveRequestId();
 
   if (activeRequestId) {
-    // Tag output with request ID for demuxing on Java side
+    // Tag output with request ID for demuxing on the extension host
     const lines = text.split('\n');
     for (const line of lines) {
       if (line.length > 0) {
@@ -253,6 +280,7 @@ console.error = function (...args) {
   const text = args
     .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
     .join(' ');
+  const activeRequestId = getActiveRequestId();
   if (activeRequestId) {
     writeRawLine({ id: activeRequestId, stderr: text });
   } else {
@@ -267,12 +295,14 @@ console.error = function (...args) {
 const _originalExit = process.exit;
 process.exit = function (code) {
   if (isDaemonMode) {
-    // Capture the current request ID before clearing it, so the catch block
-    // in processRequest() won't try to send a duplicate done signal.
-    const capturedId = activeRequestId;
-    activeRequestId = null;
-
+    // Capture the current request ID from ALS before unwinding.
+    const capturedId = getActiveRequestId();
     if (capturedId) {
+      activeRequestIds.delete(capturedId);
+      // Mark store so processRequest finally does not double-send done.
+      const store = requestContext.getStore();
+      if (store) store.doneSent = true;
+
       if (code === 0) {
         writeRawLine({ id: capturedId, done: true, success: true });
       } else {
@@ -285,8 +315,6 @@ process.exit = function (code) {
       }
     }
     // Throw to unwind the current call stack instead of actually exiting.
-    // processRequest's catch block checks activeRequestId === null and
-    // will skip sending a duplicate done signal.
     throw new Error(`[daemon] process.exit(${code}) intercepted`);
   }
   _originalExit(code);
@@ -393,96 +421,118 @@ async function processRequest(request) {
     return;
   }
 
-  activeRequestId = id;
+  const ctx = { id, doneSent: false };
+  activeRequestIds.add(id);
 
-  // Save original env values for restoration after request completes
-  const savedEnv = {};
+  await requestContext.run(ctx, async () => {
+    // Save original env values for restoration after request completes
+    const savedEnv = {};
+    const hasRequestEnv = params.env && typeof params.env === 'object'
+      && Object.keys(params.env).length > 0;
 
-  try {
-    // Apply environment variables from params (with save for restore).
-    // NOTE: Heartbeat/status requests bypass the command queue and may run
-    // concurrently. This is safe because they never read process.env values
-    // set here — they only return timestamps and memory usage.
-    if (params.env && typeof params.env === 'object') {
-      for (const [key, value] of Object.entries(params.env)) {
-        // Request env can include settings.json values. Do not let stale
-        // environment controls override the webview's per-turn model, context,
-        // or reasoning selections.
-        if (isWebviewControlledEnvVar(key)) {
-          continue;
+    const runBody = async () => {
+      try {
+        // Apply environment variables from params (with save for restore).
+        // Mutating process.env is serialized via withProcessEnvLock when needed.
+        if (hasRequestEnv) {
+          for (const [key, value] of Object.entries(params.env)) {
+            if (isWebviewControlledEnvVar(key)) {
+              continue;
+            }
+            if (isDangerousEnvVar(key)) {
+              console.warn(`[SECURITY] Ignoring dangerous env var from request: ${key}`);
+              continue;
+            }
+            if (value !== undefined && value !== null) {
+              savedEnv[key] = process.env[key];
+              process.env[key] = String(value);
+            }
+          }
         }
-        // Security (C): never let request/settings.json env inject code-execution vars.
-        if (isDangerousEnvVar(key)) {
-          console.warn(`[SECURITY] Ignoring dangerous env var from request: ${key}`);
-          continue;
+
+        // Parse method: "claude.send" -> provider="claude", command="send"
+        const dotIndex = method.indexOf('.');
+        if (dotIndex < 0) {
+          throw new Error(`Invalid method format: ${method}. Expected "provider.command"`);
         }
-        if (value !== undefined && value !== null) {
-          // Save original value (undefined means key didn't exist)
-          savedEnv[key] = process.env[key];
-          process.env[key] = String(value);
+        const provider = method.substring(0, dotIndex);
+        const command = method.substring(dotIndex + 1);
+
+        // Build stdinData from params (mimics what channel-manager.js does)
+        const stdinData = { ...params };
+        delete stdinData.env; // env is handled separately
+
+        if (provider === 'claude' && command === 'send') {
+          await sendMessagePersistent(stdinData);
+        } else if (provider === 'claude' && command === 'sendWithAttachments') {
+          await sendMessageWithAttachmentsPersistent(stdinData);
+        } else if (provider === 'claude' && command === 'preconnect') {
+          await preconnectPersistent(stdinData);
+        } else if (provider === 'claude' && command === 'resetRuntime') {
+          await resetRuntimePersistent(stdinData);
+        } else if (provider === 'claude' && command === 'getContextUsage') {
+          await getContextUsagePersistent(stdinData);
+        } else {
+          // Dispatch to the existing handlers for non-send commands + CLI providers.
+          switch (provider) {
+            case 'claude':
+              await handleClaudeCommand(command, [], stdinData);
+              break;
+            case 'codex':
+              await handleCodexCommand(command, [], stdinData);
+              break;
+            case 'grok':
+              await handleGrokCommand(command, [], stdinData);
+              break;
+            case 'kimi':
+              await handleKimiCommand(command, [], stdinData);
+              break;
+            case 'opencode':
+              await handleOpenCodeCommand(command, [], stdinData);
+              break;
+            case 'pi':
+              await handlePiCommand(command, [], stdinData);
+              break;
+            default:
+              throw new Error(`Unknown provider: ${provider}`);
+          }
         }
+
+        if (!ctx.doneSent) {
+          ctx.doneSent = true;
+          writeRawLine({ id, done: true, success: true });
+        }
+      } catch (error) {
+        // Only send done if not already sent (e.g., by process.exit interceptor)
+        if (!ctx.doneSent) {
+          ctx.doneSent = true;
+          writeRawLine({
+            id,
+            done: true,
+            success: false,
+            error: error.message || String(error),
+            code: error.code,
+          });
+        }
+      } finally {
+        // Restore original environment variables to prevent cross-request pollution
+        for (const [key, originalValue] of Object.entries(savedEnv)) {
+          if (originalValue === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = originalValue;
+          }
+        }
+        activeRequestIds.delete(id);
       }
-    }
+    };
 
-    // Parse method: "claude.send" -> provider="claude", command="send"
-    const dotIndex = method.indexOf('.');
-    if (dotIndex < 0) {
-      throw new Error(`Invalid method format: ${method}. Expected "provider.command"`);
-    }
-    const provider = method.substring(0, dotIndex);
-    const command = method.substring(dotIndex + 1);
-
-    // Build stdinData from params (mimics what channel-manager.js does)
-    const stdinData = { ...params };
-    delete stdinData.env; // env is handled separately
-
-    if (provider === 'claude' && command === 'send') {
-      await sendMessagePersistent(stdinData);
-    } else if (provider === 'claude' && command === 'sendWithAttachments') {
-      await sendMessageWithAttachmentsPersistent(stdinData);
-    } else if (provider === 'claude' && command === 'preconnect') {
-      await preconnectPersistent(stdinData);
-    } else if (provider === 'claude' && command === 'resetRuntime') {
-      await resetRuntimePersistent(stdinData);
-    } else if (provider === 'claude' && command === 'getContextUsage') {
-      await getContextUsagePersistent(stdinData);
+    if (hasRequestEnv) {
+      await withProcessEnvLock(runBody);
     } else {
-      // Dispatch to the existing handlers for non-send commands.
-      switch (provider) {
-        case 'claude':
-          await handleClaudeCommand(command, [], stdinData);
-          break;
-        case 'codex':
-          await handleCodexCommand(command, [], stdinData);
-          break;
-        default:
-          throw new Error(`Unknown provider: ${provider}`);
-      }
+      await runBody();
     }
-
-    writeRawLine({ id, done: true, success: true });
-  } catch (error) {
-    // Only send done if not already sent (e.g., by process.exit interceptor)
-    if (activeRequestId !== null) {
-      writeRawLine({
-        id,
-        done: true,
-        success: false,
-        error: error.message || String(error),
-        code: error.code,
-      });
-    }
-  } finally {
-    activeRequestId = null;
-    // Restore original environment variables to prevent cross-request pollution
-    for (const [key, originalValue] of Object.entries(savedEnv)) {
-      if (originalValue === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = originalValue;
-      }
-    }
-  }
+  });
 }
 
 // =============================================================================
@@ -496,14 +546,15 @@ async function processRequest(request) {
       `[daemon] Uncaught exception: ${error.message}\n${error.stack}\n`,
       'utf8'
     );
-    if (activeRequestId) {
+    const id = getActiveRequestId();
+    if (id) {
       writeRawLine({
-        id: activeRequestId,
+        id,
         done: true,
         success: false,
         error: `Uncaught exception: ${error.message}`,
       });
-      activeRequestId = null;
+      activeRequestIds.delete(id);
     }
   });
 
@@ -512,14 +563,15 @@ async function processRequest(request) {
       `[daemon] Unhandled rejection: ${reason}\n`,
       'utf8'
     );
-    if (activeRequestId) {
+    const id = getActiveRequestId();
+    if (id) {
       writeRawLine({
-        id: activeRequestId,
+        id,
         done: true,
         success: false,
         error: `Unhandled rejection: ${String(reason)}`,
       });
-      activeRequestId = null;
+      activeRequestIds.delete(id);
     }
   });
 
@@ -550,10 +602,8 @@ async function processRequest(request) {
     crlfDelay: Infinity,
   });
 
-  // Command requests must be serialized because they share `activeRequestId`
-  // for stdout interception. Heartbeats/status are safe to run concurrently.
-  let commandQueue = Promise.resolve();
-
+  // Command requests run concurrently (multi-window / multi-tab). Request id
+  // tagging uses AsyncLocalStorage so stdout lines demux correctly.
   rl.on('line', (line) => {
     // Skip empty lines
     if (!line.trim()) return;
@@ -569,32 +619,46 @@ async function processRequest(request) {
       return;
     }
 
-    // Heartbeats and status queries don't use activeRequestId — safe to run immediately
+    // Heartbeats and status queries — safe to run immediately
     if (request.method === 'heartbeat' || request.method === 'status') {
       processRequest(request);
       return;
     }
 
-    // Abort bypasses the command queue — must run immediately to cancel active work
+    // Abort must run immediately. Prefer scoped targetRequestIds from the
+    // extension (per-webview) so multi-window stop only kills that window.
     if (request.method === 'abort') {
-      const targetId = activeRequestId;
+      const params = request.params && typeof request.params === 'object' ? request.params : {};
+      // Bridge always sends an array for multi-window scoping.
+      // - array (possibly empty): scoped abort — empty means abort none for Codex
+      // - missing: legacy abort all
+      const hasScopedTargets = Array.isArray(params.targetRequestIds);
+      const targetRequestIds = hasScopedTargets
+        ? params.targetRequestIds.map(String).filter(Boolean)
+        : null;
+      const active = [...activeRequestIds];
+      const scoped = hasScopedTargets
+        ? targetRequestIds.filter((tid) => activeRequestIds.has(tid))
+        : active;
       _originalStderrWrite(
-        `[daemon] Abort requested, active request: ${targetId || 'none'}\n`,
+        `[daemon] Abort requested mode=${hasScopedTargets ? 'scoped' : 'all'} ` +
+          `targets=${hasScopedTargets ? (targetRequestIds.join(',') || '(none)') : '(all)'} ` +
+          `active=${active.length ? active.join(',') : 'none'} ` +
+          `scoped=${scoped.length ? scoped.join(',') : 'none'}\n`,
         'utf8'
       );
-      if (targetId) {
-        // Fire-and-forget: disposeRuntime will cause the queued processRequest
-        // to throw and emit its own done signal. We don't need to await here
-        // because the Java side already completes its futures in sendAbort().
+      // Codex: pass array for scoped (even empty); undefined = abort all.
+      abortCurrentCodexTurn(hasScopedTargets ? targetRequestIds : undefined).catch((e) => {
+        _originalStderrWrite(
+          `[daemon] Codex abort error: ${e.message}\n`,
+          'utf8'
+        );
+      });
+      // Claude: only when unscoped, or this webview still has active targets.
+      if (!hasScopedTargets || scoped.length > 0) {
         abortCurrentTurn().catch((e) => {
           _originalStderrWrite(
             `[daemon] Claude abort error: ${e.message}\n`,
-            'utf8'
-          );
-        });
-        abortCurrentCodexTurn().catch((e) => {
-          _originalStderrWrite(
-            `[daemon] Codex abort error: ${e.message}\n`,
             'utf8'
           );
         });
@@ -603,10 +667,7 @@ async function processRequest(request) {
       return;
     }
 
-    // Live permission-mode switch bypasses the command queue: it targets the
-    // runtime backing the in-progress turn and must apply before that turn's
-    // next tool call. Queuing it behind the turn's own processRequest would
-    // defer the switch until the turn ends, defeating the purpose.
+    // Live permission-mode switch: apply immediately (not queued behind turns)
     if (request.method === 'claude.setPermissionMode') {
       const switchId = request.id || '0';
       if (!request.id) {
@@ -624,15 +685,13 @@ async function processRequest(request) {
       return;
     }
 
-    // Command requests are serialized to prevent activeRequestId conflicts
-    commandQueue = commandQueue
-      .then(() => processRequest(request))
-      .catch((e) => {
-        _originalStderrWrite(
-          `[daemon] Request queue error: ${e.message}\n`,
-          'utf8'
-        );
-      });
+    // Parallel command execution (multi-window)
+    processRequest(request).catch((e) => {
+      _originalStderrWrite(
+        `[daemon] Request error: ${e.message}\n`,
+        'utf8'
+      );
+    });
   });
 
   rl.on('close', async () => {

@@ -25,7 +25,8 @@
     "minutes": "м",
     "optional": "Необязательно",
     "collapse": "Свернуть",
-    "expand": "Развернуть"
+    "expand": "Развернуть",
+    "gotIt": "Понятно"
   },
   "chat": {
     "sendMessage": "Отправить сообщение в {{provider}}",
@@ -90,7 +91,7 @@
     "attachmentFile": "[Вложение: {{fileName}}]",
     "unknownFile": "Неизвестный файл",
     "attachmentsUploaded": "[Вложения загружены]",
-    "streamingConnected": "{{provider}} обрабатывает запрос",
+    "streamingConnected": "AI обрабатывает запрос",
     "showEarlierMessages": "Показать предыдущие сообщения ({{count}})",
     "totalDuration": "Этот ответ занял",
     "tokenUsage": "вход {{input}} / выход {{output}}",
@@ -261,7 +262,7 @@
       "permissionDialogTimeout": {
         "label": "Таймаут диалогов разрешений и вопросов",
         "unit": "секунд",
-        "hint": "Установите таймаут для диалогов вопросов Claude и диалогов запроса разрешений (30~3600 секунд). После таймаута диалог закроется автоматически, и Claude продолжит работу."
+        "hint": "Установите таймаут для диалогов вопросов ИИ и диалогов запроса разрешений (30~3600 секунд). После таймаута диалог закроется автоматически, и ИИ продолжит работу."
       },
       "chatBgColor": {
         "label": "Цвет фона чата",
@@ -291,14 +292,21 @@
         "label": "Уведомление о вопросе пользователю",
         "enabled": "Включено",
         "disabled": "Выключено",
-        "hint": "При включении показывает системное уведомление, когда Claude задаёт вопрос, чтобы вы его не пропустили. При выключении уведомление не появляется."
+        "hint": "При включении показывает системное уведомление, когда ИИ задаёт вопрос, чтобы вы его не пропустили. При выключении уведомление не появляется."
+      },
+      "chatBarColor": {
+        "label": "Chat bar color",
+        "custom": "Custom",
+        "reset": "Reset",
+        "hint": "Applies to the chat header and status bar. Leave empty to follow the theme default."
       }
     },
     "providers": "Управление провайдерами",
     "providersDesc": "Управление конфигурациями API-провайдеров Claude и Codex и переключение между ними",
     "providerTab": {
       "claude": "Claude Code",
-      "codex": "Codex"
+      "codex": "Codex",
+      "cli": "CLI"
     },
     "pluginModels": {
       "title": "Пользовательские модели",
@@ -324,7 +332,14 @@
       "configuredSectionDesc": "Модели активного провайдера Claude или settings.json уже отображаются в списке выбора. Здесь можно изменить только стоимость.",
       "configuredEditHint": "Эта модель управляется активным провайдером Claude или settings.json. Здесь можно изменить только стоимость.",
       "customSectionTitle": "Пользовательские модели",
-      "editPricing": "Изменить стоимость"
+      "editPricing": "Изменить стоимость",
+      "contextWindow": {
+        "label": "Context window (K tokens)",
+        "placeholder": "e.g. 200 for 200K",
+        "hint": "Optional. Enter thousands of tokens (200 = 200,000). Codex only.",
+        "invalidValue": "Maximum context must be a positive integer in K units",
+        "summary": "Context: {{value}} tokens"
+      }
     },
     "dependencies": "Зависимости SDK",
     "dependenciesDesc": "Управление установкой и обновлением зависимостей AI SDK",
@@ -779,7 +794,57 @@
         "saveChanges": "Сохранить"
       }
     },
-    "configure": "Настроить"
+    "configure": "Настроить",
+    "cli": {
+      "hint": "These CLIs must be installed and configured in your system terminal. The plugin only detects installation status and version — it will never install them for you. Confirm each CLI works in the terminal before coming back here to use it.",
+      "refresh": "Re-check",
+      "retry": "Retry",
+      "loading": "Checking CLI installation status…",
+      "loadFailed": "Detection failed. Please try again.",
+      "status": {
+        "installed": "Installed",
+        "notInstalled": "Not installed"
+      },
+      "viewInstallGuide": "Install guide",
+      "howToInstall": "View install guide",
+      "copy": "Copy",
+      "copied": "Copied to clipboard",
+      "copyFailed": "Failed to copy",
+      "tools": {
+        "grok": {
+          "name": "Grok CLI",
+          "description": "xAI Grok terminal coding agent"
+        },
+        "kimi": {
+          "name": "Kimi CLI",
+          "description": "Moonshot Kimi Code CLI"
+        },
+        "opencode": {
+          "name": "OpenCode",
+          "description": "Open-source terminal AI coding agent"
+        },
+        "pi": {
+          "name": "PI CLI",
+          "description": "Minimal terminal coding agent with multi-provider model support"
+        }
+      },
+      "installDialog": {
+        "title": "Install {{name}}",
+        "lead": "Install {{name}} in your system terminal first and make sure `{{binary}}` is available, then come back and click Re-check. This plugin will not run the installer for you.",
+        "stepOpenTerminal": "Open your system terminal (Terminal / iTerm / PowerShell, etc.)",
+        "stepRunCommand": "Copy and run the install command below",
+        "stepVerify": "After install, run `{{binary}} --version` to verify",
+        "stepReturn": "Return here and click Re-check",
+        "primaryCommand": "Recommended install command (macOS / Linux)",
+        "windowsCommand": "Windows (PowerShell)",
+        "altCommand": "Alternative install method",
+        "openDocs": "Open official docs"
+      },
+      "listTitle": "Local CLI tools",
+      "summary": "{{installed}} / {{total}} installed",
+      "moreComingSoon": "More coming soon",
+      "copyPath": "Copy path"
+    }
   },
   "history": {
     "title": "История",
@@ -896,7 +961,7 @@
     "timeoutWarning": "Ответьте в течение {{seconds}} сек, иначе диалог закроется"
   },
   "askUserQuestion": {
-    "title": "У Claude есть вопросы к вам",
+    "title": "У ИИ есть вопросы к вам",
     "progress": "Вопрос {{current}} / {{total}}",
     "multiSelectHint": "Можно выбрать несколько вариантов",
     "cancel": "Отмена",
@@ -913,10 +978,10 @@
   },
   "planApproval": {
     "title": "План готов к утверждению",
-    "subtitle": "Claude составил план и ждёт одобрения.",
+    "subtitle": "ИИ составил план и ждёт одобрения.",
     "requestedPermissions": "Запрашиваемые разрешения",
     "executionMode": "Режим выполнения",
-    "executionModeDescription": "Как Claude будет выполнять план:",
+    "executionModeDescription": "Как ИИ будет выполнять план:",
     "approve": "Утвердить и выполнить",
     "reject": "Отклонить",
     "toApprove": "чтобы утвердить",
@@ -1104,7 +1169,7 @@
         "title": "Ключевые возможности",
         "toolExtension": {
           "label": "Расширение инструментов",
-          "description": "Добавление возможностей доступа к файловой системе и сети для Claude"
+          "description": "Добавление возможностей доступа к файловой системе и сети для ИИ"
         },
         "dataConnection": {
           "label": "Подключение данных",
@@ -1227,8 +1292,8 @@
     "collapse": "Свернуть панель статуса",
     "undoChanges": "Отменить изменения",
     "undoConfirmTitle": "Отмена изменений файла",
-    "undoWillDelete": "Файл был создан Claude. Отмена удалит его.",
-    "undoWillRestore": "Файл вернётся к состоянию до изменений Claude.",
+    "undoWillDelete": "Файл был создан ИИ. Отмена удалит его.",
+    "undoWillRestore": "Файл вернётся к состоянию до изменений ИИ.",
     "undoCannotUndo": "Это действие необратимо.",
     "confirmUndo": "Подтвердить отмену",
     "undoSuccess": "Изменения {{fileName}} отменены",
@@ -1289,7 +1354,7 @@
       "title": "Что такое навыки?",
       "overview": {
         "title": "Обзор",
-        "description": "Навыки — это динамически загружаемые наборы инструкций, скрипты и папки ресурсов, которые улучшают работу Claude для конкретных задач. Навыки учат Claude выполнять определённые задачи воспроизводимым способом — например, создавать документы по бренд-гайдлайнам, анализировать данные по корпоративным процессам или автоматизировать личные задачи."
+        "description": "Навыки — это динамически загружаемые наборы инструкций, скрипты и папки ресурсов, которые улучшают работу ИИ для конкретных задач. Навыки учат ИИ выполнять определённые задачи воспроизводимым способом — например, создавать документы по бренд-гайдлайнам, анализировать данные по корпоративным процессам или автоматизировать личные задачи."
       },
       "structure": {
         "title": "Структура навыка",
@@ -1322,7 +1387,7 @@
         "title": "Советы по использованию",
         "item1": "Убедитесь, что директория навыка содержит валидный файл SKILL.md",
         "item2": "Имена навыков должны использовать строчные буквы, цифры и дефисы (kebab-case)",
-        "item3": "Навыки автоматически применяются в чатах Claude после загрузки",
+        "item3": "Навыки автоматически применяются в чатах ИИ после загрузки",
         "item4": "Управляйте статусом отдельных навыков с помощью переключателей",
         "item5": "Упомяните имя навыка в чате для использования, например, «Используй навык pdf для извлечения полей формы»"
       },
@@ -1480,7 +1545,14 @@
     },
     "searchPlaceholder": "Поиск моделей",
     "noModelsFound": "Модели не найдены",
-    "hiddenModelCount": "+ {{count}} дополнительных моделей. Введите текст для поиска."
+    "hiddenModelCount": "+ {{count}} дополнительных моделей. Введите текст для поиска.",
+    "grok": {
+      "grok45": {
+        "label": "Grok 4.5",
+        "description": "xAI Grok 4.5"
+      }
+    },
+    "cliLoadFailed": "Failed to load models. Click to retry."
   },
   "modes": {
     "default": {
@@ -1538,6 +1610,20 @@
     },
     "opencode": {
       "label": "OpenCode"
+    },
+    "grok": {
+      "label": "Grok CLI"
+    },
+    "kimi": {
+      "label": "Kimi CLI"
+    },
+    "pi": {
+      "label": "PI CLI"
+    },
+    "beta": {
+      "badge": "Beta",
+      "title": "Beta Feature",
+      "message": "This feature is still in Beta. If you encounter any bugs, please report them to the author promptly."
     }
   },
   "promptEnhancer": {

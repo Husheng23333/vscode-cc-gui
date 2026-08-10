@@ -40,6 +40,10 @@ import { SlashCommandService } from './bridge/services/SlashCommandService';
 import { SettingsStore } from './bridge/services/SettingsStore';
 import { sanitizeUserMessagePayload } from './bridge/services/userMessageSanitizer';
 import type { SessionTemplate } from './sessionTemplate';
+import type { RuntimeProviderId } from './bridge/types';
+import { isRuntimeProvider } from './cli/cliTools';
+import { CliStatusHandler } from './bridge/handlers/CliStatusHandler';
+import { CliModelsHandler } from './bridge/handlers/CliModelsHandler';
 
 type MessageCallback = (event: string, content: string) => void;
 type CreateTabCallback = () => void;
@@ -54,7 +58,10 @@ export class BridgeServer {
   private _workspacePath: string;
   private _webview?: vscode.Webview;
   private _log: vscode.OutputChannel;
-  private _activeProvider: 'claude' | 'codex' = 'claude';
+  private _logAppendLine: (value: string) => void;
+  private _logAppend: (value: string) => void;
+  private _configListener?: vscode.Disposable;
+  private _activeProvider: RuntimeProviderId = 'claude';
   private _selectedModel: string = '';
   /** request id → text as typed in the input before skill / bridge expansion (for history UI). */
   private _reqIdToUserInputAsTyped = new Map<string, string>();
@@ -68,6 +75,7 @@ export class BridgeServer {
     reject(reason?: any): void;
     chunks: string[];
     timeout: ReturnType<typeof setTimeout>;
+    onProgress?: (partial: string) => void;
   }>();
   private readonly _runtimeContext: RuntimeContextService;
   private readonly _historyService: HistoryService;
@@ -86,14 +94,21 @@ export class BridgeServer {
   }>();
   constructor(private readonly context: vscode.ExtensionContext) {
     this._log = vscode.window.createOutputChannel('CC GUI');
-    // Disable Output panel noise: do not auto-show, and drop all append* writes.
-    // Re-enable by setting ENABLE_CCG_OUTPUT_LOG = true when debugging.
-    const ENABLE_CCG_OUTPUT_LOG = false;
-    if (!ENABLE_CCG_OUTPUT_LOG) {
-      this._log.appendLine = () => {};
-      this._log.append = () => {};
-    }
-    // this._log.show(true);
+    // Preserve real writers so we can toggle via settings without recreating the channel.
+    this._logAppendLine = this._log.appendLine.bind(this._log);
+    this._logAppend = this._log.append.bind(this._log);
+    this._applyDebugLogSetting(false);
+    this._configListener = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('ccGui.enableDebugLog')) {
+        this._applyDebugLogSetting(true);
+        // Keep webview toggle in sync when changed from VS Code Settings UI.
+        if (this._webview) {
+          const enabled =
+            vscode.workspace.getConfiguration('ccGui').get<boolean>('enableDebugLog') === true;
+          this._callWebviewJson(this._webview, 'updateEnableDebugLog', { enableDebugLog: enabled });
+        }
+      }
+    });
     this._bridgePath = path.join(context.extensionPath, 'ai-bridge', 'daemon.js');
     this._workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
     this._statusBarWidgetEnabled = context.globalState.get<boolean>('ccg.status_bar_widget_enabled', true);
@@ -111,7 +126,13 @@ export class BridgeServer {
       () => this._workspacePath,
       (webview, functionName, payload) => this._callWebviewJson(webview, functionName, payload),
     );
-    this._permissionIpc = new PermissionIpcService(this._log, () => this._webview, this.context.globalState);
+    this._permissionIpc = new PermissionIpcService(
+      this._log,
+      () => this._webview,
+      this.context.globalState,
+      // Multi-window: route permission dialogs to the webview that owns the daemon turn.
+      (bridgeRequestId) => this._pendingWebviews.get(bridgeRequestId),
+    );
     this._settingsStore = new SettingsStore(context);
     this._providerStore = new ProviderStore(context, {
       syncProviderToDisk: (providers) => {
@@ -158,7 +179,7 @@ export class BridgeServer {
     this._callbacks.forEach(cb => cb(event, content));
   }
 
-  getActiveProvider(): 'claude' | 'codex' {
+  getActiveProvider(): RuntimeProviderId {
     return this._activeProvider;
   }
 
@@ -198,7 +219,12 @@ export class BridgeServer {
   requestAiText(
     provider: 'claude' | 'codex',
     prompt: string,
-    options: { model?: string; disableThinking?: boolean; streaming?: boolean } = {},
+    options: {
+      model?: string;
+      disableThinking?: boolean;
+      streaming?: boolean;
+      onProgress?: (partial: string) => void;
+    } = {},
   ): Promise<string> {
     if (!this._bridgeProcess || this._bridgeProcess.killed) {
       this._log.appendLine('[BRIDGE] Daemon not running, starting...');
@@ -217,7 +243,7 @@ export class BridgeServer {
       message: prompt,
       text: prompt,
       permissionMode: 'default',
-      streaming: options.streaming ?? false,
+      streaming: options.streaming ?? Boolean(options.onProgress),
       disableThinking: options.disableThinking ?? true,
     };
     if (provider === 'codex') {
@@ -233,7 +259,13 @@ export class BridgeServer {
         this._requestEvents.delete(id);
         reject(new Error('AI text request timed out'));
       }, 120000);
-      this._textRequestResolvers.set(id, { resolve, reject, chunks: [], timeout });
+      this._textRequestResolvers.set(id, {
+        resolve,
+        reject,
+        chunks: [],
+        timeout,
+        onProgress: options.onProgress,
+      });
       this._requestEvents.set(id, 'internal_ai_text_request');
       const msg = JSON.stringify({ id, method, params }) + '\n';
       this._log.appendLine(`[BRIDGE] Sending internal AI text request: id=${id} provider=${provider}`);
@@ -363,6 +395,8 @@ export class BridgeServer {
     dispatcher.register(new McpMarketplaceHandler(bridgeContext));
     dispatcher.register(new SkillHandler(bridgeContext));
     dispatcher.register(new DependencyHandler(bridgeContext));
+    dispatcher.register(new CliStatusHandler(bridgeContext));
+    dispatcher.register(new CliModelsHandler(bridgeContext));
     this._log.appendLine(`[BRIDGE] Registered ${dispatcher.getHandlerCount()} modular handlers`);
     return dispatcher;
   }
@@ -607,7 +641,15 @@ export class BridgeServer {
       this._statusBarItem.hide();
       return;
     }
-    const provider = this._activeProvider === 'codex' ? 'Codex' : 'Claude';
+    const providerLabels: Record<RuntimeProviderId, string> = {
+      claude: 'Claude',
+      codex: 'Codex',
+      grok: 'Grok',
+      kimi: 'Kimi',
+      opencode: 'OpenCode',
+      pi: 'PI',
+    };
+    const provider = providerLabels[this._activeProvider] ?? this._activeProvider;
     const model = this._selectedModel ? ` ${this._selectedModel}` : '';
     const state = status ? ` ${status}` : '';
     this._statusBarItem.text = `$(comment-discussion) ${provider}${model}${state}`;
@@ -770,16 +812,20 @@ export class BridgeServer {
     params.workspacePath = params.workspacePath ?? (effectiveWorkingDirectory || this._workspacePath);
     params.cwd = params.cwd ?? effectiveWorkingDirectory;
 
-    const providerFromPayload = params?.provider;
-    const activeProvider: 'claude' | 'codex' =
-      providerFromPayload === 'codex' || providerFromPayload === 'claude'
-        ? providerFromPayload
+    const providerFromPayload = typeof params?.provider === 'string' ? params.provider : '';
+    const activeProvider: RuntimeProviderId =
+      isRuntimeProvider(providerFromPayload)
+        ? (providerFromPayload as RuntimeProviderId)
         : this._activeProvider;
 
     // Map webview event names → daemon method names
     const METHOD_MAP: Record<string, string> = {
       'send_message':                  `${activeProvider}.send`,
-      'send_message_with_attachments': activeProvider === 'codex' ? 'codex.send' : 'claude.sendWithAttachments',
+      // Attachments only for Claude SDK path; CLI/Codex fall back to plain send.
+      'send_message_with_attachments':
+        activeProvider === 'claude'
+          ? 'claude.sendWithAttachments'
+          : `${activeProvider}.send`,
       'preconnect':                    'claude.preconnect',
       'abort':                         'abort',
       'reset_runtime':                 'claude.resetRuntime',
@@ -793,6 +839,30 @@ export class BridgeServer {
     if (!method) {
       this._log.appendLine(`[BRIDGE] No method mapping for event: ${event}`);
       return;
+    }
+
+    // Scope abort to this webview's in-flight send requests so multi-window
+    // stop only cancels that window (not every concurrent turn).
+    if (event === 'abort') {
+      const targetRequestIds: string[] = [];
+      for (const [reqId, wv] of this._pendingWebviews.entries()) {
+        if (wv !== webview) continue;
+        const reqEvent = this._requestEvents.get(reqId);
+        if (
+          reqEvent === 'send_message' ||
+          reqEvent === 'send_message_with_attachments' ||
+          this._streamStarted.has(reqId)
+        ) {
+          targetRequestIds.push(reqId);
+        }
+      }
+      params = {
+        ...params,
+        targetRequestIds,
+      };
+      this._log.appendLine(
+        `[BRIDGE] abort scoped to webview requestIds=${targetRequestIds.join(',') || '(none)'}`,
+      );
     }
 
     this._fillSelectedText(params);
@@ -809,6 +879,9 @@ export class BridgeServer {
       if (activeProvider === 'codex') {
         params.sandboxMode = params.sandboxMode ?? this.getCodexSandboxMode();
       }
+      // Ensure daemon routing receives the active provider even if the webview
+      // omitted it (CLI providers rely on this for session continuity).
+      params.provider = activeProvider;
     }
 
     const userInputAsTyped =
@@ -1035,6 +1108,13 @@ export class BridgeServer {
         this._emitStreamStart(msg.id, webview);
       } else if (line === '[STREAM_END]' || line === '[MESSAGE_END]') {
         this._emitStreamEnd(msg.id, webview);
+      } else if (line === '[STREAM_HEARTBEAT]') {
+        // Keep stall watchdog alive during long tool phases with no text deltas
+        // (Codex app-server / multi-step turns). Does not open a new stream.
+        webview.postMessage({
+          type: 'js_eval',
+          content: 'window.onStreamingHeartbeat && window.onStreamingHeartbeat()',
+        });
       } else if (line.startsWith('[CONTENT_DELTA] ')) {
         let delta: string;
         const rawDelta = line.slice('[CONTENT_DELTA] '.length);
@@ -1149,8 +1229,16 @@ export class BridgeServer {
             const sid = this._lastSessionId.get(msg.id) ?? '';
             const text = this._historyService.extractCodexTextFromContent(parsed.message.content);
             if (parsed.type === 'assistant' && text.trim()) {
-              // Mark that assistant textual content has already streamed for this turn.
-              this._contentStarted.add(msg.id);
+              // Codex non-streaming (or final-only CLI snapshots) may only send
+              // [MESSAGE] without prior [CONTENT_DELTA]. Surface text once so the
+              // webview streaming slot is not left blank.
+              if (!this._contentStarted.has(msg.id)) {
+                this._emitStreamStart(msg.id, webview);
+                this._contentStarted.add(msg.id);
+                webview.postMessage({ type: 'content_delta', content: text });
+              } else {
+                this._contentStarted.add(msg.id);
+              }
               this._latestAssistantPreview.set(msg.id, text.trim());
             }
             if (sid) {
@@ -1358,10 +1446,12 @@ export class BridgeServer {
         } catch {
           request.chunks.push(rawDelta.trim().replace(/^"|"$/g, ''));
         }
+        this._emitInternalTextProgress(request);
         return true;
       }
       if (line.startsWith('[CONTENT] ')) {
         request.chunks.push(line.slice('[CONTENT] '.length));
+        this._emitInternalTextProgress(request);
         return true;
       }
       if (line.startsWith('[MESSAGE] ')) {
@@ -1369,12 +1459,14 @@ export class BridgeServer {
         const text = this._extractTextFromDaemonMessage(parsed);
         if (text) {
           request.chunks.push(text);
+          this._emitInternalTextProgress(request);
         }
         return true;
       }
       const parsed = this._safeJson<any>(line, null);
       if (parsed?.result && typeof parsed.result === 'string') {
         request.chunks.push(parsed.result);
+        this._emitInternalTextProgress(request);
       }
       return true;
     }
@@ -1392,6 +1484,21 @@ export class BridgeServer {
     }
 
     return true;
+  }
+
+  private _emitInternalTextProgress(request: {
+    chunks: string[];
+    onProgress?: (partial: string) => void;
+  }): void {
+    if (!request.onProgress) return;
+    const partial = this._dedupeTextChunks(request.chunks);
+    if (partial) {
+      try {
+        request.onProgress(partial);
+      } catch {
+        // ignore consumer errors
+      }
+    }
   }
 
   private _extractTextFromDaemonMessage(parsed: any): string {
@@ -1554,7 +1661,33 @@ export class BridgeServer {
     this._usageStatistics.postStatistics(webview);
   }
 
+  /**
+   * Gate Output Channel writes via `ccGui.enableDebugLog` (default: false).
+   * When disabled, append* is a no-op so normal use stays quiet.
+   */
+  private _applyDebugLogSetting(fromConfigChange: boolean): void {
+    const enabled =
+      vscode.workspace.getConfiguration('ccGui').get<boolean>('enableDebugLog') === true;
+    // Drive view/title menu visibility for openDevTools (package.json when clause).
+    void vscode.commands.executeCommand('setContext', 'ccGui.enableDebugLog', enabled);
+    if (enabled) {
+      this._log.appendLine = this._logAppendLine;
+      this._log.append = this._logAppend;
+      if (fromConfigChange) {
+        this._logAppendLine('[CC GUI] Debug log enabled (ccGui.enableDebugLog)');
+        this._log.show(true);
+      }
+    } else {
+      if (fromConfigChange) {
+        this._logAppendLine('[CC GUI] Debug log disabled (ccGui.enableDebugLog)');
+      }
+      this._log.appendLine = () => {};
+      this._log.append = () => {};
+    }
+  }
+
   dispose() {
+    this._configListener?.dispose();
     this._runtimeContext.dispose();
     this._permissionIpc.dispose();
     this._bridgeProcess?.kill();

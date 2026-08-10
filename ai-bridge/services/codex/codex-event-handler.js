@@ -16,7 +16,12 @@ import { existsSync } from 'fs';
 import { readFile, unlink, writeFile } from 'fs/promises';
 import { requestPermissionFromJava } from '../../permission-handler.js';
 import { findSessionFileByThreadId } from './codex-agents-loader.js';
-import { extractPatchFromResponseItemPayload, parseApplyPatchToOperations } from './codex-patch-parser.js';
+import {
+  extractPatchFromExecCommand,
+  extractPatchFromResponseItemPayload,
+  parseApplyPatchToOperations,
+} from './codex-patch-parser.js';
+import { emitFileChangeItemAsTools } from './codex-file-change-emit.js';
 import {
   truncateForDisplay, getStableItemId, extractCommand,
   smartToolName, smartDescription, mapCommandToolNameToPermissionToolName,
@@ -227,6 +232,7 @@ export function createInitialEventState(emitMessage) {
     processedPatchCallIds: new Set(),
     processedSessionFunctionCallIds: new Set(),
     processedSessionFunctionOutputIds: new Set(),
+    emittedFileChangeToolIds: new Set(),
     reasoningTextCache: new Map(),
     assistantTextCache: new Map(),
     reasoningObserved: false,
@@ -497,14 +503,39 @@ function emitSyntheticPatchOperations(state, patchBatches, isError, deniedCallId
       const toolUseId = `codex_patch_${batch.callId}_${index}`;
       const toolName = op.toolName === 'write' ? 'write' : 'edit';
       if (!state.emittedToolUseIds.has(toolUseId)) {
+        const oldS = typeof op.oldString === 'string' ? op.oldString : '';
+        const newS = typeof op.newString === 'string' ? op.newString : '';
+        // apply_patch ops already separate −/+ lines (context may appear on both
+        // sides). Prefer counting only exclusive lines for footer stats.
+        const oldSet = new Set(oldS ? oldS.split('\n') : []);
+        const newSet = new Set(newS ? newS.split('\n') : []);
+        let additions = 0;
+        let deletions = 0;
+        if (toolName === 'write' || oldS === '') {
+          additions = newS ? newS.split('\n').length : 0;
+          deletions = 0;
+        } else if (newS === '') {
+          additions = 0;
+          deletions = oldS ? oldS.split('\n').length : 0;
+        } else {
+          for (const line of (newS ? newS.split('\n') : [])) {
+            if (!oldSet.has(line)) additions += 1;
+          }
+          for (const line of (oldS ? oldS.split('\n') : [])) {
+            if (!newSet.has(line)) deletions += 1;
+          }
+        }
         state.emitMessage(toolUseMsg(toolUseId, toolName, {
           file_path: op.filePath,
-          old_string: op.oldString,
-          new_string: op.newString,
+          old_string: oldS,
+          new_string: newS,
+          content: toolName === 'write' ? newS : undefined,
           start_line: op.startLine,
           end_line: op.endLine,
           replace_all: false,
-          source: 'codex_session_patch'
+          source: 'codex_session_patch',
+          additions,
+          deletions,
         }));
         state.emittedToolUseIds.add(toolUseId);
       }
@@ -554,11 +585,22 @@ async function maybeRequestCommandApprovalViaBridge(state, config, { toolUseId, 
   return false;
 }
 
-function emitThinkingDelta(text) {
+function isStreamingEnabled(config) {
+  // Default ON when config omits the flag (unit tests / older callers).
+  return config?.streamingEnabled !== false;
+}
+
+function emitThinkingDelta(text, config) {
+  if (!isStreamingEnabled(config)) {
+    return;
+  }
   process.stdout.write(`[THINKING_DELTA] ${JSON.stringify(text)}\n`);
 }
 
-function emitContentDelta(text) {
+function emitContentDelta(text, config) {
+  if (!isStreamingEnabled(config)) {
+    return;
+  }
   process.stdout.write(`[CONTENT_DELTA] ${JSON.stringify(text)}\n`);
 }
 
@@ -580,7 +622,7 @@ function emitThinkingBlock(state, text) {
   });
 }
 
-function maybeEmitReasoning(state, item) {
+function maybeEmitReasoning(state, item, config) {
   if (!item || item.type !== 'reasoning') return;
   const raw = typeof item.text === 'string' ? item.text : '';
   const text = raw.trim();
@@ -592,8 +634,10 @@ function maybeEmitReasoning(state, item) {
   state.reasoningTextCache.set(stableId, text);
   state.reasoningObserved = true;
   if (delta) {
-    emitThinkingDelta(delta);
+    emitThinkingDelta(delta, config);
   }
+  // Non-streaming: keep a single thinking snapshot MESSAGE for history.
+  // Streaming: still emit the block so turn_messages can capture reasoning.
   emitThinkingBlock(state, text);
 }
 
@@ -625,13 +669,13 @@ async function handleItemCompleted(item, state, config) {
   console.log('[DEBUG] item.completed - type:', item.type);
   console.log('[DEBUG] item.completed - has text:', !!item.text);
   console.log('[DEBUG] item.completed - has agent_message:', !!item.agent_message);
-  maybeEmitReasoning(state, item);
+  maybeEmitReasoning(state, item, config);
 
   if (item.type === 'agent_message') {
-    handleAgentMessage(item, state);
+    handleAgentMessage(item, state, config, { emitSnapshot: true });
   } else if (item.type === 'command_execution') {
-    handleCommandExecution(item, state);
-  } else if (item.type === 'file_change') {
+    handleCommandExecution(item, state, config);
+  } else if (item.type === 'file_change' || item.type === 'fileChange') {
     await handleFileChange(item, state, config);
   } else if (item.type === 'mcp_tool_call') {
     handleMcpToolCall(item, state);
@@ -640,7 +684,7 @@ async function handleItemCompleted(item, state, config) {
   }
 }
 
-function handleAgentMessage(item, state, { emitSnapshot = true } = {}) {
+function handleAgentMessage(item, state, config, { emitSnapshot = true } = {}) {
   const text = item.text || '';
   console.log('[DEBUG] agent_message text length:', text.length);
   console.log('[DEBUG] agent_message text (first 100 chars):', text.substring(0, 100));
@@ -651,14 +695,16 @@ function handleAgentMessage(item, state, { emitSnapshot = true } = {}) {
   state.assistantTextCache.set(stableId, text);
   if (delta) {
     state.assistantText += delta;
-    emitContentDelta(delta);
+    // Progressive UI path: only when streamingEnabled.
+    emitContentDelta(delta, config);
   }
+  // Final/non-streaming path relies on [MESSAGE] snapshots (and bridge fallback).
   if (emitSnapshot && text && text.trim()) {
     state.emitMessage(textMsg(text));
   }
 }
 
-function handleCommandExecution(item, state) {
+function handleCommandExecution(item, state, config = {}) {
   const toolUseId = ensureToolUseId(state, 'completed', item);
   const command = extractCommand(item);
   if (state.deniedCommandToolUseIds.has(toolUseId)) {
@@ -678,38 +724,104 @@ function handleCommandExecution(item, state) {
   }
   state.emitMessage(toolResultMsg(toolUseId, isError, outputStr && outputStr.trim() ? outputStr : '(no output)'));
   state.emittedToolResultIds.add(toolUseId);
+
+  // If the command embeds apply_patch, also surface edit/write tools for the Edit tab
+  // (exec --json often only emits command_execution, not a separate file_change item).
+  try {
+    const patchText = extractPatchFromExecCommand(command)
+      || extractPatchFromExecCommand(outputStrRaw);
+    if (patchText) {
+      const operations = parseApplyPatchToOperations(patchText)
+        .map((op) => ({
+          ...op,
+          filePath: resolveFilePath(op.filePath, config.cwd),
+        }))
+        .filter((op) => op.filePath && (op.oldString !== '' || op.newString !== ''));
+      if (operations.length > 0) {
+        const emitted = emitSyntheticPatchOperations(
+          state,
+          [{ callId: toolUseId, operations }],
+          isError,
+        );
+        if (emitted > 0) {
+          console.log('[DEBUG] command_execution apply_patch → edit tools:', emitted);
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('[DEBUG] Failed to extract patch from command_execution:', error?.message || error);
+  }
 }
 
 async function handleFileChange(item, state, config) {
   const status = item.status || 'completed';
-  const isError = status !== 'completed';
+  const isError =
+    status !== 'completed'
+    && status !== 'success'
+    && !(typeof status === 'object' && status?.type === 'completed');
   try { console.log('[DEBUG] file_change raw item:', JSON.stringify(item)); }
   catch (error) { console.log('[DEBUG] file_change raw item stringify failed:', error?.message || error); }
 
-  const patchBatches = await collectPatchOperationsFromSession(state, config);
-  let deniedCallIds = new Set();
-  let rollbackByCallId = new Map();
-
-  const shouldBridgeApproval = !isError &&
-    !isAutoEditPermissionMode(config.normalizedPermissionMode) &&
-    (config.threadOptions.approvalPolicy && config.threadOptions.approvalPolicy !== 'never');
-  if (shouldBridgeApproval && patchBatches.length > 0) {
-    deniedCallIds = await requestPatchApprovalsViaBridge(patchBatches);
-    if (deniedCallIds.size > 0) {
-      rollbackByCallId = await rollbackDeniedPatchBatches(patchBatches, deniedCallIds);
-      const failedRollbackCount = Array.from(rollbackByCallId.values())
-        .filter((entry) => entry && entry.success === false).length;
-      state.emitMessage({
-        type: 'status',
-        message: failedRollbackCount > 0
-          ? `Approval denied: attempted to rollback ${deniedCallIds.size} change(s), ${failedRollbackCount} rollback(s) failed`
-          : `Approval denied: rolled back ${deniedCallIds.size} change(s)`
-      });
+  // 1) Prefer structured changes[] on the item (newer Codex ThreadItem shape).
+  let emitted = 0;
+  if (Array.isArray(item.changes) && item.changes.length > 0) {
+    const normalizedChanges = item.changes.map((change) => {
+      if (!change || typeof change !== 'object') return change;
+      const path = change.path || change.file_path || change.filePath;
+      return {
+        ...change,
+        path: path ? resolveFilePath(path, config.cwd) : path,
+      };
+    });
+    emitted = emitFileChangeItemAsTools(
+      {
+        id: item.id || getStableItemId(item) || randomUUID(),
+        type: 'fileChange',
+        status: isError ? 'failed' : 'completed',
+        changes: normalizedChanges,
+      },
+      state.emitMessage,
+      state.emittedFileChangeToolIds,
+    );
+    // Keep emittedToolUseIds in sync so other synthesizers don't double-fire.
+    for (const id of state.emittedFileChangeToolIds) {
+      state.emittedToolUseIds.add(id);
+    }
+    if (emitted > 0) {
+      console.log('[DEBUG] file_change from item.changes:', emitted);
     }
   }
-  const emitted = emitSyntheticPatchOperations(state, patchBatches, isError, deniedCallIds, rollbackByCallId);
-  if (emitted > 0) console.log('[DEBUG] file_change synthesized operations:', emitted);
-  else console.log('[DEBUG] file_change: no patch operations found in session log');
+
+  // 2) Fall back to session JSONL apply_patch scan (legacy exec path).
+  if (emitted === 0) {
+    const patchBatches = await collectPatchOperationsFromSession(state, config);
+    let deniedCallIds = new Set();
+    let rollbackByCallId = new Map();
+
+    const shouldBridgeApproval = !isError &&
+      !isAutoEditPermissionMode(config.normalizedPermissionMode) &&
+      (config.threadOptions.approvalPolicy && config.threadOptions.approvalPolicy !== 'never');
+    if (shouldBridgeApproval && patchBatches.length > 0) {
+      deniedCallIds = await requestPatchApprovalsViaBridge(patchBatches);
+      if (deniedCallIds.size > 0) {
+        rollbackByCallId = await rollbackDeniedPatchBatches(patchBatches, deniedCallIds);
+        const failedRollbackCount = Array.from(rollbackByCallId.values())
+          .filter((entry) => entry && entry.success === false).length;
+        state.emitMessage({
+          type: 'status',
+          message: failedRollbackCount > 0
+            ? `Approval denied: attempted to rollback ${deniedCallIds.size} change(s), ${failedRollbackCount} rollback(s) failed`
+            : `Approval denied: rolled back ${deniedCallIds.size} change(s)`
+        });
+      }
+    }
+    emitted = emitSyntheticPatchOperations(state, patchBatches, isError, deniedCallIds, rollbackByCallId);
+    if (emitted > 0) console.log('[DEBUG] file_change synthesized from session log:', emitted);
+  }
+
+  if (emitted === 0) {
+    console.log('[DEBUG] file_change: no structured changes and no session patch operations found');
+  }
 }
 
 function handleMcpToolCall(item, state) {
@@ -751,6 +863,9 @@ function handleMcpToolCall(item, state) {
 export async function processCodexEventStream(events, state, config) {
   let rawEventIndex = 0;
   try {
+    console.log('[CCG_DEBUG] processCodexEventStream start:', JSON.stringify({
+      streamingEnabled: isStreamingEnabled(config),
+    }));
     for await (const event of events) {
       rawEventIndex += 1;
       const rawEventJson = stringifyRawEvent(event);
@@ -802,7 +917,7 @@ export async function processCodexEventStream(events, state, config) {
       }
 
       case 'item.started': {
-        maybeEmitReasoning(state, event.item);
+        maybeEmitReasoning(state, event.item, config);
         if (event.item && event.item.type === 'command_execution') {
           const toolUseId = ensureToolUseId(state, 'started', event.item);
           const command = extractCommand(event.item);
@@ -835,9 +950,11 @@ export async function processCodexEventStream(events, state, config) {
       }
 
       case 'item.updated':
-        maybeEmitReasoning(state, event.item);
+        maybeEmitReasoning(state, event.item, config);
         if (event.item && event.item.type === 'agent_message') {
-          handleAgentMessage(event.item, state, { emitSnapshot: false });
+          // Streaming path: deltas only (no full MESSAGE spam).
+          // Non-streaming: still update caches; snapshot waits for item.completed.
+          handleAgentMessage(event.item, state, config, { emitSnapshot: false });
         }
         await replayMissingFunctionCallsDuringStream(state, config);
         break;
@@ -855,6 +972,17 @@ export async function processCodexEventStream(events, state, config) {
         const replayed = await replayMissingFunctionCallsFromSession(state, config);
         if (replayed.toolUses > 0 || replayed.toolResults > 0) {
           console.log('[DEBUG] Replayed session function calls:', JSON.stringify(replayed));
+        }
+        // Final pass: synthesize any apply_patch ops still only in the session log
+        // (covers non-streaming exec turns where file_change never fired).
+        try {
+          const lateBatches = await collectPatchOperationsFromSession(state, config);
+          const lateEmitted = emitSyntheticPatchOperations(state, lateBatches, false);
+          if (lateEmitted > 0) {
+            console.log('[DEBUG] turn.completed late session patch → edit tools:', lateEmitted);
+          }
+        } catch (error) {
+          console.warn('[DEBUG] turn.completed patch scan failed:', error?.message || error);
         }
         if (event.usage) {
           console.log('[DEBUG] Token usage:', event.usage);

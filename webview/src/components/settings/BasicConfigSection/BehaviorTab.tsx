@@ -87,6 +87,8 @@ export interface BehaviorTabProps {
   onCommitGenerationEnabledChange?: (enabled: boolean) => void;
   statusBarWidgetEnabled?: boolean;
   onStatusBarWidgetEnabledChange?: (enabled: boolean) => void;
+  enableDebugLog?: boolean;
+  onEnableDebugLogChange?: (enabled: boolean) => void;
   aiTitleGenerationEnabled?: boolean;
   onAiTitleGenerationEnabledChange?: (enabled: boolean) => void;
   /**
@@ -131,6 +133,8 @@ const BehaviorTab = ({
   onCommitGenerationEnabledChange = () => {},
   statusBarWidgetEnabled = true,
   onStatusBarWidgetEnabledChange = () => {},
+  enableDebugLog = false,
+  onEnableDebugLogChange = () => {},
   aiTitleGenerationEnabled = true,
   onAiTitleGenerationEnabledChange = () => {},
   newSessionConfirmEnabled = true,
@@ -335,6 +339,32 @@ const BehaviorTab = ({
         <small className={styles.formHint}>
           <span className="codicon codicon-info" />
           <span>{t('settings.basic.statusBarWidget.hint')}</span>
+        </small>
+      </div>
+
+      {/* Debug log toggle */}
+      <div className={styles.streamingSection}>
+        <div className={styles.fieldHeader}>
+          <span className="codicon codicon-output" />
+          <span className={styles.fieldLabel}>{t('settings.basic.debugLog.label')}</span>
+        </div>
+        <label className={styles.toggleWrapper}>
+          <input
+            type="checkbox"
+            className={styles.toggleInput}
+            checked={enableDebugLog}
+            onChange={(e) => onEnableDebugLogChange(e.target.checked)}
+          />
+          <span className={styles.toggleSlider} />
+          <span className={styles.toggleLabel}>
+            {enableDebugLog
+              ? t('settings.basic.debugLog.enabled')
+              : t('settings.basic.debugLog.disabled')}
+          </span>
+        </label>
+        <small className={styles.formHint}>
+          <span className="codicon codicon-info" />
+          <span>{t('settings.basic.debugLog.hint')}</span>
         </small>
       </div>
 

@@ -274,6 +274,18 @@ interface Window {
    */
   updateActiveProvider?: (providerId: string) => void;
 
+  /**
+   * CLI install/version detection payload (Settings → CLI tab)
+   */
+  updateCliStatus?: (json: string) => void;
+
+  /**
+   * Dynamic CLI model catalog (Kimi / OpenCode / PI)
+   */
+  setCliModels?: (
+    dataOrStr: string | { provider?: string; models?: unknown; success?: boolean; error?: string }
+  ) => void;
+
   updateThinkingEnabled?: (json: string) => void;
 
   /**
@@ -327,6 +339,11 @@ interface Window {
   updateStatusBarWidgetEnabled?: (json: string) => void;
 
   /**
+   * Update debug log enabled state
+   */
+  updateEnableDebugLog?: (json: string) => void;
+
+  /**
    * Update permission dialog timeout setting
    */
   updatePermissionDialogTimeout?: (json: string) => void;
@@ -370,6 +387,11 @@ interface Window {
    * File path resolved callback - receives the resolved absolute path for a file link tooltip.
    */
   onFilePathResolved?: (json: string) => void;
+
+  /**
+   * Drag-drop path batch resolved callback (absolute OS paths from extension host).
+   */
+  onDropPathsResolved?: (json: string) => void;
 
   /**
    * Show success message
