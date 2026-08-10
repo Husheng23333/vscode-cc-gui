@@ -136,6 +136,8 @@
   padding: 4px 0;
   white-space: nowrap;
   font-family: inherit;
+  /* Above input-editable and status chrome when menus open upward */
+  z-index: 10050;
 }
 
 .selector-option {

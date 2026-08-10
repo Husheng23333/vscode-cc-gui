@@ -13,6 +13,34 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    version: '0.1.1',
+    date: '2026-08-10',
+    content: {
+      en: `- Bump version to 0.1.1
+- Fix chat toolbar selectors clipped by overflow (config / provider / mode unclickable)
+- Fix revoking local settings.json authorization
+- Surface Codex/Claude send failures in chat; swallow success JSON envelopes
+- Fix Grok/CLI history isolation`,
+      zh: `- 版本升级到 0.1.1
+- 修复底部工具栏配置/供应商/模式按钮菜单被裁切导致点不动
+- 修复取消本地 settings.json 授权无效
+- 发送失败在聊天区展示；成功结果 JSON 不再误入正文
+- 修复 Grok/CLI 历史隔离`,
+    },
+  },
+  {
+    version: '0.1.0',
+    date: '2026-08-10',
+    content: {
+      en: `- Bump version to 0.1.0 for Marketplace-compatible SemVer
+- Clean packaging ignores (drop tests, sql.js debug builds, non-dist webview files)
+- Remove personal local paths from README packaging instructions`,
+      zh: `- 版本升级到 0.1.0，符合 Marketplace 的 SemVer 要求
+- 收紧打包忽略规则（排除测试、sql.js debug 构建、非 dist 的 webview 文件）
+- 移除 README 打包说明中的个人本机路径`,
+    },
+  },
+  {
     version: '0.0.2-fix2',
     date: '2026-08-05',
     content: {

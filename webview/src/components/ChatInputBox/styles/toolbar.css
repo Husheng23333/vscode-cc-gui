@@ -28,18 +28,10 @@
   gap: 4px;
   flex: 1 1 0%;
   min-width: 0;
-  /* Allow this flex item to shrink below its children's intrinsic width so
-   * the send button on the right is never pushed outside the panel. */
-  overflow-x: auto;
-  overflow-y: visible;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.button-area-left::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
+  /* Must stay visible: overflow-x:auto forces overflow-y to compute to auto as well,
+   * which clips mode/config/provider dropdowns that open upward (looks like "can't click").
+   * Narrow layouts rely on container-query icon-only chrome + right-side z-index instead. */
+  overflow: visible;
 }
 
 .button-area-right {
