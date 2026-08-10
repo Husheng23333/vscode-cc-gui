@@ -89,6 +89,30 @@ describe('ProviderStore shared config', () => {
     assert.equal(syncedSnapshots.length, 1);
   });
 
+  it('clears claude.current when revoking local settings auth (all providers inactive)', async () => {
+    const store = new ProviderStore(createContext(), {
+      syncProviderToDisk: () => {},
+    });
+
+    await store.saveClaudeProviders([
+      { id: '__local_settings_json__', name: 'Local Settings', isActive: true },
+      { id: 'proxy-a', name: 'Proxy A', isActive: false },
+    ]);
+    assert.equal(readConfig().claude.current, '__local_settings_json__');
+    assert.equal(store.getActiveClaudeProvider()?.id, '__local_settings_json__');
+
+    // Mirrors switch_provider { id: '__disabled__' }: every card isActive=false.
+    await store.saveClaudeProviders([
+      { id: '__local_settings_json__', name: 'Local Settings', isActive: false },
+      { id: 'proxy-a', name: 'Proxy A', isActive: false },
+    ]);
+
+    assert.equal(readConfig().claude.current, '');
+    assert.equal(store.getActiveClaudeProvider(), null);
+    const list = store.getClaudeProviders();
+    assert.equal(list.find((p: any) => p.id === '__local_settings_json__')?.isActive, false);
+  });
+
   it('migrates legacy Codex globalState into the shared config file', () => {
     const store = new ProviderStore(
       createContext({
