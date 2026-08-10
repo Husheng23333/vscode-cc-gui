@@ -370,7 +370,7 @@ export async function runCodexAppServerTurn(options = {}) {
 
   try {
     await sendRequest('initialize', {
-      clientInfo: { name: 'vscode-cc-gui', version: '0.0.2' },
+      clientInfo: { name: 'vscode-cc-gui', version: '0.1.0' },
       capabilities: { experimentalApi: true },
     });
     sendNotification('initialized', {});

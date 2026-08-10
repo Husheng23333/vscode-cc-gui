@@ -1,5 +1,17 @@
 # Changelog
 
+##### **2026年8月10日（v0.1.0）**
+
+English:
+- Bump version to 0.1.0 for Marketplace-compatible SemVer
+- Clean packaging ignores (drop tests, sql.js debug builds, non-dist webview files)
+- Remove personal local paths from README packaging instructions
+
+中文:
+- 版本升级到 0.1.0，符合 Marketplace 的 SemVer 要求
+- 收紧打包忽略规则（排除测试、sql.js debug 构建、非 dist 的 webview 文件）
+- 移除 README 打包说明中的个人本机路径
+
 ##### **2026年8月5日（v0.0.2-fix2）**
 
 English:

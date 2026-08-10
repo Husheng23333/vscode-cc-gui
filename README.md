@@ -8,38 +8,29 @@ A 100% open-source GUI for Claude Code CLI and Codex, shipped as a VS Code exten
 
 ---
 
-## Windows PowerShell: Build and Package the VSIX
+## Build and Package the VSIX
 
-Run the following commands from the project root. This builds the extension and webview, then packages them into a `.vsix` file without relying on a globally installed `vsce` command:
+From the project root:
 
-```powershell
-cd D:\livehime\code\vscode-cc-gui
+```bash
 npm install
+cd webview && npm install && cd ..
+cd ai-bridge && npm install && cd ..
 npm run build
 npm exec --yes --package=@vscode/vsce -- vsce package
 ```
 
-The generated file is named `vscode-cc-gui-<version>.vsix` and is placed in the project root. Install it in VS Code with:
+The generated file is named `vscode-cc-gui-<version>.vsix` in the project root. Install it in VS Code with:
 
-```powershell
-code --install-extension .\vscode-cc-gui-0.0.2-fix2.vsix
+```bash
+code --install-extension ./vscode-cc-gui-0.1.0.vsix
 ```
 
-If the webview dependencies are missing, install them once and run the build again:
+### Repair a broken global `vsce` command
 
-```powershell
-cd D:\livehime\code\vscode-cc-gui\webview
-npm install
-cd ..
-npm run build
-npm exec --yes --package=@vscode/vsce -- vsce package
-```
+If a global `vsce` install is broken, reinstall it:
 
-### Repair the Global `vsce` Command
-
-If `vsce.cmd` reports `Cannot find module ...@vscode\\vsce\\vsce`, reinstall the global package:
-
-```powershell
+```bash
 npm uninstall -g @vscode/vsce
 npm install -g @vscode/vsce
 vsce package
