@@ -1058,7 +1058,7 @@ describe('useWindowCallbacks integration', () => {
         } as never,
         timestamp: new Date().toISOString(),
       };
-      const { opts } = createOptsWithMessages([assistantWithThreeTools, userWithOneResult]);
+      const { opts, buffer } = createOptsWithMessages([assistantWithThreeTools, userWithOneResult]);
       renderHook(() => useWindowCallbacks(opts));
 
       act(() => { window.onStreamStart!(); });
@@ -1067,6 +1067,48 @@ describe('useWindowCallbacks integration', () => {
       expect(window.__deniedToolIds?.has('tool-1')).toBe(false);
       expect(window.__deniedToolIds?.has('tool-2')).toBe(true);
       expect(window.__deniedToolIds?.has('tool-3')).toBe(true);
+      // Synthetic tool_result carrier so GenericToolBlock flips off pending spinner
+      const last = buffer.current[buffer.current.length - 1];
+      expect(last?.type).toBe('user');
+      expect(last?.content).toBe('[tool_result]');
+      const blocks = (last?.raw as { content?: Array<{ tool_use_id?: string }> })?.content ?? [];
+      expect(blocks.map((b) => b.tool_use_id).sort()).toEqual(['tool-2', 'tool-3']);
+    });
+
+    it('resolves tool_result that is not the immediate next message (interleaved assistant text)', () => {
+      // tool_use → more assistant thinking → later tool_result
+      const assistantTool: ClaudeMessage = {
+        type: 'assistant',
+        content: '',
+        raw: {
+          content: [
+            { type: 'tool_use', id: 'tool-wait', name: 'get_command_or_subagent_output', input: { timeout_ms: 300000 } },
+          ],
+        } as never,
+        timestamp: new Date().toISOString(),
+      };
+      const assistantMore: ClaudeMessage = {
+        type: 'assistant',
+        content: 'still waiting',
+        raw: { content: [{ type: 'text', text: 'still waiting' }] } as never,
+        timestamp: new Date().toISOString(),
+      };
+      const userResult: ClaudeMessage = {
+        type: 'user',
+        content: '[tool_result]',
+        raw: {
+          content: [{ type: 'tool_result', tool_use_id: 'tool-wait', content: 'done' }],
+        } as never,
+        timestamp: new Date().toISOString(),
+      };
+      const { opts } = createOptsWithMessages([assistantTool, assistantMore, userResult]);
+      renderHook(() => useWindowCallbacks(opts));
+
+      act(() => { window.onStreamStart!(); });
+      act(() => { window.onStreamEnd!('5'); });
+
+      // Must NOT mark as interrupted — result exists after intervening assistant text
+      expect(window.__deniedToolIds?.has('tool-wait')).toBe(false);
     });
 
     it('does not pollute __deniedToolIds when every tool_use has a tool_result', () => {

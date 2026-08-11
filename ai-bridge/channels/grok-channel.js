@@ -20,16 +20,18 @@ export async function handleGrokCommand(command, args, stdinData) {
           cwd,
           model,
           reasoningEffort,
+          attachments,
         } = stdinData;
         await grokSendMessage(
           message,
           sessionId || '',
           cwd || '',
           model || '',
-          reasoningEffort || 'medium'
+          reasoningEffort || 'medium',
+          Array.isArray(attachments) ? attachments : [],
         );
       } else {
-        await grokSendMessage(args[0], args[1], args[2], args[3], args[4]);
+        await grokSendMessage(args[0], args[1], args[2], args[3], args[4], []);
       }
       break;
     }

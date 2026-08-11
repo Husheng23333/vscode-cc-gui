@@ -27,6 +27,7 @@
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { createInterface } from 'readline';
+import { readFile } from 'fs/promises';
 import { resolveGrokCliPath } from '../../utils/grok-cli-path.js';
 import {
   createToolTailState,
@@ -34,6 +35,12 @@ import {
   pollChatHistoryToolSignals,
   resolveChatHistoryPath,
 } from './history-tools.js';
+import {
+  buildGrokPromptBlocksJson,
+  cleanupGrokPromptFile,
+  collectImageAttachments,
+  writeGrokPromptFile,
+} from './grok-image-prompt.js';
 
 const GROK_REASONING_EFFORTS = new Set(['low', 'medium', 'high']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -165,12 +172,24 @@ function resolveGrokModelFlag(model) {
   return trimmed;
 }
 
-function buildGrokArgs({ message, sessionId, model, reasoningEffort }) {
+/**
+ * Build headless grok argv.
+ * - Text-only: `-p <prompt>`
+ * - With images: `--prompt-file <staging.json>` (ACP blocks; avoids ARG_MAX)
+ *
+ * @param {{ message: string, sessionId: string, model: string, reasoningEffort: string, promptFile?: string|null }} opts
+ */
+function buildGrokArgs({ message, sessionId, model, reasoningEffort, promptFile = null }) {
   const args = [
     '--output-format', 'streaming-json',
     '--always-approve',
-    '-p', safePromptArg(message),
   ];
+
+  if (promptFile) {
+    args.push('--prompt-file', promptFile);
+  } else {
+    args.push('-p', safePromptArg(message));
+  }
 
   const modelFlag = resolveGrokModelFlag(model);
   if (modelFlag) {
@@ -221,18 +240,21 @@ function killChildTree(child) {
  * @param {string} cwd
  * @param {string} model  Config profile name for `-m` (default: omit → [models].default)
  * @param {string} reasoningEffort  low|medium|high
+ * @param {Array} [attachments]  Optional image attachments from the webview
  */
 export async function sendMessage(
   message,
   sessionId = '',
   cwd = '',
   model = '',
-  reasoningEffort = 'medium'
+  reasoningEffort = 'medium',
+  attachments = [],
 ) {
   let streamStarted = false;
   let streamEnded = false;
   let hadError = false;
   let resolvedSessionId = isUuid(sessionId) ? sessionId.trim() : null;
+  let promptFilePath = null;
 
   const emitStreamEndOnce = () => {
     if (!streamStarted || streamEnded) return;
@@ -245,8 +267,41 @@ export async function sendMessage(
   console.log('[STREAM_START]');
   streamStarted = true;
 
+  const workCwdEarly = cwd && cwd !== 'undefined' && cwd !== 'null' ? cwd : process.cwd();
+
+  // Materialise path-only attachments to base64 so buildGrokPromptBlocksJson can encode them.
+  let resolvedAttachments = attachments;
+  try {
+    resolvedAttachments = await materializePathAttachments(attachments);
+  } catch (error) {
+    hadError = true;
+    emitSendError(`Failed to load image attachments: ${error?.message || error}`);
+    emitStreamEndOnce();
+    return;
+  }
+
+  try {
+    const multimodal = buildGrokPromptBlocksJson(message, resolvedAttachments);
+    if (multimodal) {
+      promptFilePath = await writeGrokPromptFile(multimodal.json, workCwdEarly);
+      logDebug(`multimodal prompt-file images=${multimodal.imageCount} path=${promptFilePath}`);
+    }
+  } catch (error) {
+    hadError = true;
+    emitSendError(error?.message || String(error));
+    emitStreamEndOnce();
+    await cleanupGrokPromptFile(promptFilePath);
+    return;
+  }
+
   const bin = resolveGrokCliPath();
-  const args = buildGrokArgs({ message, sessionId, model, reasoningEffort });
+  const args = buildGrokArgs({
+    message,
+    sessionId,
+    model,
+    reasoningEffort,
+    promptFile: promptFilePath,
+  });
 
   // If we pre-assigned a new session id via -s, surface it immediately.
   const sessionFlagIndex = args.indexOf('-s');
@@ -260,7 +315,7 @@ export async function sendMessage(
   logDebug('spawn', bin, args.filter((_, i) => {
     // Avoid dumping the full prompt into logs.
     return !(args[i - 1] === '-p');
-  }).join(' '), `promptLen=${String(message || '').length}`);
+  }).join(' '), `promptLen=${String(message || '').length} images=${collectImageAttachments(resolvedAttachments).length}`);
 
   const env = {
     ...process.env,
@@ -407,4 +462,55 @@ export async function sendMessage(
       resolve();
     });
   });
+
+  await cleanupGrokPromptFile(promptFilePath);
+}
+
+/**
+ * Expand path-only / local_image attachments into base64 so prompt builder can
+ * encode ACP image blocks without re-reading later.
+ * @param {unknown} attachments
+ */
+async function materializePathAttachments(attachments) {
+  if (!Array.isArray(attachments) || attachments.length === 0) return [];
+  const out = [];
+  for (const item of attachments) {
+    if (!item || typeof item !== 'object') continue;
+    const a = /** @type {Record<string, unknown>} */ (item);
+    if (typeof a.data === 'string' && a.data.length > 0) {
+      out.push(a);
+      continue;
+    }
+    const filePath =
+      (typeof a.path === 'string' && a.path)
+      || (a.type === 'local_image' && typeof a.path === 'string' ? a.path : null);
+    if (!filePath) {
+      out.push(a);
+      continue;
+    }
+    try {
+      const buf = await readFile(String(filePath));
+      const ext = String(filePath).split('.').pop()?.toLowerCase() || 'png';
+      const mediaType =
+        (typeof a.mediaType === 'string' && a.mediaType.startsWith('image/')
+          ? a.mediaType
+          : null)
+        || (ext === 'jpg' || ext === 'jpeg'
+          ? 'image/jpeg'
+          : ext === 'gif'
+            ? 'image/gif'
+            : ext === 'webp'
+              ? 'image/webp'
+              : 'image/png');
+      out.push({
+        ...a,
+        mediaType,
+        data: buf.toString('base64'),
+      });
+    } catch (error) {
+      logWarn(`Failed to read image attachment path=${filePath}:`, error?.message || error);
+      out.push(a);
+    }
+  }
+  return out;
 }

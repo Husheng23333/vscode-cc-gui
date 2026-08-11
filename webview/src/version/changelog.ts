@@ -13,6 +13,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    version: '0.1.2',
+    date: '2026-08-11',
+    content: {
+      en: `- Bump version to 0.1.2
+- Fix Grok history: restore attached images when reloading sessions
+- Fix Grok session titles: prefer typed user_query over English AI generated_title (including image turns)
+- Fix Grok image send: pass attachments via \`--prompt-file\` so the model can see images (UI no longer shows a false optimistic-only image)
+- Fix tool spinners stuck pending after multi-step agent turns / stream end`,
+      zh: `- 版本升级到 0.1.2
+- 修复 Grok 历史重载后用户附件图片丢失
+- 修复 Grok 会话标题：优先使用用户输入原文，不再误用英文 AI 标题（含带图消息）
+- 修复 Grok 发图：通过 \`--prompt-file\` 把附件真正传给模型（避免仅 UI 有图、模型看不到）
+- 修复多步工具调用结束后转圈不消失的问题`,
+    },
+  },
+  {
     version: '0.1.1',
     date: '2026-08-10',
     content: {

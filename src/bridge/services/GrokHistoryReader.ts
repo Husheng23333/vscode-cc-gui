@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { imageBlockFromLocalPath } from './claudeImageRestore.ts';
 
 export interface GrokSessionInfo {
   sessionId: string;
@@ -209,10 +210,16 @@ export class GrokHistoryReader {
       if (value?.type !== 'user' || value.synthetic_reason) continue;
       const rawText = this.extractContentText(value.content);
       if (this.isRuntimeContextUserText(rawText)) continue;
-      // Attachment-only turns (no typed text) are not good session titles.
-      if (/^\s*<image_files>/i.test(rawText.trim())) continue;
+      // Prefer the typed <user_query> body. Messages often look like:
+      //   <image_files>…path…</image_files>
+      //   <user_query>图片上是啥?</user_query>
+      // Older code skipped any turn that *started* with <image_files>, so the
+      // list fell back to Grok's English generated_title ("What Is On The Image Query").
       const display = this.stripUserQueryWrapper(rawText);
-      if (display) return display;
+      if (!display) continue;
+      // Pure image bookkeeping with no usable typed text.
+      if (/^\s*<image_files>/i.test(display)) continue;
+      return display;
     }
     return '';
   }
@@ -243,9 +250,13 @@ export class GrokHistoryReader {
         const rawText = this.extractContentText(value.content);
         if (this.isRuntimeContextUserText(rawText)) continue;
         const display = this.stripUserQueryWrapper(rawText);
-        if (!display) continue;
+        const imageBlocks = this.extractImageBlocks(value.content, rawText);
+        // Keep turns that have either typed text or restored images.
+        // Previously image-only / image+query turns lost their pictures on history reload
+        // because we only built a text block and dropped `{type:"image", url:...}`.
+        if (!display && imageBlocks.length === 0) continue;
         counter += 1;
-        messages.push(this.buildUserTextMessage(display, `grok-user-${counter}`));
+        messages.push(this.buildUserMessage(display, imageBlocks, `grok-user-${counter}`));
       } else if (type === 'assistant') {
         const text = this.extractContentText(value.content);
         if (text.trim()) {
@@ -306,7 +317,154 @@ export class GrokHistoryReader {
   }
 
   private buildUserTextMessage(text: string, uuid: string) {
-    return this.buildGuiMessage('user', 'user', [{ type: 'text', text }], text, uuid);
+    return this.buildUserMessage(text, [], uuid);
+  }
+
+  /**
+   * User history row: optional restored image blocks + typed text.
+   * Frontend `normalizeBlocks` accepts Anthropic-style `{ type:'image', source:{type:'base64',...} }`.
+   */
+  private buildUserMessage(
+    text: string,
+    imageBlocks: Array<Record<string, unknown>>,
+    uuid: string,
+  ) {
+    const contentBlocks: unknown[] = [...imageBlocks];
+    if (text) {
+      contentBlocks.push({ type: 'text', text });
+    }
+    // content string is used for titles / fallbacks; keep typed text only (no image_files XML).
+    return this.buildGuiMessage('user', 'user', contentBlocks, text, uuid);
+  }
+
+  /**
+   * Pull image blocks out of a Grok user turn.
+   *
+   * Grok CLI persists multimodal user turns as:
+   *   content: [
+   *     { type: 'text', text: '<image_files>\n1. /.../assets/image-xxx.png\n...</image_files>\n\n<user_query>...' },
+   *     { type: 'image', url: 'data:image/png;base64,...' },
+   *   ]
+   * Live UI shows the image; history reload previously discarded the image entries.
+   */
+  private extractImageBlocks(content: unknown, rawText: string): Array<Record<string, unknown>> {
+    const blocks: Array<Record<string, unknown>> = [];
+    const seen = new Set<string>();
+
+    const pushBlock = (block: Record<string, unknown> | null | undefined) => {
+      if (!block || block.type !== 'image') return;
+      const source = block.source && typeof block.source === 'object'
+        ? (block.source as Record<string, unknown>)
+        : undefined;
+      const key = typeof source?.data === 'string'
+        ? `data:${source.media_type || ''}:${(source.data as string).slice(0, 64)}`
+        : typeof (block as any).src === 'string'
+          ? `src:${(block as any).src}`
+          : JSON.stringify(block);
+      if (seen.has(key)) return;
+      seen.add(key);
+      blocks.push(block);
+    };
+
+    if (Array.isArray(content)) {
+      for (const entry of content) {
+        if (!entry || typeof entry !== 'object') continue;
+        const candidate = entry as Record<string, unknown>;
+        if (candidate.type !== 'image') continue;
+
+        // Grok format: { type: 'image', url: 'data:image/...;base64,...' }
+        if (typeof candidate.url === 'string' && candidate.url) {
+          pushBlock(this.imageBlockFromDataUrlOrPath(candidate.url));
+          continue;
+        }
+        // Anthropic / already-normalized: { type: 'image', source: { type, media_type, data } }
+        if (candidate.source && typeof candidate.source === 'object') {
+          const source = candidate.source as Record<string, unknown>;
+          if (source.type === 'base64' && typeof source.data === 'string') {
+            pushBlock({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: typeof source.media_type === 'string' ? source.media_type : 'image/png',
+                data: source.data,
+              },
+            });
+            continue;
+          }
+          if (source.type === 'url' && typeof source.url === 'string') {
+            pushBlock(this.imageBlockFromDataUrlOrPath(source.url));
+            continue;
+          }
+        }
+        if (typeof candidate.src === 'string' && candidate.src) {
+          pushBlock(this.imageBlockFromDataUrlOrPath(candidate.src));
+        }
+      }
+    }
+
+    // Fallback / supplement: paths listed inside <image_files>...</image_files>
+    for (const filePath of this.extractImageFilePaths(rawText)) {
+      pushBlock(imageBlockFromLocalPath(filePath) ?? undefined);
+    }
+
+    return blocks;
+  }
+
+  private imageBlockFromDataUrlOrPath(value: string): Record<string, unknown> | null {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return null;
+
+    const dataUrl = /^data:([^;,]+);base64,(.+)$/i.exec(trimmed);
+    if (dataUrl) {
+      return {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: dataUrl[1] || 'image/png',
+          data: dataUrl[2],
+        },
+      };
+    }
+
+    // Absolute file path (or file:// URL) → read bytes
+    const filePath = trimmed.startsWith('file://')
+      ? decodeURIComponent(trimmed.slice('file://'.length))
+      : trimmed;
+    if (filePath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(filePath)) {
+      return imageBlockFromLocalPath(filePath);
+    }
+
+    // Relative-looking path: still try; imageBlockFromLocalPath returns null if missing
+    if (filePath.includes('assets/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(filePath)) {
+      const fromPath = imageBlockFromLocalPath(filePath);
+      if (fromPath) return fromPath;
+    }
+
+    return null;
+  }
+
+  /** Parse absolute paths from Grok's `<image_files>` bookkeeping block. */
+  private extractImageFilePaths(text: string): string[] {
+    if (!text || !text.includes('<image_files>')) return [];
+    const match = text.match(/<image_files>([\s\S]*?)<\/image_files>/i);
+    if (!match?.[1]) return [];
+    const body = match[1];
+    const paths: string[] = [];
+    // Lines like: "1. /Users/.../assets/image-xxx.png"
+    const lineRe = /^\s*(?:\d+\.\s*)?(\/?(?:Users|home|tmp|var|private|[A-Za-z]:)[^\r\n]+?\.(?:png|jpe?g|gif|webp|bmp|svg))\s*$/gim;
+    let m: RegExpExecArray | null;
+    while ((m = lineRe.exec(body))) {
+      const p = (m[1] || '').trim();
+      if (p) paths.push(p);
+    }
+    // Also accept bare absolute paths without the "N." prefix / drive heuristics above
+    if (paths.length === 0) {
+      const looseRe = /(\/(?:Users|home|tmp|var|private)[^\s"'<>]+\.(?:png|jpe?g|gif|webp|bmp|svg))/gi;
+      while ((m = looseRe.exec(body))) {
+        paths.push(m[1]);
+      }
+    }
+    return paths;
   }
 
   private buildAssistantTextMessage(text: string, uuid: string) {
@@ -408,8 +566,19 @@ export class GrokHistoryReader {
 
   private stripUserQueryWrapper(text: string): string {
     const trimmed = text.trim();
-    const match = trimmed.match(/^<user_query>\s*([\s\S]*?)\s*<\/user_query>$/i);
-    return match ? match[1].trim() : trimmed;
+    if (!trimmed) return '';
+
+    // Prefer the explicit <user_query> body when present (may sit after <image_files>).
+    const queryMatch = trimmed.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/i);
+    if (queryMatch) {
+      return (queryMatch[1] || '').trim();
+    }
+
+    // Drop Grok's image bookkeeping block; keep any remaining prose.
+    const withoutImageFiles = trimmed
+      .replace(/<image_files>[\s\S]*?<\/image_files>\s*/gi, '')
+      .trim();
+    return withoutImageFiles;
   }
 
   private isRuntimeContextUserText(text: string): boolean {

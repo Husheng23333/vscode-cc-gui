@@ -17,7 +17,8 @@
  *
  * Commands:
  *   send                - Send a message (parameters passed via stdin as JSON)
- *   sendWithAttachments - Send a message with attachments (claude only)
+ *   sendWithAttachments - Send a message with attachments (claude dedicated path;
+ *                         grok/codex etc. receive attachments on plain `send`)
  *   getSession          - Retrieve session message history (claude only)
  *   listModels          - List models (kimi / opencode / pi)
  *

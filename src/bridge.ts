@@ -957,7 +957,8 @@ export class BridgeServer {
     // Map webview event names → daemon method names
     const METHOD_MAP: Record<string, string> = {
       'send_message':                  `${activeProvider}.send`,
-      // Attachments only for Claude SDK path; CLI/Codex fall back to plain send.
+      // Claude has a dedicated multimodal send; Grok/Codex/etc. share `.send`
+      // and must read `params.attachments` themselves (Grok uses --prompt-file).
       'send_message_with_attachments':
         activeProvider === 'claude'
           ? 'claude.sendWithAttachments'
