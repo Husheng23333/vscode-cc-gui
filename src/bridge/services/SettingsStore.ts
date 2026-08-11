@@ -5,8 +5,12 @@ import { NodeDetector } from '../../nodeDetector';
 import { isLikelyNodeExecutable } from '../../nodeDetectorUtils';
 import { LanguageConfigPayload, resolveLanguageConfig } from '../../language';
 import { StateStore } from './StateStore';
-
-const MIN_NODE_MAJOR_VERSION = 18;
+import {
+  MIN_NODE_MAJOR_VERSION,
+  formatNodeRequirementError,
+  isNodeVersionSupported,
+  readNodeVersion,
+} from '../../nodeRequirements';
 const DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS = 300;
 const MIN_PERMISSION_DIALOG_TIMEOUT_SECONDS = 30;
 const MAX_PERMISSION_DIALOG_TIMEOUT_SECONDS = 3600;
@@ -125,25 +129,36 @@ export class SettingsStore {
     return this.state.updateString('ccg.codex_fast_mode', this.extractJsonField(content, 'codexFastMode') ?? content);
   }
 
-  getNodePathPayload(): { path: string; version: string | null; minVersion: number; valid: boolean; error?: string } {
-    const configured = vscode.workspace.getConfiguration('ccGui').get<string>('nodePath') ?? '';
-    const detected = NodeDetector.find(this.context) ?? '';
-    const configuredNode = configured && isLikelyNodeExecutable(configured) ? configured : '';
-    const nodePath = configuredNode || detected;
-    const version = nodePath ? this.detectNodeVersion(nodePath) : null;
+  getNodePathPayload(): {
+    path: string;
+    version: string | null;
+    minVersion: number;
+    valid: boolean;
+    error?: string;
+  } {
+    const configured = (vscode.workspace.getConfiguration('ccGui').get<string>('nodePath') ?? '').trim();
+    const configuredNode =
+      configured && fs.existsSync(configured) && isLikelyNodeExecutable(configured) ? configured : '';
+    const runtimePath = NodeDetector.find(this.context) ?? '';
+    const nodePath = configuredNode || runtimePath;
+    const version = nodePath ? readNodeVersion(nodePath) : null;
+    const valid = !!nodePath && isNodeVersionSupported(version);
+    const error = valid ? undefined : formatNodeRequirementError(nodePath || undefined, version);
     return {
       path: nodePath,
       version,
       minVersion: MIN_NODE_MAJOR_VERSION,
-      valid: !!nodePath && this.isSupportedNodeVersion(version),
-      error: nodePath ? undefined : 'Node.js not found',
+      valid,
+      error,
     };
   }
 
-  async setNodePath(content: string): Promise<{ path: string; version: string | null; minVersion: number; valid: boolean; error?: string }> {
+  async setNodePath(content: string): Promise<ReturnType<SettingsStore['getNodePathPayload']>> {
     const parsedPath = this.extractJsonField(content, 'path') ?? content;
     const nodePath = parsedPath.trim();
-    await vscode.workspace.getConfiguration('ccGui').update('nodePath', nodePath, vscode.ConfigurationTarget.Global);
+    await vscode.workspace
+      .getConfiguration('ccGui')
+      .update('nodePath', nodePath, vscode.ConfigurationTarget.Global);
     return this.getNodePathPayload();
   }
 
@@ -398,21 +413,6 @@ export class SettingsStore {
     } catch {
       return fallback;
     }
-  }
-
-  private detectNodeVersion(nodePath: string): string | null {
-    try {
-      const cp = require('child_process') as typeof import('child_process');
-      return cp.execFileSync(nodePath, ['--version'], { encoding: 'utf8', timeout: 5000 }).trim();
-    } catch {
-      return null;
-    }
-  }
-
-  private isSupportedNodeVersion(version: string | null): boolean {
-    if (!version) return false;
-    const major = Number(version.replace(/^v/, '').split('.')[0]);
-    return Number.isFinite(major) && major >= MIN_NODE_MAJOR_VERSION;
   }
 
   private clampPermissionDialogTimeoutSeconds(value: unknown): number {

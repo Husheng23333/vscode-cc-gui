@@ -2,7 +2,7 @@
   "name": "vscode-cc-gui",
   "displayName": "CC GUI（Claude and Codex）",
   "description": "Independent open-source GUI for Claude Code CLI and Codex (unofficial)",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "MossX",
   "author": {
     "name": "MossX"
@@ -200,7 +200,7 @@
         "ccGui.nodePath": {
           "type": "string",
           "default": "",
-          "description": "Custom path to Node.js executable"
+          "description": "Node.js executable used only by CC GUI (requires v20+). Does not change your project terminal Node. Leave empty to use auto-detected node on PATH."
         },
         "ccGui.autoSyncActiveFile": {
           "type": "boolean",

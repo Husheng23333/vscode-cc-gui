@@ -15,14 +15,45 @@ import { applyCodexLiveMessage } from '../../../utils/codexLiveInsert';
 import { createLocalizeMessage } from '../../../utils/localizationUtils';
 import { isEmptyAssistantPlaceholder, parseSendErrorPayload } from '../../../utils/sendErrorPayload';
 
+function extractRawContent(msg: ClaudeMessage): unknown[] | null {
+  if (!msg.raw) return null;
+  try {
+    const rawObj = typeof msg.raw === 'string' ? JSON.parse(msg.raw) : msg.raw;
+    const content = (rawObj as { content?: unknown; message?: { content?: unknown } })?.content
+      ?? (rawObj as { message?: { content?: unknown } })?.message?.content;
+    return Array.isArray(content) ? content : null;
+  } catch {
+    return null;
+  }
+}
+
+function collectToolResultIdsFromMessages(
+  messages: ClaudeMessage[],
+  fromIndex = 0,
+): Set<string> {
+  const resolvedIds = new Set<string>();
+  for (let i = fromIndex; i < messages.length; i++) {
+    const content = extractRawContent(messages[i]);
+    if (!content) continue;
+    for (const block of content as Array<{ type?: string; tool_use_id?: string }>) {
+      if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string') {
+        resolvedIds.add(block.tool_use_id);
+      }
+    }
+  }
+  return resolvedIds;
+}
+
 /**
  * Scans assistant messages containing tool_use blocks and returns IDs that have
  * no matching tool_result anywhere in the conversation.
  *
- * scope: 'lastTurn'  — only inspect the most recent assistant tool_use group and
- *                       its immediate user follow-up (default; used by
- *                       onPermissionDenied + onStreamEnd, where only the active
- *                       turn can have stragglers).
+ * scope: 'lastTurn'  — inspect the most recent assistant tool_use group and
+ *                       match tool_results in ANY subsequent message (not just
+ *                       the immediate next user message). Multi-step agent
+ *                       turns often interleave assistant text after tool_use
+ *                       before tool_result arrives; only checking nextMsg left
+ *                       spinners pending forever after timeout/stream end.
  * scope: 'all'       — collect every tool_use ID across the whole message list
  *                       and check against every tool_result block anywhere.
  *                       Required by historyLoadComplete because a replayed
@@ -41,25 +72,11 @@ export function collectUnresolvedToolUseIds(
   const idsToAdd: string[] = [];
   try {
     if (scope === 'all') {
-      // Pass 1: gather every tool_result id present anywhere in the conversation.
-      const resolvedIds = new Set<string>();
+      const resolvedIds = collectToolResultIdsFromMessages(messages, 0);
       for (const msg of messages) {
-        if (!msg.raw) continue;
-        const rawObj = typeof msg.raw === 'string' ? JSON.parse(msg.raw) : msg.raw;
-        const content = rawObj?.content ?? rawObj?.message?.content;
-        if (!Array.isArray(content)) continue;
-        for (const block of content as Array<{ type?: string; tool_use_id?: string }>) {
-          if (block?.type === 'tool_result' && block.tool_use_id) {
-            resolvedIds.add(block.tool_use_id);
-          }
-        }
-      }
-      // Pass 2: flag every assistant tool_use without a matching result.
-      for (const msg of messages) {
-        if (msg.type !== 'assistant' || !msg.raw) continue;
-        const rawObj = typeof msg.raw === 'string' ? JSON.parse(msg.raw) : msg.raw;
-        const content = rawObj?.content ?? rawObj?.message?.content;
-        if (!Array.isArray(content)) continue;
+        if (msg.type !== 'assistant') continue;
+        const content = extractRawContent(msg);
+        if (!content) continue;
         for (const block of content as Array<{ type?: string; id?: string }>) {
           if (block?.type === 'tool_use' && block.id
               && !resolvedIds.has(block.id)
@@ -71,34 +88,27 @@ export function collectUnresolvedToolUseIds(
       return idsToAdd;
     }
 
-    // scope === 'lastTurn'
+    // scope === 'lastTurn': latest assistant that has tool_use blocks.
+    // Match tool_results in ANY subsequent message (not only the immediate
+    // next user message) so interleaved assistant text after tool_use still
+    // resolves correctly when the result arrives later.
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
-      if (msg.type !== 'assistant' || !msg.raw) continue;
-      const rawObj = typeof msg.raw === 'string' ? JSON.parse(msg.raw) : msg.raw;
-      const content = rawObj.content || rawObj.message?.content;
-      if (!Array.isArray(content)) continue;
+      if (msg.type !== 'assistant') continue;
+      const content = extractRawContent(msg);
+      if (!content) continue;
 
-      const toolUses = content.filter(
-        (block: { type?: string; id?: string }) =>
-          block.type === 'tool_use' && block.id,
-      ) as Array<{ type: string; id: string; name?: string }>;
-      if (toolUses.length === 0) continue;
-
-      const nextMsg = messages[i + 1];
-      const existingResultIds = new Set<string>();
-      if (nextMsg?.type === 'user' && nextMsg.raw) {
-        const nextRaw =
-          typeof nextMsg.raw === 'string' ? JSON.parse(nextMsg.raw) : nextMsg.raw;
-        const nextContent = nextRaw.content || nextRaw.message?.content;
-        if (Array.isArray(nextContent)) {
-          nextContent.forEach((block: { type?: string; tool_use_id?: string }) => {
-            if (block.type === 'tool_result' && block.tool_use_id) {
-              existingResultIds.add(block.tool_use_id);
-            }
-          });
+      const toolUses: Array<{ id: string }> = [];
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue;
+        const b = block as { type?: string; id?: string };
+        if (b.type === 'tool_use' && typeof b.id === 'string' && b.id) {
+          toolUses.push({ id: b.id });
         }
       }
+      if (toolUses.length === 0) continue;
+
+      const existingResultIds = collectToolResultIdsFromMessages(messages, i + 1);
 
       for (const tu of toolUses) {
         if (!existingResultIds.has(tu.id) && !window.__deniedToolIds?.has(tu.id)) {
@@ -111,6 +121,24 @@ export function collectUnresolvedToolUseIds(
     console.error('[Frontend] Error in collectUnresolvedToolUseIds:', e);
   }
   return idsToAdd;
+}
+
+/** Synthetic user/tool_result carrier so findToolResult resolves after stream end. */
+export function buildInterruptedToolResultMessage(toolIds: string[]): ClaudeMessage {
+  return {
+    type: 'user',
+    content: '[tool_result]',
+    raw: {
+      role: 'user',
+      content: toolIds.map((id) => ({
+        type: 'tool_result',
+        tool_use_id: id,
+        is_error: true,
+        content: 'Interrupted: tool did not complete (timeout or stream ended before result).',
+      })),
+    },
+    timestamp: new Date().toISOString(),
+  };
 }
 
 /**
@@ -681,28 +709,26 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     setLoadingStartTime(null);
     setIsThinking(false);
 
-    // FIX: When stream ends (normal completion, user interrupt, or backend abort),
-    // any tool_use without a matching tool_result will otherwise render as a
-    // perpetual loading spinner in BashToolGroupBlock / EditToolGroupBlock /
-    // ReadToolGroupBlock. Treat them as interrupted by reusing the denied-tool
-    // mechanism so the UI shows a definitive (error) state instead of pending.
+    // FIX: When stream ends (normal completion, user interrupt, timeout, or
+    // backend abort), any tool_use without a matching tool_result would render
+    // a perpetual pending spinner. Mark them denied AND append a synthetic
+    // tool_result carrier so findToolResult / GenericToolBlock flip to error.
     //
     // For a normal turn the SDK delivers all tool_results before onStreamEnd,
-    // so collectUnresolvedToolUseIds returns []. The cost is only paid when the
-    // turn was actually cut short (interrupt / <turn_aborted>).
+    // so collectUnresolvedToolUseIds returns [] and we skip the extra message.
     if (!window.__deniedToolIds) {
       window.__deniedToolIds = new Set<string>();
     }
-    let interruptedIds: string[] = [];
     setMessages((currentMessages) => {
-      interruptedIds = collectUnresolvedToolUseIds(currentMessages);
-      // Return a new reference only when there is something to surface — avoids
-      // an extra ChatMessages re-render on the hot path of every normal turn.
-      return interruptedIds.length > 0 ? [...currentMessages] : currentMessages;
+      const interruptedIds = collectUnresolvedToolUseIds(currentMessages, 'lastTurn');
+      if (interruptedIds.length === 0) {
+        return currentMessages;
+      }
+      for (const id of interruptedIds) {
+        window.__deniedToolIds!.add(id);
+      }
+      return [...currentMessages, buildInterruptedToolResultMessage(interruptedIds)];
     });
-    for (const id of interruptedIds) {
-      window.__deniedToolIds.add(id);
-    }
 
     // Mark this turn as processed — idempotency guard for dual-path delivery
     window.__streamEndProcessedTurnId = endedStreamingTurnId;

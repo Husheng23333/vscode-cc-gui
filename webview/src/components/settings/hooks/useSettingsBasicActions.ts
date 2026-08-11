@@ -95,7 +95,7 @@ export interface UseSettingsBasicActionsReturn {
   // =========================================================================
   // Handler functions (public API for components)
   // =========================================================================
-  handleSaveNodePath: () => void;
+  handleSaveNodePath: (pathOverride?: string) => void;
   handleSaveClaudeCliPath: () => void;
   handleSaveWorkingDirectory: () => void;
   handleUiFontSelectionChange: (selection: string) => void;
@@ -194,7 +194,7 @@ export function useSettingsBasicActions({
   // Node.js path
   const [nodePath, setNodePath] = useState('');
   const [nodeVersion, setNodeVersion] = useState<string | null>(null);
-  const [minNodeVersion, setMinNodeVersion] = useState(18);
+  const [minNodeVersion, setMinNodeVersion] = useState(20);
   const [savingNodePath, setSavingNodePath] = useState(false);
 
   // Custom Claude CLI path (overrides bundled SDK when set)
@@ -338,9 +338,13 @@ export function useSettingsBasicActions({
     } catch { /* ignore storage errors */ }
   }, [diffExpandedByDefault]);
 
-  const handleSaveNodePath = useCallback(() => {
+  const handleSaveNodePath = useCallback((pathOverride?: string) => {
     setSavingNodePath(true);
-    const payload = { path: (nodePath || '').trim() };
+    const nextPath = (pathOverride ?? nodePath ?? '').trim();
+    if (pathOverride !== undefined) {
+      setNodePath(nextPath);
+    }
+    const payload = { path: nextPath };
     sendToJava(`set_node_path:${JSON.stringify(payload)}`);
   }, [nodePath]);
 

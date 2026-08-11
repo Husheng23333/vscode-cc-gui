@@ -107,9 +107,15 @@ export class SettingsHandler implements BridgeHandler {
       case 'get_node_path':
         callWindowFunction(webview, 'updateNodePath', this.store.getNodePathPayload());
         return true;
-      case 'set_node_path':
-        callWindowFunction(webview, 'updateNodePath', await this.store.setNodePath(content));
+      case 'set_node_path': {
+        // Persist first, then restart daemon so the new binary is actually used.
+        // Without restart, the old Node process keeps handling chat (settings-only warning).
+        // Do NOT toast/alert here: Environment tab already shows the red "unsupported" card.
+        const payload = await this.store.setNodePath(content);
+        callWindowFunction(webview, 'updateNodePath', payload);
+        this.context.callbacks.restartBridgeDaemon();
         return true;
+      }
 
       case 'get_claude_cli_path':
         callWindowFunction(webview, 'updateClaudeCliPath', { path: this.store.getClaudeCliPath() });
@@ -117,6 +123,8 @@ export class SettingsHandler implements BridgeHandler {
       case 'set_claude_cli_path':
         await this.store.setClaudeCliPath(content);
         callWindowFunction(webview, 'updateClaudeCliPath', { path: this.store.getClaudeCliPath(), saved: true });
+        // CLI path is read by the daemon; restart so override takes effect.
+        this.context.callbacks.restartBridgeDaemon();
         return true;
 
       case 'get_working_directory':

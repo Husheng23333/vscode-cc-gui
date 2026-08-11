@@ -65,14 +65,19 @@ describe('evaluateNodeStatus', () => {
     assert.equal(status.warning, 'missing');
   });
 
-  it('returns too_old for Node < 18', () => {
+  it('returns too_old for Node < 20', () => {
     const status = evaluateNodeStatus('/path/to/node', 'v16.20.2');
     assert.equal(status.available, true);
     assert.equal(status.warning, 'too_old');
     assert.equal(status.version, 'v16.20.2');
   });
 
-  it('returns available with no warning for Node 18+', () => {
+  it('returns too_old for Node 18 (plugin now requires 20+)', () => {
+    const status = evaluateNodeStatus('/path/to/node', 'v18.20.0');
+    assert.equal(status.warning, 'too_old');
+  });
+
+  it('returns available with no warning for Node 20+', () => {
     const status = evaluateNodeStatus('/path/to/node', 'v20.10.0');
     assert.equal(status.available, true);
     assert.equal(status.warning, undefined);

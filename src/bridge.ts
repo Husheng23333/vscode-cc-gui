@@ -44,6 +44,12 @@ import type { RuntimeProviderId } from './bridge/types';
 import { isRuntimeProvider } from './cli/cliTools';
 import { CliStatusHandler } from './bridge/handlers/CliStatusHandler';
 import { CliModelsHandler } from './bridge/handlers/CliModelsHandler';
+import { createDebugGatedOutputChannel } from './debugOutputChannel';
+import {
+  formatNodeRequirementError,
+  isNodeVersionSupported,
+  readNodeVersion,
+} from './nodeRequirements';
 
 type MessageCallback = (event: string, content: string) => void;
 type CreateTabCallback = () => void;
@@ -57,9 +63,13 @@ export class BridgeServer {
   private _bridgePath: string;
   private _workspacePath: string;
   private _webview?: vscode.Webview;
+  /** Flag-gated facade passed to services (append* no-op when debug log is off). */
   private _log: vscode.OutputChannel;
+  /** Underlying OutputChannel — never monkey-patched. */
+  private _rawLog: vscode.OutputChannel;
   private _logAppendLine: (value: string) => void;
   private _logAppend: (value: string) => void;
+  private _debugLogEnabled = false;
   private _configListener?: vscode.Disposable;
   private _activeProvider: RuntimeProviderId = 'claude';
   private _selectedModel: string = '';
@@ -93,10 +103,21 @@ export class BridgeServer {
     model?: string;
   }>();
   constructor(private readonly context: vscode.ExtensionContext) {
-    this._log = vscode.window.createOutputChannel('CC GUI');
-    // Preserve real writers so we can toggle via settings without recreating the channel.
-    this._logAppendLine = this._log.appendLine.bind(this._log);
-    this._logAppend = this._log.append.bind(this._log);
+    // Gate via a facade + flag. Do NOT replace OutputChannel.appendLine with a
+    // no-op: VS Code reuses named channels across reloads, so a previous no-op
+    // patch could be captured as the "real" writer and silence logs forever
+    // until the switch was toggled after a full channel recreate.
+    const gated = createDebugGatedOutputChannel(
+      'CC GUI',
+      () => this._debugLogEnabled,
+      (name) => vscode.window.createOutputChannel(name),
+    );
+    this._rawLog = gated.raw;
+    this._log = gated.log;
+    this._logAppendLine = gated.forceAppendLine;
+    this._logAppend = gated.forceAppend;
+    // Keep the channel alive with the extension host (and avoid accidental GC/dispose races).
+    context.subscriptions.push(this._rawLog);
     this._applyDebugLogSetting(false);
     this._configListener = vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('ccGui.enableDebugLog')) {
@@ -692,12 +713,41 @@ export class BridgeServer {
     }));
   }
 
+  /**
+   * Kill the current ai-bridge daemon and start a new one with the configured Node.
+   * Must be called after `ccGui.nodePath` changes — otherwise chat keeps using
+   * the old Node process while settings only show a version warning.
+   */
   private _restartBridgeDaemon(): void {
+    this._logAppendLine('[BRIDGE] Restarting daemon (node path / CLI override may have changed)');
     try {
       this._bridgeProcess?.kill();
     } catch { /* ignore */ }
     this._bridgeProcess = undefined;
     this._startBridge();
+  }
+
+  /** Debounce Node-version / missing-daemon user notices (avoid toast spam). */
+  private _lastNodeRequirementNotifyAt = 0;
+  private _lastNodeRequirementNotifyText = '';
+
+  /**
+   * Notify the user about Node requirement failures at most once per 60s per message.
+   * Settings page already has a persistent banner; chat only needs a rare reminder.
+   */
+  private _notifyNodeRequirementOnce(webview: vscode.Webview | undefined, message: string): void {
+    const now = Date.now();
+    if (
+      message === this._lastNodeRequirementNotifyText
+      && now - this._lastNodeRequirementNotifyAt < 60_000
+    ) {
+      return;
+    }
+    this._lastNodeRequirementNotifyAt = now;
+    this._lastNodeRequirementNotifyText = message;
+    if (webview) {
+      this._postSendError(webview, message);
+    }
   }
 
   private _lastModel = new Map<string, string>(); // id → model name
@@ -875,7 +925,18 @@ export class BridgeServer {
       this._startBridge();
     }
     if (!this._bridgeProcess?.stdin) {
-      this._log.appendLine('[BRIDGE] ERROR: No stdin available after _startBridge');
+      // Common cause: configured Node is below MIN_NODE_MAJOR_VERSION and
+      // _startBridge refused to spawn.
+      const nodePath = NodeDetector.find(this.context);
+      const version = nodePath ? readNodeVersion(nodePath) : null;
+      const detail =
+        formatNodeRequirementError(nodePath, version)
+        || 'AI bridge daemon is not running (no stdin). Check Node.js path in Settings → Environment.';
+      this._forceLog(`[BRIDGE] ERROR: No stdin available after _startBridge — ${detail}`);
+      // Only remind on real user sends — never on heartbeat / background polls.
+      if (event === 'send_message' || event === 'send_message_with_attachments') {
+        this._notifyNodeRequirementOnce(webview, detail);
+      }
       return;
     }
 
@@ -896,7 +957,8 @@ export class BridgeServer {
     // Map webview event names → daemon method names
     const METHOD_MAP: Record<string, string> = {
       'send_message':                  `${activeProvider}.send`,
-      // Attachments only for Claude SDK path; CLI/Codex fall back to plain send.
+      // Claude has a dedicated multimodal send; Grok/Codex/etc. share `.send`
+      // and must read `params.attachments` themselves (Grok uses --prompt-file).
       'send_message_with_attachments':
         activeProvider === 'claude'
           ? 'claude.sendWithAttachments'
@@ -1079,10 +1141,22 @@ export class BridgeServer {
     }
     const nodePath = NodeDetector.find(this.context);
     if (!nodePath) {
-      this._log.appendLine('[BRIDGE] ERROR: Node.js not found');
+      const msg = formatNodeRequirementError(undefined, null);
+      this._forceLog(`[BRIDGE] ERROR: ${msg}`);
+      // Log only — do not toast on every start attempt (frontend polls often).
       return;
     }
-    this._log.appendLine(`[BRIDGE] Starting daemon: node=${nodePath} path=${this._bridgePath}`);
+    const nodeVersion = readNodeVersion(nodePath);
+    if (!isNodeVersionSupported(nodeVersion)) {
+      const msg = formatNodeRequirementError(nodePath, nodeVersion);
+      this._forceLog(`[BRIDGE] ERROR: ${msg}`);
+      // Log only. Settings Environment tab shows a persistent banner; chat
+      // is notified (debounced) when the user actually sends a message.
+      return;
+    }
+    this._log.appendLine(
+      `[BRIDGE] Starting daemon: node=${nodePath} version=${nodeVersion ?? '?'} path=${this._bridgePath}`,
+    );
 
     // Remove proxy environment variables to prevent 502 Bad Gateway errors
     // Node.js HTTP client auto-reads these vars, but the proxy may not handle all requests correctly
@@ -1820,26 +1894,28 @@ export class BridgeServer {
 
   /**
    * Gate Output Channel writes via `ccGui.enableDebugLog` (default: false).
-   * When disabled, append* is a no-op so normal use stays quiet.
+   * When disabled, the gated facade's append* is a no-op so normal use stays quiet.
    */
   private _applyDebugLogSetting(fromConfigChange: boolean): void {
     const enabled =
       vscode.workspace.getConfiguration('ccGui').get<boolean>('enableDebugLog') === true;
+    this._debugLogEnabled = enabled;
     // Drive view/title menu visibility for openDevTools (package.json when clause).
     void vscode.commands.executeCommand('setContext', 'ccGui.enableDebugLog', enabled);
     if (enabled) {
-      this._log.appendLine = this._logAppendLine;
-      this._log.append = this._logAppend;
-      if (fromConfigChange) {
-        this._logAppendLine('[CC GUI] Debug log enabled (ccGui.enableDebugLog)');
-        this._log.show(true);
+      // Always stamp a marker when the gate opens — including cold start with a
+      // persisted ON setting — so users do not need to toggle the switch to verify.
+      // Use force writer (not the gated facade) so the marker is never dropped.
+      this._logAppendLine(`[CC GUI] Debug log enabled (ccGui.enableDebugLog) at ${new Date().toISOString()}`);
+      // Select this channel in the Output panel. Without show(), dispose+recreate
+      // can leave the panel stuck on a disposed/empty view even though logs write.
+      try {
+        this._rawLog.show(true);
+      } catch {
+        // ignore UI failures
       }
-    } else {
-      if (fromConfigChange) {
-        this._logAppendLine('[CC GUI] Debug log disabled (ccGui.enableDebugLog)');
-      }
-      this._log.appendLine = () => {};
-      this._log.append = () => {};
+    } else if (fromConfigChange) {
+      this._logAppendLine('[CC GUI] Debug log disabled (ccGui.enableDebugLog)');
     }
   }
 
@@ -1848,6 +1924,7 @@ export class BridgeServer {
     this._runtimeContext.dispose();
     this._permissionIpc.dispose();
     this._bridgeProcess?.kill();
+    // Output channel is also on context.subscriptions; avoid double-dispose races.
   }
 
   // ── globalState helpers ───────────────────────────────────────────────────

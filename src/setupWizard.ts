@@ -64,7 +64,7 @@ export class SetupWizardService {
     }
 
     const description = status.warning === 'too_old'
-      ? `Detected ${status.version} at ${status.path}. CC GUI requires Node.js 18 or higher.`
+      ? `Detected ${status.version} at ${status.path}. CC GUI requires Node.js 20 or higher (you can keep Node 16 for project work and point CC GUI at a separate Node 20+ install).`
       : 'Node.js was not detected on common paths or $PATH.';
 
     const action = await vscode.window.showWarningMessage(
@@ -77,7 +77,7 @@ export class SetupWizardService {
     if (action === 'Set custom Node path') {
       const input = await vscode.window.showInputBox({
         title: 'Custom Node.js executable path',
-        prompt: 'Absolute path to a node binary (>= 18)',
+        prompt: 'Absolute path to a node binary for CC GUI only (>= 20; project may still use Node 16)',
         ignoreFocusOut: true,
       });
       const trimmed = input?.trim();
