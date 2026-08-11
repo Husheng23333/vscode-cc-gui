@@ -277,6 +277,7 @@ const App = () => {
     toggleFavoriteSession, updateHistoryTitle, applyHistoryTitleLocal, convertToCliSession,
   } = useSessionManagement({
     messages, loading, historyData, currentSessionId, customSessionTitle,
+    currentProvider,
     setHistoryData, setMessages, setCurrentView, setCurrentSessionId,
     setCustomSessionTitle, setUsagePercentage, setUsageUsedTokens, setUsageMaxTokens,
     setStatus, setLoading, setIsThinking, setStreamingActive,

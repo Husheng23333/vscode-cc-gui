@@ -409,12 +409,6 @@ function logLoopError(error, lp) {
  * Handle top-level catch for both send functions: emit stream end on error and format error payload.
  */
 function handleSendError(error, streamState, sdkStderrLines) {
-  if (streamState.streamingEnabled && streamState.streamStarted && !streamState.streamEnded) {
-    // NOTE: Do NOT emit accumulatedUsage at stream end, even on error.
-    // If assistant messages were received, emitUsageTag already sent the correct usage.
-    // If no assistant message was received, the usage would be incomplete anyway.
-    process.stdout.write('[STREAM_END]\n');
-  }
   const payload = buildConfigErrorPayload(error);
   if (sdkStderrLines.length > 0) {
     const sdkErrorText = sdkStderrLines.slice(-10).join('\n');
@@ -422,7 +416,18 @@ function handleSendError(error, streamState, sdkStderrLines) {
     payload.details.sdkError = sdkErrorText;
   }
   payload.error = truncateString(payload.error);
-  console.error('[SEND_ERROR]', JSON.stringify(payload));
+  // Emit SEND_ERROR before STREAM_END so the bridge still has the request webview
+  // mapping when delivering the failure to the chat UI.
+  const serialized = JSON.stringify(payload);
+  console.error('[SEND_ERROR]', serialized);
+  console.log(`[SEND_ERROR] ${serialized}`);
+  if (streamState.streamingEnabled && streamState.streamStarted && !streamState.streamEnded) {
+    // NOTE: Do NOT emit accumulatedUsage at stream end, even on error.
+    // If assistant messages were received, emitUsageTag already sent the correct usage.
+    // If no assistant message was received, the usage would be incomplete anyway.
+    process.stdout.write('[STREAM_END]\n');
+    streamState.streamEnded = true;
+  }
 }
 
 // ========== Exported send functions ==========

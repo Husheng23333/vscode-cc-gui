@@ -1,5 +1,21 @@
 # Changelog
 
+##### **2026年8月10日（v0.1.1）**
+
+English:
+- Bump version to 0.1.1
+- Fix chat toolbar selectors clipped by overflow (config / provider / mode unclickable)
+- Fix revoking local settings.json authorization
+- Surface Codex/Claude send failures in chat; swallow success JSON envelopes
+- Fix Grok/CLI history isolation
+
+中文:
+- 版本升级到 0.1.1
+- 修复底部工具栏配置/供应商/模式按钮菜单被裁切导致点不动
+- 修复取消本地 settings.json 授权无效
+- 发送失败在聊天区展示；成功结果 JSON 不再误入正文
+- 修复 Grok/CLI 历史隔离
+
 ##### **2026年8月10日（v0.1.0）**
 
 English:

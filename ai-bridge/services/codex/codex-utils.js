@@ -223,6 +223,55 @@ export const SESSION_CONTEXT_SCAN_MAX_LINES = 1200;
  * @param {Error} error - The error object
  * @returns {object} Structured error payload
  */
+/**
+ * Detect whether a Codex error is caused by invalid ~/.codex/config.toml.
+ * These fail before any network call, so they must not be framed as network issues.
+ *
+ * @param {string} rawError
+ * @returns {boolean}
+ */
+export function isCodexConfigError(rawError) {
+  const text = String(rawError || '');
+  return (
+    text.includes('config.toml') ||
+    text.includes('duplicate key') ||
+    text.includes('reserved built-in provider') ||
+    text.includes('Invalid configuration') ||
+    text.includes('failed to load configuration') ||
+    text.includes('Error loading config')
+  );
+}
+
+/**
+ * Build a user-facing tip for known config.toml problems.
+ *
+ * @param {string} rawError
+ * @returns {string}
+ */
+export function buildCodexConfigErrorTip(rawError) {
+  const text = String(rawError || '');
+  if (text.includes('duplicate key')) {
+    return [
+      'Cause: a key is defined more than once in ~/.codex/config.toml (for example model_provider).',
+      'Fix: open the file and keep only one definition of each top-level key, then retry.',
+    ].join('\n');
+  }
+  if (text.includes('reserved built-in provider')) {
+    return [
+      'Cause: custom model_providers cannot use built-in IDs such as "openai".',
+      'Fix: rename your provider, for example:',
+      '  model_provider = "openai-custom"',
+      '  [model_providers.openai-custom]',
+      'Both names must match. Do not use [model_providers.openai].',
+    ].join('\n');
+  }
+  return [
+    'Cause: Codex failed to load ~/.codex/config.toml.',
+    'Fix: open the file, correct the syntax/keys reported above, then retry.',
+    'Tip: custom Base URL providers must use a non-reserved provider id (not "openai").',
+  ].join('\n');
+}
+
 export function buildErrorPayload(error) {
   const rawError = error?.message || String(error);
   const errorName = error?.name || 'Error';
@@ -240,9 +289,18 @@ export function buildErrorPayload(error) {
                          rawError.includes('network') ||
                          rawError.includes('fetch failed');
 
+  const isConfigError = isCodexConfigError(rawError);
+
   let userMessage;
 
-  if (isAuthError) {
+  if (isConfigError) {
+    userMessage = [
+      'Codex configuration error:',
+      `- Error message: ${rawError}`,
+      '',
+      buildCodexConfigErrorTip(rawError),
+    ].join('\n');
+  } else if (isAuthError) {
     userMessage = [
       'Codex authentication error:',
       `- Error message: ${rawError}`,
@@ -280,7 +338,8 @@ export function buildErrorPayload(error) {
       rawError,
       errorName,
       isAuthError,
-      isNetworkError
+      isNetworkError,
+      isConfigError,
     }
   };
 }

@@ -12,6 +12,8 @@ import { THROTTLE_INTERVAL } from '../../useStreamingMessages';
 import { parseSequence } from '../parseSequence';
 import { getStreamEndHandlingMode } from '../messageSync';
 import { applyCodexLiveMessage } from '../../../utils/codexLiveInsert';
+import { createLocalizeMessage } from '../../../utils/localizationUtils';
+import { isEmptyAssistantPlaceholder, parseSendErrorPayload } from '../../../utils/sendErrorPayload';
 
 /**
  * Scans assistant messages containing tool_use blocks and returns IDs that have
@@ -127,6 +129,8 @@ const STREAM_STALL_CHECK_INTERVAL_MS = 5_000;
 
 export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): void {
   const {
+    t,
+    addToast,
     setMessages,
     setStreamingActive,
     setLoading,
@@ -726,6 +730,93 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
 
     for (const id of idsToAdd) {
       window.__deniedToolIds!.add(id);
+    }
+  };
+
+  /**
+   * Surface backend send failures as a chat error bubble (type: 'error').
+   * Without this handler, panel maps send_error → onSendError but nothing
+   * renders, so config/auth failures only "flash" and disappear.
+   */
+  window.onSendError = (payload?: string) => {
+    if (window.__sessionTransitioning) return;
+
+    const localize = createLocalizeMessage(t);
+    const errorText = localize(parseSendErrorPayload(payload));
+
+    // Dual-path delivery (stderr + stdout [SEND_ERROR] + bare JSON) can fire
+    // the same failure multiple times within one turn — keep a short debounce.
+    const now = Date.now();
+    if (
+      window.__lastSendErrorText === errorText
+      && typeof window.__lastSendErrorAt === 'number'
+      && now - window.__lastSendErrorAt < 3000
+    ) {
+      setStreamingActive(false);
+      setLoading(false);
+      setLoadingStartTime(null);
+      setIsThinking(false);
+      return;
+    }
+    window.__lastSendErrorText = errorText;
+    window.__lastSendErrorAt = now;
+
+    clearStallWatchdog();
+    if (contentUpdateTimeoutRef.current != null) {
+      cancelAnimationFrame(contentUpdateTimeoutRef.current);
+      contentUpdateTimeoutRef.current = null;
+    }
+    if (thinkingUpdateTimeoutRef.current != null) {
+      cancelAnimationFrame(thinkingUpdateTimeoutRef.current);
+      thinkingUpdateTimeoutRef.current = null;
+    }
+    if (typeof window.__cancelPendingUpdateMessages === 'function') {
+      window.__cancelPendingUpdateMessages();
+    }
+
+    isStreamingRef.current = false;
+    useBackendStreamingRenderRef.current = false;
+    streamingMessageIndexRef.current = -1;
+    streamingTurnIdRef.current = -1;
+    streamingContentRef.current = '';
+    streamingThinkingRef.current = '';
+    autoExpandedThinkingKeysRef.current.clear();
+
+    setMessages((prev) => {
+      let next = [...prev];
+      // Drop trailing empty assistant placeholders from the failed turn.
+      while (next.length > 0 && isEmptyAssistantPlaceholder(next[next.length - 1])) {
+        next = next.slice(0, -1);
+      }
+      // Avoid stacking identical error bubbles if dual-path delivery fires twice.
+      const last = next[next.length - 1];
+      if (last?.type === 'error' && last.content === errorText) {
+        return next;
+      }
+      return [
+        ...next,
+        {
+          type: 'error',
+          content: errorText,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+    });
+
+    setStreamingActive(false);
+    setLoading(false);
+    setLoadingStartTime(null);
+    setIsThinking(false);
+    sendBridgeEvent('tab_status_changed', JSON.stringify({ status: 'completed' }));
+
+    const toastLine = errorText.split('\n').find((line) => line.trim().length > 0) || errorText;
+    addToast(toastLine.slice(0, 160), 'error');
+
+    // Mirror into host Output channel (works even when chat styling is missed).
+    try {
+      sendBridgeEvent('debug_log', `[UI_SEND_ERROR] ${errorText.slice(0, 1000)}`);
+    } catch {
+      // ignore
     }
   };
 

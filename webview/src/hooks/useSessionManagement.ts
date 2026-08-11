@@ -18,6 +18,8 @@ interface UseSessionManagementOptions {
   historyData: HistoryData | null;
   currentSessionId: string | null;
   customSessionTitle?: string | null;
+  /** Active runtime provider (claude/codex/grok/…); used when snapshotting live sessions. */
+  currentProvider?: string;
   setHistoryData: React.Dispatch<React.SetStateAction<HistoryData | null>>;
   setMessages: React.Dispatch<React.SetStateAction<ClaudeMessage[]>>;
   setCurrentView: (view: ViewMode) => void;
@@ -69,6 +71,7 @@ export function useSessionManagement({
   historyData,
   currentSessionId,
   customSessionTitle = null,
+  currentProvider,
   setHistoryData,
   setMessages,
   setCurrentView,
@@ -92,16 +95,21 @@ export function useSessionManagement({
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyDataRef = useRef(historyData);
   historyDataRef.current = historyData;
+  const currentProviderRef = useRef(currentProvider);
+  currentProviderRef.current = currentProvider;
 
   // Snapshot of the session that was on screen before the user opened a history
   // item, so we can restore it exactly (rather than leaving the historical
   // session's data permanently in place with no way back). Only captured once
   // per "history detour" — browsing several history items in a row keeps
   // pointing back at the original live session, not the last-viewed history item.
+  // `provider` is required so returnToLiveSession reloads via the correct history
+  // backend (Grok vs Claude vs Codex) even if historyData was replaced later.
   const liveSessionSnapshotRef = useRef<{
     sessionId: string | null;
     title: string | null;
     messages: ClaudeMessage[];
+    provider?: string;
   } | null>(null);
   const [hasReturnableSession, setHasReturnableSession] = useState(false);
   const clearLiveSessionSnapshot = useCallback(() => {
@@ -261,7 +269,16 @@ export function useSessionManagement({
     // browsing several history items in a row must keep pointing back at the
     // original live session, not the last-viewed history item.
     if (liveSessionSnapshotRef.current === null) {
-      liveSessionSnapshotRef.current = { sessionId: currentSessionId, title: customSessionTitle, messages };
+      const liveProvider =
+        currentProviderRef.current
+        || historyDataRef.current?.sessions?.find(s => s.sessionId === currentSessionId)?.provider
+        || undefined;
+      liveSessionSnapshotRef.current = {
+        sessionId: currentSessionId,
+        title: customSessionTitle,
+        messages,
+        provider: liveProvider,
+      };
       setHasReturnableSession(true);
     }
 
@@ -291,7 +308,10 @@ export function useSessionManagement({
     setHasReturnableSession(false);
 
     if (snapshot.sessionId) {
-      const resolvedProvider = historyDataRef.current?.sessions?.find(s => s.sessionId === snapshot.sessionId)?.provider || 'claude';
+      const resolvedProvider =
+        snapshot.provider
+        || historyDataRef.current?.sessions?.find(s => s.sessionId === snapshot.sessionId)?.provider
+        || 'claude';
       beginSessionTransition(snapshot.sessionId, snapshot.title);
       sendBridgeEvent('set_provider', resolvedProvider);
       sendBridgeEvent('load_session', JSON.stringify({

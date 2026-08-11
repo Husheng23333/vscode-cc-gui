@@ -8,6 +8,7 @@ import { imageBlockFromLocalPath, restoreClaudeImageReferencesInContent } from '
 import { codemossConfigPath, readCodemossConfigFile, writeCodemossConfigFile } from './codemossJsonStore';
 import { codexImageTagRegex, imagePathFromCodexImageTagMatch, stripCodexInlineImageTags as stripCodexInlineImageTagsText } from './codexImageTags';
 import { GrokHistoryReader } from './GrokHistoryReader';
+import { hasLocalHistorySupport, isCliOnlyProvider } from '../../cli/cliTools';
 
 const USER_INPUT_BY_SESSION_KEY = 'ccg.userInputBySession';
 /** Legacy migration source only — favorites now live in the shared FAVORITES_FILE. Never written to again. */
@@ -31,7 +32,12 @@ interface CodexHistoryMessage {
   raw?: { message: { content: Array<Record<string, unknown>> } };
 }
 
-type CodexHistoryCacheEntry = { messages: any[]; updatedAt: string };
+type CodexHistoryCacheEntry = {
+  messages: any[];
+  updatedAt: string;
+  /** Always 'codex' for new writes; missing on legacy entries. */
+  provider?: 'codex';
+};
 
 export class HistoryService {
   private readonly context: vscode.ExtensionContext;
@@ -83,10 +89,11 @@ export class HistoryService {
       }
       const cache = this.context.globalState.get<Record<string, CodexHistoryCacheEntry>>(CODEX_HISTORY_CACHE_KEY) ?? {};
       const storageKey = this.getScopedSessionStorageKey(sessionId);
-      const existing = cache[storageKey] ?? { messages: [], updatedAt: new Date().toISOString() };
+      const existing = cache[storageKey] ?? { messages: [], updatedAt: new Date().toISOString(), provider: 'codex' };
       const nextMessages = [...existing.messages, normalizedMessage];
       existing.messages = nextMessages.slice(-400);
       existing.updatedAt = normalizedMessage.timestamp;
+      existing.provider = 'codex';
       cache[storageKey] = existing;
 
       const entries = Object.entries(cache)
@@ -384,6 +391,24 @@ export class HistoryService {
       this.loadGrokHistoryData(webview);
       return;
     }
+    // Kimi / OpenCode / PI: chat works, but there is no local history reader yet.
+    // Must not fall through to Claude's ~/.claude/projects scan — that incorrectly
+    // shows Claude sessions under other CLI providers.
+    if (isCliOnlyProvider(provider) && !hasLocalHistorySupport(provider)) {
+      this.log.appendLine(`[HISTORY] loadHistoryData: provider="${provider}" has no local history support`);
+      webview.postMessage({
+        type: 'history_data',
+        content: JSON.stringify({
+          success: true,
+          sessions: [],
+          total: 0,
+          favorites: this.getFavorites(),
+          historyUnsupported: true,
+          provider,
+        }),
+      });
+      return;
+    }
     const projectsDir = this.getClaudeProjectsDir();
     const favorites = this.getFavorites();
 
@@ -508,12 +533,14 @@ export class HistoryService {
   private loadGrokHistoryData(webview: vscode.Webview): void {
     try {
       const favorites = this.getFavorites();
+      const vscTitles: Record<string, string> = this.context.globalState.get('ccg.historyTitles') ?? {};
       const reader = new GrokHistoryReader();
       const workspace = this.getWorkspacePath();
       const result = reader.getSessionsForProject(workspace);
       const sessions = (result.sessions || []).map((session) => ({
         sessionId: session.sessionId,
-        title: session.title,
+        // Prefer user-renamed titles so list and chat header stay in sync.
+        title: vscTitles[session.sessionId] || session.title,
         messageCount: session.messageCount,
         lastTimestamp: new Date(session.lastTimestamp).toISOString(),
         firstTimestamp: new Date(session.firstTimestamp).toISOString(),
@@ -553,7 +580,8 @@ export class HistoryService {
       return;
     }
 
-    const normalizedProvider = provider === 'codex' || provider === 'claude' || provider === 'grok' ? provider : undefined;
+    const knownProviders = new Set(['claude', 'codex', 'grok', 'kimi', 'opencode', 'pi']);
+    const normalizedProvider = provider && knownProviders.has(provider) ? provider : undefined;
     this.log.appendLine(`[BRIDGE] loadSession called: sessionId="${sessionId}" provider="${normalizedProvider ?? 'auto'}"`);
 
     if (normalizedProvider === 'grok') {
@@ -568,6 +596,13 @@ export class HistoryService {
         webview.postMessage({ type: 'session_messages', content: JSON.stringify([]) });
         return;
       }
+    }
+
+    // CLI providers without a history reader: do not probe Claude/Codex stores.
+    if (normalizedProvider && isCliOnlyProvider(normalizedProvider) && !hasLocalHistorySupport(normalizedProvider)) {
+      this.log.appendLine(`[BRIDGE] loadSession: provider="${normalizedProvider}" has no local history support`);
+      webview.postMessage({ type: 'session_messages', content: JSON.stringify([]) });
+      return;
     }
 
     const projectsDir = this.getClaudeProjectsDir();
@@ -589,21 +624,26 @@ export class HistoryService {
     }
 
     try {
-      if (normalizedProvider !== 'claude') {
-        const liveMessages = this.readCodexLiveMessages(sessionId);
-        if (liveMessages.length > 0) {
-          this.log.appendLine(`[BRIDGE] loadSession: loaded ${liveMessages.length} messages from codex live session`);
-          webview.postMessage({ type: 'session_messages', content: JSON.stringify(liveMessages) });
-          return;
-        }
+      if (normalizedProvider !== 'claude' && normalizedProvider !== 'grok') {
+        // Never serve Grok-owned sessions through the Codex history paths.
+        if (this.getGrokSessionIdSet(this.getWorkspacePath()).has(sessionId)) {
+          this.log.appendLine(`[BRIDGE] loadSession: skipping codex paths for grok sessionId="${sessionId}"`);
+        } else {
+          const liveMessages = this.readCodexLiveMessages(sessionId);
+          if (liveMessages.length > 0) {
+            this.log.appendLine(`[BRIDGE] loadSession: loaded ${liveMessages.length} messages from codex live session`);
+            webview.postMessage({ type: 'session_messages', content: JSON.stringify(liveMessages) });
+            return;
+          }
 
-        const cache = this.context.globalState.get<Record<string, CodexHistoryCacheEntry>>(CODEX_HISTORY_CACHE_KEY) ?? {};
-        const entry = this.getCodexCacheEntryForCurrentWorkspace(cache, sessionId);
-        if (entry?.messages?.length) {
-          const messages = this.materializeCodexHistoryMessages(entry.messages);
-          this.log.appendLine(`[BRIDGE] loadSession: loaded ${messages.length} messages from codex cache`);
-          webview.postMessage({ type: 'session_messages', content: JSON.stringify(messages) });
-          return;
+          const cache = this.context.globalState.get<Record<string, CodexHistoryCacheEntry>>(CODEX_HISTORY_CACHE_KEY) ?? {};
+          const entry = this.getCodexCacheEntryForCurrentWorkspace(cache, sessionId);
+          if (entry?.messages?.length) {
+            const messages = this.materializeCodexHistoryMessages(entry.messages);
+            this.log.appendLine(`[BRIDGE] loadSession: loaded ${messages.length} messages from codex cache`);
+            webview.postMessage({ type: 'session_messages', content: JSON.stringify(messages) });
+            return;
+          }
         }
       }
     } catch { /* ignore */ }
@@ -778,6 +818,10 @@ export class HistoryService {
     const vscTitles: Record<string, string> = this.context.globalState.get('ccg.historyTitles') ?? {};
     const cache = this.context.globalState.get<Record<string, CodexHistoryCacheEntry>>(CODEX_HISTORY_CACHE_KEY) ?? {};
     const workspacePath = this.getWorkspacePath();
+    // Sessions owned by Grok must never appear under Codex history. Older builds
+    // incorrectly wrote every provider's [MESSAGE] stream into this cache.
+    const grokSessionIds = this.getGrokSessionIdSet(workspacePath);
+    this.purgeForeignProviderSessionsFromCodexCache(cache, grokSessionIds);
     const sessions: any[] = [];
     let cacheSessionCount = 0;
     let archivedSessionCount = 0;
@@ -785,6 +829,9 @@ export class HistoryService {
 
     for (const [storageKey, data] of this.getCodexCacheEntriesForCurrentWorkspace(cache)) {
       const sessionId = this.sessionIdFromScopedStorageKey(storageKey);
+      if (grokSessionIds.has(sessionId)) continue;
+      // Reject explicitly non-codex tags if present (defensive; writers always set 'codex').
+      if (data.provider && data.provider !== 'codex') continue;
       const messages = this.materializeCodexHistoryMessages(Array.isArray(data.messages) ? data.messages : []);
       if (messages.length === 0) continue;
       const firstUser = messages.find((m: any) => m?.type === 'user' && this.getCodexMessageDisplayText(m).length > 0);
@@ -818,6 +865,7 @@ export class HistoryService {
             sessionId = match ? match[1] : file.replace(/\.jsonl$/, '');
           }
           if (!sessionId || !summary || summary.messageCount === 0) continue;
+          if (grokSessionIds.has(sessionId)) continue;
           if (workspacePath && !cwdMatchesProject(summary.cwd, workspacePath)) continue;
           sessions.push({
             sessionId,
@@ -837,6 +885,7 @@ export class HistoryService {
       for (const filePath of this.getCodexLiveSessionFiles()) {
         const summary = this.summarizeCodexLiveSessionFile(filePath);
         if (!summary?.sessionId || summary.messageCount === 0) continue;
+        if (grokSessionIds.has(summary.sessionId)) continue;
         if (workspacePath && !cwdMatchesProject(summary.cwd, workspacePath)) continue;
         const existingIdx = sessions.findIndex(s => s.sessionId === summary.sessionId);
         const nextSession = {
@@ -1205,6 +1254,46 @@ export class HistoryService {
     }
     const prefix = `${scope}::`;
     return entries.filter(([key]) => key.startsWith(prefix));
+  }
+
+  /** Session ids that belong to Grok for the current (or all) project(s). */
+  private getGrokSessionIdSet(workspacePath?: string): Set<string> {
+    try {
+      const reader = new GrokHistoryReader();
+      const sessions = workspacePath
+        ? reader.listSessionsForProject(workspacePath)
+        : reader.listAllSessions();
+      return new Set(sessions.map((s) => s.sessionId).filter(Boolean));
+    } catch (error: any) {
+      this.log.appendLine(`[HISTORY] getGrokSessionIdSet failed: ${error?.message || error}`);
+      return new Set();
+    }
+  }
+
+  /**
+   * Remove cache entries that were incorrectly recorded for non-Codex providers
+   * (notably Grok) so they stop showing up in Codex history after upgrade.
+   */
+  private purgeForeignProviderSessionsFromCodexCache(
+    cache: Record<string, CodexHistoryCacheEntry>,
+    foreignSessionIds: Set<string>,
+  ): void {
+    if (foreignSessionIds.size === 0) return;
+    let removed = 0;
+    const next: Record<string, CodexHistoryCacheEntry> = { ...cache };
+    for (const key of Object.keys(next)) {
+      const sessionId = this.sessionIdFromScopedStorageKey(key);
+      if (!foreignSessionIds.has(sessionId)) continue;
+      delete next[key];
+      removed += 1;
+    }
+    if (removed === 0) return;
+    void this.context.globalState.update(CODEX_HISTORY_CACHE_KEY, next);
+    // Mutate caller's object so subsequent reads in this load see the purge.
+    for (const key of Object.keys(cache)) {
+      if (!(key in next)) delete cache[key];
+    }
+    this.log.appendLine(`[HISTORY] purged ${removed} foreign (non-codex) session(s) from codex history cache`);
   }
 
   private getCodexCacheEntryForCurrentWorkspace(

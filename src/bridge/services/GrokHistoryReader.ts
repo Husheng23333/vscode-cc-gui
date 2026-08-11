@@ -123,7 +123,11 @@ export class GrokHistoryReader {
     const chatPath = path.join(sessionDir, 'chat_history.jsonl');
     if (!fs.existsSync(chatPath) && !fs.existsSync(summaryPath)) return null;
 
-    let title = sessionId.slice(0, 8);
+    // Prefer the user's real first prompt over Grok's AI-generated_title /
+    // session_summary (e.g. "Simple Arithmetic Calculation 1 Plus 2"), which
+    // the user never typed and looks wrong next to the chat bubble "1+2".
+    let title = '';
+    let aiTitle = '';
     let messageCount = 0;
     let firstTimestamp = this.fileMtime(summaryPath) || this.fileMtime(chatPath) || Date.now();
     let lastTimestamp = firstTimestamp;
@@ -136,7 +140,7 @@ export class GrokHistoryReader {
     if (fs.existsSync(summaryPath)) {
       try {
         const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
-        title = summary.generated_title || summary.session_summary || title;
+        aiTitle = String(summary.generated_title || summary.session_summary || '').trim();
         messageCount = Number(summary.num_chat_messages ?? summary.num_messages ?? 0) || 0;
         const created = this.parseTime(summary.created_at);
         const updated = this.parseTime(summary.updated_at);
@@ -145,17 +149,23 @@ export class GrokHistoryReader {
       } catch { /* ignore */ }
     }
 
-    if (messageCount === 0 && fs.existsSync(chatPath)) {
+    if (fs.existsSync(chatPath)) {
       try {
-        const lines = fs.readFileSync(chatPath, 'utf8').split(/\r?\n/).filter((l) => l.trim());
-        messageCount = lines.length;
+        const firstUserPrompt = this.extractFirstUserPromptFromChat(chatPath);
+        if (firstUserPrompt) title = firstUserPrompt;
+        if (messageCount === 0) {
+          const lines = fs.readFileSync(chatPath, 'utf8').split(/\r?\n/).filter((l) => l.trim());
+          messageCount = lines.length;
+        }
         lastTimestamp = this.fileMtime(chatPath) || lastTimestamp;
       } catch { /* ignore */ }
     }
 
+    if (!title) title = aiTitle || sessionId.slice(0, 8);
+
     return {
       sessionId,
-      title: String(title || sessionId.slice(0, 8)),
+      title: this.truncateTitle(title),
       messageCount,
       lastTimestamp,
       firstTimestamp,
@@ -163,6 +173,55 @@ export class GrokHistoryReader {
       fileSize,
       provider: 'grok',
     };
+  }
+
+  /**
+   * First non-synthetic, non-context user turn — matches what appears as the
+   * user bubble in chat after stripUserQueryWrapper.
+   */
+  private extractFirstUserPromptFromChat(chatPath: string): string {
+    // Cap read size for list performance; first real user turn is almost always near the head.
+    let raw = '';
+    try {
+      const fd = fs.openSync(chatPath, 'r');
+      try {
+        const stat = fs.fstatSync(fd);
+        const max = Math.min(stat.size, 256 * 1024);
+        const buf = Buffer.alloc(max);
+        const n = fs.readSync(fd, buf, 0, max, 0);
+        raw = buf.subarray(0, n).toString('utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      return '';
+    }
+
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.includes('"type"')) continue;
+      let value: any;
+      try {
+        value = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      if (value?.type !== 'user' || value.synthetic_reason) continue;
+      const rawText = this.extractContentText(value.content);
+      if (this.isRuntimeContextUserText(rawText)) continue;
+      // Attachment-only turns (no typed text) are not good session titles.
+      if (/^\s*<image_files>/i.test(rawText.trim())) continue;
+      const display = this.stripUserQueryWrapper(rawText);
+      if (display) return display;
+    }
+    return '';
+  }
+
+  private truncateTitle(title: string, maxLen = 80): string {
+    const t = String(title || '').replace(/\s+/g, ' ').trim();
+    if (!t) return '';
+    if (t.length <= maxLen) return t;
+    return `${t.slice(0, maxLen - 1)}…`;
   }
 
   private parseChatHistoryToMessages(chatPath: string): Array<Record<string, unknown>> {
@@ -219,50 +278,71 @@ export class GrokHistoryReader {
     return messages;
   }
 
-  private buildUserTextMessage(text: string, uuid: string) {
+  /**
+   * Frontend history/chat rendering expects Claude-style rows:
+   *   { type, content, raw: { uuid?, message: { role, content: blocks } }, timestamp? }
+   * not raw CLI jsonl rows with a top-level `message` field. Without `content`/`raw`,
+   * shouldShowMessage / getMessageText treat every row as empty and the chat list is blank.
+   */
+  private buildGuiMessage(
+    type: 'user' | 'assistant',
+    role: 'user' | 'assistant',
+    contentBlocks: unknown[],
+    textContent: string,
+    uuid: string,
+  ) {
     return {
-      type: 'user',
-      uuid,
-      message: { role: 'user', content: [{ type: 'text', text }] },
+      type,
+      content: textContent,
+      raw: {
+        uuid,
+        message: {
+          role,
+          content: contentBlocks,
+        },
+      },
+      timestamp: new Date().toISOString(),
     };
+  }
+
+  private buildUserTextMessage(text: string, uuid: string) {
+    return this.buildGuiMessage('user', 'user', [{ type: 'text', text }], text, uuid);
   }
 
   private buildAssistantTextMessage(text: string, uuid: string) {
-    return {
-      type: 'assistant',
-      uuid,
-      message: { role: 'assistant', content: [{ type: 'text', text }] },
-    };
+    return this.buildGuiMessage('assistant', 'assistant', [{ type: 'text', text }], text, uuid);
   }
 
   private buildAssistantThinkingMessage(text: string, uuid: string) {
-    return {
-      type: 'assistant',
+    return this.buildGuiMessage(
+      'assistant',
+      'assistant',
+      [{ type: 'thinking', thinking: text }],
+      text,
       uuid,
-      message: { role: 'assistant', content: [{ type: 'thinking', thinking: text }] },
-    };
+    );
   }
 
   private buildToolUseMessage(id: string, name: string, input: unknown, uuid: string) {
-    return {
-      type: 'assistant',
+    return this.buildGuiMessage(
+      'assistant',
+      'assistant',
+      [{ type: 'tool_use', id, name, input: input && typeof input === 'object' ? input : {} }],
+      '',
       uuid,
-      message: {
-        role: 'assistant',
-        content: [{ type: 'tool_use', id, name, input: input && typeof input === 'object' ? input : {} }],
-      },
-    };
+    );
   }
 
   private buildToolResultMessage(toolUseId: string, content: string, isError: boolean, uuid: string) {
-    return {
-      type: 'user',
+    // Use the same display marker as live tool inserts so shouldShowMessage
+    // hides standalone tool_result rows (results attach to the tool card via raw).
+    return this.buildGuiMessage(
+      'user',
+      'user',
+      [{ type: 'tool_result', tool_use_id: toolUseId, is_error: isError, content }],
+      '[tool_result]',
       uuid,
-      message: {
-        role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: toolUseId, is_error: isError, content }],
-      },
-    };
+    );
   }
 
   private extractContentText(content: unknown): string {
@@ -333,7 +413,9 @@ export class GrokHistoryReader {
   }
 
   private isRuntimeContextUserText(text: string): boolean {
-    return /<ide_selection>|<opened_file>|<workspace_path>/i.test(text);
+    // Grok injects system/context turns as user rows; hide them from the chat timeline.
+    // Do not filter <image_files> — those are real user attachments.
+    return /<ide_selection>|<opened_file>|<workspace_path>|<user_info>|<system-reminder>/i.test(text);
   }
 
   private resolveSessionDir(sessionId: string, cwd?: string): string | undefined {
@@ -364,7 +446,12 @@ export class GrokHistoryReader {
   }
 
   private encodeCwd(cwd: string): string {
-    return encodeURIComponent(cwd || '').replace(/%2F/gi, '%2F');
+    // Match Grok CLI session dir naming (see ai-bridge encodeGrokSessionCwd):
+    // normalize separators and strip trailing slashes before encoding.
+    const normalized = String(cwd || '')
+      .replace(/\\/g, '/')
+      .replace(/\/+$/, '');
+    return encodeURIComponent(normalized);
   }
 
   private decodeCwd(encoded: string): string {

@@ -90,9 +90,12 @@ export class ProviderHandler implements BridgeHandler {
 
       case 'switch_provider': {
         const { id } = parseJson<any>(content, {});
+        const targetId = String(id ?? '').trim();
+        // Include builtin pseudo-providers so isActive can target local settings / CLI login.
+        // __disabled__ marks every entry inactive; saveClaudeProviders then clears claude.current.
         const providers = this.store.getClaudeProviders().map((provider: any) => ({
           ...provider,
-          isActive: id === '__disabled__' ? false : provider.id === id,
+          isActive: targetId === '__disabled__' ? false : provider.id === targetId,
         }));
         await this.store.saveClaudeProviders(providers);
         postJson(webview, 'providers_updated', this.store.getClaudeProviders());

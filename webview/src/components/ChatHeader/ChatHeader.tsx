@@ -102,6 +102,49 @@ export function ChatHeader({
     return null;
   }
 
+  const showReturnToLive =
+    currentView === 'chat' && canReturnToLiveSession && typeof onReturnToLiveSession === 'function';
+
+  const renderSessionTitle = () => {
+    if (editing) {
+      return (
+        <div className="session-title-edit-mode" onClick={(e) => e.stopPropagation()}>
+          <input
+            ref={inputRef}
+            type="text"
+            className="session-title-input"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
+            maxLength={50}
+            spellCheck={false}
+            aria-label="Session title"
+          />
+          <button className="session-title-save-btn" onClick={commitEdit} aria-label="Save title">
+            <span className="codicon codicon-check" />
+          </button>
+          <button className="session-title-cancel-btn" onClick={cancelEdit} aria-label="Cancel editing">
+            <span className="codicon codicon-close" />
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="session-title-wrapper">
+        <div className="session-title" title={sessionTitle}>
+          {sessionTitle}
+        </div>
+        {titleEditable && (
+          <button className="session-title-edit-btn" onClick={startEditing} aria-label="Edit session title">
+            <span className="codicon codicon-edit" />
+          </button>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="header">
       <div className="header-left">
@@ -109,46 +152,21 @@ export function ChatHeader({
           <button className="back-button" onClick={onBack} data-tooltip={t('common.back')}>
             <BackIcon /> {t('common.back')}
           </button>
-        ) : currentView === 'chat' && canReturnToLiveSession && onReturnToLiveSession ? (
-          <button
-            className="back-button"
-            onClick={onReturnToLiveSession}
-            data-tooltip={t('common.backToLiveSession', { defaultValue: 'Back to conversation' })}
-          >
-            <BackIcon /> {t('common.backToLiveSession', { defaultValue: 'Back to conversation' })}
-          </button>
-        ) : editing ? (
-          <div className="session-title-edit-mode" onClick={(e) => e.stopPropagation()}>
-            <input
-              ref={inputRef}
-              type="text"
-              className="session-title-input"
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onBlur={handleBlur}
-              maxLength={50}
-              spellCheck={false}
-              aria-label="Session title"
-            />
-            <button className="session-title-save-btn" onClick={commitEdit} aria-label="Save title">
-              <span className="codicon codicon-check" />
-            </button>
-            <button className="session-title-cancel-btn" onClick={cancelEdit} aria-label="Cancel editing">
-              <span className="codicon codicon-close" />
-            </button>
-          </div>
         ) : (
-          <div className="session-title-wrapper">
-            <div className="session-title">
-              {sessionTitle}
-            </div>
-            {titleEditable && (
-              <button className="session-title-edit-btn" onClick={startEditing} aria-label="Edit session title">
-                <span className="codicon codicon-edit" />
+          <>
+            {/* Keep the history-list title visible while browsing a history session;
+                previously the "back to live" control replaced the title entirely. */}
+            {showReturnToLive && (
+              <button
+                className="back-button"
+                onClick={onReturnToLiveSession}
+                data-tooltip={t('common.backToLiveSession', { defaultValue: 'Back to conversation' })}
+              >
+                <BackIcon /> {t('common.backToLiveSession', { defaultValue: 'Back to conversation' })}
               </button>
             )}
-          </div>
+            {currentView === 'chat' && renderSessionTitle()}
+          </>
         )}
       </div>
       <div className="header-right">

@@ -7,9 +7,14 @@
   background: var(--input-bg);
   border: 1px solid var(--input-border);
   border-radius: 8px;
+  /* Must stay visible so mode/model dropdowns can open upward past the box */
   overflow: visible;
   position: relative;
   margin: 0 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
