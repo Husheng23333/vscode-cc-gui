@@ -5,6 +5,12 @@ import { homedir } from 'os';
 import * as vscode from 'vscode';
 import { getCodexCliIntegrity } from '../../codexCliIntegrity';
 import { NodeDetector } from '../../nodeDetector';
+import {
+  MIN_NODE_MAJOR_VERSION,
+  formatNodeRequirementError,
+  isNodeVersionSupported,
+  readNodeVersion,
+} from '../../nodeRequirements';
 import { BridgeContext, BridgeHandler, BridgeMessage } from '../types';
 import { callWindowFunction, parseJson, postJson } from './helpers';
 
@@ -42,12 +48,19 @@ export class DependencyHandler implements BridgeHandler {
       case 'check_dependency_updates':
         this.checkDependencyUpdates(content, webview);
         return true;
-      case 'check_node_environment':
+      case 'check_node_environment': {
+        const nodePath = NodeDetector.find(this.context.extensionContext) ?? '';
+        const version = nodePath ? readNodeVersion(nodePath) : null;
+        const available = !!nodePath && isNodeVersionSupported(version);
         postJson(webview, 'node_environment_status', {
-          available: !!NodeDetector.find(this.context.extensionContext),
-          nodePath: NodeDetector.find(this.context.extensionContext) ?? '',
+          available,
+          nodePath,
+          version,
+          minVersion: MIN_NODE_MAJOR_VERSION,
+          error: available ? undefined : formatNodeRequirementError(nodePath || undefined, version),
         });
         return true;
+      }
       case 'install_dependency':
       case 'update_dependency':
       case 'update_dependency_sdk':

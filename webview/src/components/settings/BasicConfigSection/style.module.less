@@ -431,6 +431,65 @@
   }
 }
 
+.nodeBlockCard {
+  margin: 8px 0 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--color-error, #f85149);
+  background: color-mix(in srgb, var(--color-error, #f85149) 12%, transparent);
+}
+
+.nodeBlockTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--color-error, #f85149);
+  margin-bottom: 8px;
+
+  .codicon {
+    font-size: 16px;
+  }
+}
+
+.nodeBlockBody {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vscode-foreground, inherit);
+
+  p {
+    margin: 0 0 8px;
+  }
+
+  code {
+    font-size: 12px;
+    word-break: break-all;
+  }
+}
+
+.nodeBlockMeta {
+  margin: 0 0 8px;
+  padding-left: 18px;
+
+  li {
+    margin-bottom: 4px;
+  }
+}
+
+.nodeBlockSteps {
+  font-weight: 500;
+  margin-top: 4px !important;
+}
+
+.nodeBlockStepsList {
+  margin: 0;
+  padding-left: 18px;
+
+  li {
+    margin-bottom: 4px;
+  }
+}
+
 .nodePathInputWrapper {
   display: flex;
   flex-wrap: wrap;

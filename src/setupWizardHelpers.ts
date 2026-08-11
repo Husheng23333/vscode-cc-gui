@@ -2,10 +2,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
 import { getCodexCliIntegrity } from './codexCliIntegrity.ts';
+import {
+  MIN_NODE_MAJOR_VERSION,
+  parseNodeMajorVersion,
+} from './nodeRequirements.ts';
 
 export const SETUP_COMPLETED_KEY = 'ccg.setupWizardCompleted';
 export const SETUP_SKIPPED_AT_KEY = 'ccg.setupWizardSkippedAt';
-export const MIN_NODE_MAJOR_VERSION = 18;
+export { MIN_NODE_MAJOR_VERSION, parseNodeMajorVersion };
 
 const SDK_PACKAGES: Record<string, { id: string; name: string; pkg: string }> = {
   'claude-sdk': { id: 'claude-sdk', name: 'Claude Agent SDK', pkg: '@anthropic-ai/claude-agent-sdk' },
@@ -31,14 +35,6 @@ export interface SdkStatus {
 export interface WizardSnapshot {
   node: NodeStatus;
   sdks: SdkStatus[];
-}
-
-export function parseNodeMajorVersion(versionOutput: string | undefined | null): number | null {
-  if (!versionOutput) return null;
-  const match = versionOutput.trim().match(/^v?(\d+)/);
-  if (!match) return null;
-  const parsed = Number.parseInt(match[1], 10);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function evaluateNodeStatus(detectedPath: string | undefined, versionOutput: string | undefined): NodeStatus {

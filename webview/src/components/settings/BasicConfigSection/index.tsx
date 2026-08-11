@@ -22,7 +22,7 @@ interface BasicConfigSectionProps {
   onFontSizeLevelChange: (level: number) => void;
   nodePath: string;
   onNodePathChange: (path: string) => void;
-  onSaveNodePath: () => void;
+  onSaveNodePath: (pathOverride?: string) => void;
   savingNodePath: boolean;
   nodeVersion?: string | null;
   minNodeVersion?: number;

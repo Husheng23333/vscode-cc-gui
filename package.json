@@ -200,7 +200,7 @@
         "ccGui.nodePath": {
           "type": "string",
           "default": "",
-          "description": "Custom path to Node.js executable"
+          "description": "Node.js executable used only by CC GUI (requires v20+). Does not change your project terminal Node. Leave empty to use auto-detected node on PATH."
         },
         "ccGui.autoSyncActiveFile": {
           "type": "boolean",

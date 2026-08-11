@@ -528,7 +528,7 @@ const DependencySection = ({ addToast, isActive }: DependencySectionProps) => {
         <span className={styles.warningText}>{t('settings.dependency.installPolicyTip')}</span>
       </div>
 
-      {/* Node.js Environment Warning */}
+      {/* Node.js Environment Warning (missing or version too low for CC GUI) */}
       {nodeAvailable === false && (
         <div className={styles.warningBanner}>
           <span className="codicon codicon-warning" />

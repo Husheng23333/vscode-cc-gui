@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 export interface EnvironmentTabProps {
   nodePath: string;
   onNodePathChange: (path: string) => void;
-  onSaveNodePath: () => void;
+  onSaveNodePath: (pathOverride?: string) => void;
   savingNodePath: boolean;
   nodeVersion?: string | null;
   minNodeVersion?: number;
@@ -24,7 +24,7 @@ const EnvironmentTab = ({
   onSaveNodePath,
   savingNodePath,
   nodeVersion,
-  minNodeVersion = 18,
+  minNodeVersion = 20,
   claudeCliPath = '',
   onClaudeCliPathChange = () => {},
   onSaveClaudeCliPath = () => {},
@@ -36,7 +36,6 @@ const EnvironmentTab = ({
 }: EnvironmentTabProps) => {
   const { t } = useTranslation();
 
-  // Parse the major version number
   const parseMajorVersion = (version: string | null | undefined): number => {
     if (!version) return 0;
     const versionStr = version.startsWith('v') ? version.substring(1) : version;
@@ -48,7 +47,9 @@ const EnvironmentTab = ({
   };
 
   const majorVersion = parseMajorVersion(nodeVersion);
-  const isVersionTooLow = nodeVersion && majorVersion > 0 && majorVersion < minNodeVersion;
+  const isVersionTooLow = Boolean(nodeVersion && majorVersion > 0 && majorVersion < minNodeVersion);
+  const isMissing = !nodePath;
+  const isBlocked = isVersionTooLow || isMissing;
 
   return (
     <div className={styles.tabContent}>
@@ -58,17 +59,63 @@ const EnvironmentTab = ({
           <span className="codicon codicon-terminal" />
           <span className={styles.fieldLabel}>{t('settings.basic.nodePath.label')}</span>
           {nodeVersion && (
-            <span className={`${styles.versionBadge} ${isVersionTooLow ? styles.versionBadgeError : styles.versionBadgeOk}`}>
+            <span
+              className={`${styles.versionBadge} ${
+                isVersionTooLow ? styles.versionBadgeError : styles.versionBadgeOk
+              }`}
+            >
               {nodeVersion}
             </span>
           )}
         </div>
-        {isVersionTooLow && (
-          <div className={styles.versionWarning}>
-            <span className="codicon codicon-warning" />
-            {t('settings.basic.nodePath.versionTooLow', { minVersion: minNodeVersion })}
+
+        {isBlocked && (
+          <div className={styles.nodeBlockCard}>
+            <div className={styles.nodeBlockTitle}>
+              <span className="codicon codicon-error" />
+              {t('settings.basic.nodePath.blockTitle')}
+            </div>
+            <div className={styles.nodeBlockBody}>
+              {isVersionTooLow ? (
+                <>
+                  <p>
+                    {t('settings.basic.nodePath.versionTooLow', {
+                      minVersion: minNodeVersion,
+                      currentVersion: nodeVersion,
+                    })}
+                  </p>
+                  <ul className={styles.nodeBlockMeta}>
+                    <li>
+                      {t('settings.basic.nodePath.currentVersionLabel')}: <code>{nodeVersion}</code>
+                    </li>
+                    <li>
+                      {t('settings.basic.nodePath.minVersionLabel')}: <code>v{minNodeVersion}</code>
+                    </li>
+                    {nodePath && (
+                      <li>
+                        {t('settings.basic.nodePath.detectedPathLabel')}: <code>{nodePath}</code>
+                      </li>
+                    )}
+                  </ul>
+                </>
+              ) : (
+                <p>{t('settings.basic.nodePath.notFound', { minVersion: minNodeVersion })}</p>
+              )}
+              <p className={styles.nodeBlockSteps}>
+                {t('settings.basic.nodePath.howToFix', { minVersion: minNodeVersion })}
+              </p>
+              <ol className={styles.nodeBlockStepsList}>
+                <li>{t('settings.basic.nodePath.stepInstall', { minVersion: minNodeVersion })}</li>
+                <li>
+                  {t('settings.basic.nodePath.stepGetPath')}{' '}
+                  <code>{t('settings.basic.nodePath.hintCommand')}</code>
+                </li>
+                <li>{t('settings.basic.nodePath.stepPaste')}</li>
+              </ol>
+            </div>
           </div>
         )}
+
         <div className={styles.nodePathInputWrapper}>
           <input
             type="text"
@@ -79,13 +126,11 @@ const EnvironmentTab = ({
           />
           <button
             className={styles.saveBtn}
-            onClick={onSaveNodePath}
+            onClick={() => onSaveNodePath()}
             disabled={savingNodePath}
           >
             {savingNodePath && (
-              <span
-                className="codicon codicon-loading codicon-modifier-spin"
-              />
+              <span className="codicon codicon-loading codicon-modifier-spin" />
             )}
             {t('common.save')}
           </button>
@@ -93,7 +138,9 @@ const EnvironmentTab = ({
         <small className={styles.formHint}>
           <span className="codicon codicon-info" />
           <span>
-            {t('settings.basic.nodePath.hint')} <code>{t('settings.basic.nodePath.hintCommand')}</code> {t('settings.basic.nodePath.hintText')}
+            {t('settings.basic.nodePath.hint', { minVersion: minNodeVersion })}{' '}
+            <code>{t('settings.basic.nodePath.hintCommand')}</code>{' '}
+            {t('settings.basic.nodePath.hintText', { minVersion: minNodeVersion })}
           </span>
         </small>
       </div>
@@ -118,9 +165,7 @@ const EnvironmentTab = ({
             disabled={savingClaudeCliPath}
           >
             {savingClaudeCliPath && (
-              <span
-                className="codicon codicon-loading codicon-modifier-spin"
-              />
+              <span className="codicon codicon-loading codicon-modifier-spin" />
             )}
             {t('common.save')}
           </button>
@@ -151,18 +196,14 @@ const EnvironmentTab = ({
             disabled={savingWorkingDirectory}
           >
             {savingWorkingDirectory && (
-              <span
-                className="codicon codicon-loading codicon-modifier-spin"
-              />
+              <span className="codicon codicon-loading codicon-modifier-spin" />
             )}
             {t('common.save')}
           </button>
         </div>
         <small className={styles.formHint}>
           <span className="codicon codicon-info" />
-          <span>
-            {t('settings.basic.workingDirectory.hint')}
-          </span>
+          <span>{t('settings.basic.workingDirectory.hint')}</span>
         </small>
       </div>
     </div>
