@@ -183,22 +183,9 @@ const ChangelogDialog = ({ isOpen, onClose, entries, initialPage = 0 }: Changelo
           </button>
 
           <div className="changelog-pagination">
-            {totalPages <= 10 ? (
-              <div className="changelog-dots">
-                {entries.map((_, idx) => (
-                  <button
-                    key={idx}
-                    className={`changelog-dot ${idx === currentPage ? 'active' : ''}`}
-                    onClick={() => setCurrentPage(idx)}
-                    aria-label={`Page ${idx + 1}`}
-                  />
-                ))}
-              </div>
-            ) : (
-              <span className="changelog-page-text">
-                {t('changelog.page', { current: currentPage + 1, total: totalPages })}
-              </span>
-            )}
+            <span className="changelog-page-text">
+              {t('changelog.page', { current: currentPage + 1, total: totalPages })}
+            </span>
           </div>
 
           <button
