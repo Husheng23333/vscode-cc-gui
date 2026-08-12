@@ -47,6 +47,7 @@ import { abortCurrentCodexTurn } from './services/codex/message-service.js';
 import { isWebviewControlledEnvVar, isDangerousEnvVar } from './config/api-config.js';
 import { cleanupStaleTempImages } from './services/claude/attachment-service.js';
 import { requestContext, getRequestId } from './utils/request-context.js';
+import { abortCliProcesses } from './utils/cli-process-registry.js';
 
 // =============================================================================
 // Network Environment Setup (must run before any HTTPS connection)
@@ -654,6 +655,21 @@ async function processRequest(request) {
           'utf8'
         );
       });
+      // Grok / Kimi / OpenCode / Pi: kill registered CLI child processes.
+      try {
+        const killed = abortCliProcesses(hasScopedTargets ? targetRequestIds : undefined);
+        if (killed.length > 0) {
+          _originalStderrWrite(
+            `[daemon] CLI abort killed requestIds=${killed.join(',')}\n`,
+            'utf8'
+          );
+        }
+      } catch (e) {
+        _originalStderrWrite(
+          `[daemon] CLI abort error: ${e.message}\n`,
+          'utf8'
+        );
+      }
       // Claude: only when unscoped, or this webview still has active targets.
       if (!hasScopedTargets || scoped.length > 0) {
         abortCurrentTurn().catch((e) => {

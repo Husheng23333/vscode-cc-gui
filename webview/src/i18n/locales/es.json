@@ -250,7 +250,7 @@
         "label": "Notificación de tarea completada",
         "enabled": "Activado",
         "disabled": "Desactivado",
-        "hint": "Cuando está activado, muestra una notificación del sistema cuando la tarea AI se completa. Cuando está desactivado, no aparece ninguna notificación."
+        "hint": "Cuando está activado, muestra un toast en el panel de chat al completar la tarea. Cuando está desactivado, no aparece."
       },
       "sendShortcut": {
         "label": "Atajo de envío",

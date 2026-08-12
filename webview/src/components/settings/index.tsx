@@ -198,6 +198,9 @@ const SettingsView = ({
     enableDebugLog,
     setEnableDebugLog,
     handleEnableDebugLogChange,
+    taskCompletionNotificationEnabled,
+    setTaskCompletionNotificationEnabled,
+    handleTaskCompletionNotificationEnabledChange,
     askUserQuestionNotificationEnabled,
     setAskUserQuestionNotificationEnabled,
     handleAskUserQuestionNotificationEnabledChange,
@@ -357,6 +360,7 @@ const SettingsView = ({
     setAiTitleGenerationEnabled,
     setStatusBarWidgetEnabled,
     setEnableDebugLog,
+    setTaskCompletionNotificationEnabled,
     setAskUserQuestionNotificationEnabled,
   });
 
@@ -546,6 +550,8 @@ const SettingsView = ({
               onSaveCustomSoundPath={handleSaveCustomSoundPath}
               onTestSound={handleTestSound}
               onBrowseSound={handleBrowseSound}
+              taskCompletionNotificationEnabled={taskCompletionNotificationEnabled}
+              onTaskCompletionNotificationEnabledChange={handleTaskCompletionNotificationEnabledChange}
               askUserQuestionNotificationEnabled={askUserQuestionNotificationEnabled}
               onAskUserQuestionNotificationEnabledChange={handleAskUserQuestionNotificationEnabledChange}
               detailedOutputEnabled={detailedOutputEnabled}

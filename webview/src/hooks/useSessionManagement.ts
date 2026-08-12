@@ -131,17 +131,23 @@ export function useSessionManagement({
     // Clear expand/collapse cache on session switch to avoid unbounded growth
     clearAllPersistedExpanded();
     // Use the single cleanup entry point exposed by useWindowCallbacks.
-    // This clears both React state AND internal streaming refs in one shot.
+    // This clears both React state AND internal streaming refs in one shot,
+    // and cancels any deferred updateMessages that would re-apply the old chat.
     if (typeof window.__resetTransientUiState === 'function') {
       window.__resetTransientUiState();
     } else {
       // Fallback if useWindowCallbacks hasn't mounted yet (e.g. during SSR/tests)
+      if (typeof window.__cancelPendingUpdateMessages === 'function') {
+        window.__cancelPendingUpdateMessages();
+      }
       clearToasts();
       setStatus('');
       setLoadingState(false);
       setIsThinking(false);
       setStreamingActive(false);
     }
+    // Always clear messages after reset so a concurrent deferred updater that
+    // slipped through still loses to this last write in the same tick.
     setMessages([]);
     setCurrentSessionId(nextSessionId);
     setCustomSessionTitle(nextTitle);

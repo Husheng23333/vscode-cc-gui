@@ -6,6 +6,7 @@ import { spawn } from 'child_process';
 import { createInterface } from 'readline';
 import { emitSendError, endStream } from './marker-protocol.js';
 import { isWindowsCmdShim } from './cli-path.js';
+import { registerCliProcess } from './cli-process-registry.js';
 
 function killChildTree(child, label) {
   if (!child || child.killed) return;
@@ -62,6 +63,8 @@ export function runCliStreaming({
     };
 
     let child;
+    /** @type {(() => void)|null} */
+    let unregisterCli = null;
     try {
       child = spawn(bin, args, {
         cwd,
@@ -78,6 +81,9 @@ export function runCliStreaming({
       finish({ code: null, signal: null, hadError });
       return;
     }
+
+    // Register for Stop / interrupt_session so daemon abort can kill this child.
+    unregisterCli = registerCliProcess(() => killChildTree(child, label), label);
 
     const onParentSignal = () => killChildTree(child, label);
     process.once('SIGTERM', onParentSignal);
@@ -114,6 +120,12 @@ export function runCliStreaming({
       process.off('SIGTERM', onParentSignal);
       process.off('SIGINT', onParentSignal);
       process.off('SIGHUP', onParentSignal);
+      try {
+        unregisterCli?.();
+      } catch {
+        // ignore
+      }
+      unregisterCli = null;
 
       if (!hadError && code !== 0 && signal !== 'SIGTERM' && signal !== 'SIGINT') {
         const tail = stderrTail.trim().slice(-800);

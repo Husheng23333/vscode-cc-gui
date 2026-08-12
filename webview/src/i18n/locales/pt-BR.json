@@ -262,7 +262,7 @@
         "label": "Notificação de Conclusão de Tarefa",
         "enabled": "Ativado",
         "disabled": "Desativado",
-        "hint": "Quando ativado, exibe uma notificação do sistema quando a tarefa AI é concluída. Quando desativado, nenhuma notificação aparece."
+        "hint": "Quando ativado, exibe um toast no painel do chat ao concluir a tarefa. Quando desativado, não aparece."
       },
       "sendShortcut": {
         "label": "Atalho de Envio",

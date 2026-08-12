@@ -154,6 +154,13 @@ export function registerMessageCallbacks(
   window.__cancelPendingUpdateMessages = cancelPendingUpdateMessages;
 
   const processUpdateMessages = (json: string, sequence: number | null = null) => {
+    // Defense-in-depth: deferred (streaming-coalesced) updateMessages fire via
+    // setTimeout and skip the guard check in window.updateMessages. Without this
+    // check, a snapshot scheduled ~16ms before "new session" can re-apply the
+    // previous conversation after setMessages([]) and leave Welcome + old chat
+    // visible at the same time (or fully restore the old session).
+    if (window.__sessionTransitioning) return;
+
     const minAcceptedSequence = window.__minAcceptedUpdateSequence ?? 0;
     if (sequence != null && sequence < minAcceptedSequence) {
       return;
@@ -563,16 +570,9 @@ export function registerMessageCallbacks(
 
   window.clearMessages = () => {
     // Cancel any pending deferred updateMessages to prevent stale data from
-    // being applied after messages are cleared.
-    if (pendingUpdateRaf !== null) {
-      clearTimeout(pendingUpdateRaf);
-      pendingUpdateRaf = null;
-      pendingUpdateJson = null;
-      pendingUpdateSequence = null;
-      window.__pendingUpdateRaf = null;
-      window.__pendingUpdateJson = null;
-      window.__pendingUpdateSequence = null;
-    }
+    // being applied after messages are cleared. (Also done inside
+    // resetTransientUiState via invalidatePendingMessageSnapshots.)
+    cancelPendingUpdateMessages();
     window.__deniedToolIds?.clear();
     resetTransientUiState();
     closeContextUsageDialog();

@@ -541,18 +541,38 @@ export async function sendMessage(
     }));
 
   } catch (error) {
-    console.error('[DEBUG] Error:', error.message);
-    console.error('[DEBUG] Error stack:', error.stack);
+    const rawError = error?.message || String(error);
+    const errorName = error?.name || '';
+    // User clicked Stop → AbortController throws "Aborted". That is not a config/network failure.
+    const isUserAbort =
+      errorName === 'AbortError'
+      || rawError === 'Aborted'
+      || rawError === 'User interrupted'
+      || /operation was aborted/i.test(rawError);
 
-    const errorPayload = buildErrorPayload(error);
-    // Mirror Claude: stderr for diagnostics, stdout [SEND_ERROR] for UI, bare JSON for demux.
-    // IMPORTANT: emit SEND_ERROR *before* STREAM_END. The bridge drops request-scoped
-    // webview mapping on stream_end, so a late send_error never reaches the chat UI.
-    const serialized = JSON.stringify(errorPayload);
-    console.error('[SEND_ERROR]', serialized);
-    console.log(`[SEND_ERROR] ${serialized}`);
-    console.log(serialized);
-    emitStreamEndOnce();
+    if (isUserAbort) {
+      console.error('[DEBUG] Codex turn aborted by user (no SEND_ERROR)');
+      // Graceful finish: stream ends cleanly so the UI stops loading without an ERROR bubble.
+      console.log(JSON.stringify({
+        success: false,
+        error: 'User interrupted',
+        transport: 'aborted',
+      }));
+      emitStreamEndOnce();
+    } else {
+      console.error('[DEBUG] Error:', rawError);
+      console.error('[DEBUG] Error stack:', error?.stack);
+
+      const errorPayload = buildErrorPayload(error);
+      // Mirror Claude: stderr for diagnostics, stdout [SEND_ERROR] for UI, bare JSON for demux.
+      // IMPORTANT: emit SEND_ERROR *before* STREAM_END. The bridge drops request-scoped
+      // webview mapping on stream_end, so a late send_error never reaches the chat UI.
+      const serialized = JSON.stringify(errorPayload);
+      console.error('[SEND_ERROR]', serialized);
+      console.log(`[SEND_ERROR] ${serialized}`);
+      console.log(serialized);
+      emitStreamEndOnce();
+    }
   } finally {
     activeCodexAbortControllers.delete(requestId);
   }

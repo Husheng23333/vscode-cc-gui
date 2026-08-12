@@ -225,6 +225,7 @@ interface Window {
   updateCodexMcpServerTools?: (json: string) => void;
   onTokenTrackerResponse?: (json: string) => void;
   updateAskUserQuestionNotificationEnabled?: (json: string) => void;
+  updateTaskCompletionNotificationEnabled?: (json: string) => void;
   forceClosePermissionDialog?: (channelId?: string | null) => void;
   forceCloseAskUserQuestionDialog?: (requestId?: string | null) => void;
   forceClosePlanApprovalDialog?: (requestId?: string | null) => void;

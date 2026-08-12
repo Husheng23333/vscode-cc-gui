@@ -770,6 +770,22 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     const localize = createLocalizeMessage(t);
     const errorText = localize(parseSendErrorPayload(payload));
 
+    // User clicked Stop — Codex/Grok may still surface "Aborted". Do not show ERROR bubble.
+    const abortLike =
+      /^(Aborted|User interrupted)$/i.test(errorText.trim())
+      || /\bAborted\b/i.test(errorText)
+      || /User interrupted/i.test(errorText)
+      || /Request interrupted by user/i.test(errorText);
+    if (abortLike) {
+      clearStallWatchdog();
+      isStreamingRef.current = false;
+      setStreamingActive(false);
+      setLoading(false);
+      setLoadingStartTime(null);
+      setIsThinking(false);
+      return;
+    }
+
     // Dual-path delivery (stderr + stdout [SEND_ERROR] + bare JSON) can fire
     // the same failure multiple times within one turn — keep a short debounce.
     const now = Date.now();

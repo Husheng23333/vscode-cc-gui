@@ -6,7 +6,7 @@
  * and streaming refs when a new session is initiated.
  */
 
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, RefObject } from 'react';
 import { forceWebviewRepaint } from '../../utils/forceWebviewRepaint';
 
 export interface ResetTransientUiStateOptions {
@@ -29,7 +29,31 @@ export interface ResetTransientUiStateOptions {
 
   // Turn tracking ref (for streaming assistant isolation)
   streamingTurnIdRef: MutableRefObject<number>;
+
+  /** Optional: reset scroll position when leaving a session. */
+  messagesContainerRef?: RefObject<HTMLDivElement | null>;
 }
+
+/**
+ * Drop any in-flight / buffered message snapshots so a session transition
+ * cannot be undone by a deferred updateMessages timer (streaming coalescer)
+ * that was scheduled before the user clicked "new session".
+ */
+export const invalidatePendingMessageSnapshots = (): void => {
+  if (typeof window.__cancelPendingUpdateMessages === 'function') {
+    window.__cancelPendingUpdateMessages();
+  }
+  // Pre-mount buffer used by main.tsx before React handlers are registered.
+  const pending = (window as unknown as Record<string, unknown>).__pendingUpdateMessages;
+  if (pending !== undefined) {
+    delete (window as unknown as Record<string, unknown>).__pendingUpdateMessages;
+  }
+  // Reject any already-in-flight updateMessages sequence numbers from the
+  // previous session. Sequences are monotonic per daemon connection; bumping
+  // to max(current, 1) is enough when no sequence was ever seen (stays 0→1).
+  const currentMin = window.__minAcceptedUpdateSequence ?? 0;
+  window.__minAcceptedUpdateSequence = currentMin + 1;
+};
 
 /**
  * Clear all transient UI state (streaming refs + React state flags).
@@ -38,6 +62,11 @@ export interface ResetTransientUiStateOptions {
  */
 export const buildResetTransientUiState = (opts: ResetTransientUiStateOptions) => {
   return () => {
+    // Must run first: a deferred processUpdateMessages (setTimeout ~16ms from
+    // streaming coalescer) would otherwise re-apply the old session's snapshot
+    // after setMessages([]) and resurrect the previous conversation in the UI.
+    invalidatePendingMessageSnapshots();
+
     opts.clearToasts();
     opts.setStatus('');
     opts.setLoading(false);
@@ -65,9 +94,22 @@ export const buildResetTransientUiState = (opts: ResetTransientUiStateOptions) =
       cancelAnimationFrame(opts.thinkingUpdateTimeoutRef.current);
       opts.thinkingUpdateTimeoutRef.current = null;
     }
-    // Clear JCEF native-rendering ghosting left by the outgoing session's overlays
-    // and input-box content after the transition unmounts/reflows them.
+
+    // Reset scroll so the new session's WelcomeScreen is not under leftover
+    // scroll offset from a long previous conversation.
+    const container = opts.messagesContainerRef?.current;
+    if (container) {
+      container.scrollTop = 0;
+    }
+
+    // Clear JCEF native-rendering ghosting left by the outgoing session's message
+    // list / overlays. Schedule once after React unmounts (double rAF inside
+    // forceWebviewRepaint) and once more on the next macrotask for heavy markdown
+    // unmounts that can outlive two animation frames.
     forceWebviewRepaint('session-transition');
+    window.setTimeout(() => {
+      forceWebviewRepaint('session-transition-delayed');
+    }, 50);
   };
 };
 

@@ -72,10 +72,14 @@ export class CcGuiPanel implements vscode.WebviewViewProvider {
   }
 
   openChatTab(title?: string): void {
+    // Prefer the same editor group as the current chat panel so "+" opens a
+    // native stacked tab (like Claude Code / editor tabs), not a side-by-side
+    // split. Fall back to Active when the first tab is opened from the sidebar.
+    const viewColumn = this._activePanel?.viewColumn ?? vscode.ViewColumn.Active;
     const panel = vscode.window.createWebviewPanel(
       'ccGui.chatTab',
       this._tabTitle(title),
-      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
+      { viewColumn, preserveFocus: false },
       { ...this._webviewOptions(), retainContextWhenHidden: true }
     );
     panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'icon-small.svg');
@@ -294,6 +298,7 @@ export class CcGuiPanel implements vscode.WebviewViewProvider {
           'session_messages':           'onSessionMessages',
           // Sound
           'update_ask_user_question_notification_enabled': 'updateAskUserQuestionNotificationEnabled',
+          'update_task_completion_notification_enabled': 'updateTaskCompletionNotificationEnabled',
           'update_sound_notification_config': 'updateSoundNotificationConfig',
         };
         window.addEventListener('message', function(event) {
