@@ -1,10 +1,10 @@
-# CC GUI（Claude and Codex）
+# CCGUI / CC GUI（Claude、Codex、OpenCode、Kimi...）
 
 [English](./README.md)
 
-100% 开源的 Claude Code CLI 与 Codex 图形界面（VS Code 插件）。  
+**CCGUI**（也称 **CC GUI** / **ccgui**）是 100% 开源的 Claude Code CLI、Codex、OpenCode、Kimi、Grok 等图形界面（VS Code 插件）。
 
-> **非官方。** CC GUI 是独立开源项目，与 Anthropic、OpenAI、Microsoft **无隶属、背书或赞助关系**。
+> **非官方。** CC GUI 是独立开源项目，与 Anthropic、OpenAI、Microsoft 及其他第三方工具厂商 **无隶属、背书或赞助关系**。
 
 ---
 
