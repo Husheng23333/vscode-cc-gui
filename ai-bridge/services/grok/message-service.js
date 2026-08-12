@@ -29,6 +29,7 @@ import { randomUUID } from 'crypto';
 import { createInterface } from 'readline';
 import { readFile } from 'fs/promises';
 import { resolveGrokCliPath } from '../../utils/grok-cli-path.js';
+import { registerCliProcess } from '../../utils/cli-process-registry.js';
 import {
   createToolTailState,
   emitToolSignals,
@@ -232,6 +233,8 @@ function killChildTree(child) {
   }
 }
 
+
+
 /**
  * Send a message via Grok CLI and stream markers to stdout.
  *
@@ -363,6 +366,8 @@ export async function sendMessage(
 
   await new Promise((resolve) => {
     let child;
+    /** @type {(() => void)|null} */
+    let unregisterCli = null;
     try {
       child = spawn(bin, args, {
         cwd: workCwd,
@@ -378,6 +383,9 @@ export async function sendMessage(
       resolve();
       return;
     }
+
+    // Stop button / interrupt_session → daemon abort kills this Grok CLI child.
+    unregisterCli = registerCliProcess(() => killChildTree(child), 'Grok');
 
     const onParentSignal = () => killChildTree(child);
     process.once('SIGTERM', onParentSignal);
@@ -443,6 +451,12 @@ export async function sendMessage(
       process.off('SIGTERM', onParentSignal);
       process.off('SIGINT', onParentSignal);
       process.off('SIGHUP', onParentSignal);
+      try {
+        unregisterCli?.();
+      } catch {
+        // ignore
+      }
+      unregisterCli = null;
       if (toolPollTimer) {
         clearInterval(toolPollTimer);
         toolPollTimer = null;

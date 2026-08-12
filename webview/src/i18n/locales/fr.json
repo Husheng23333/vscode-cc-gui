@@ -250,7 +250,7 @@
         "label": "Notification de fin de tâche",
         "enabled": "Activé",
         "disabled": "Désactivé",
-        "hint": "Lorsque activé, affiche une notification système lorsque la tâche AI est terminée. Lorsque désactivé, aucune notification apparaît."
+        "hint": "Lorsque activé, affiche un toast dans le panneau de chat à la fin de la tâche. Lorsque désactivé, rien n'apparaît."
       },
       "sendShortcut": {
         "label": "Raccourci d'envoi",

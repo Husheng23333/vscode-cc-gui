@@ -70,6 +70,8 @@ export class SettingsHandler implements BridgeHandler {
     'set_ai_title_generation_enabled',
     'get_ask_user_question_notification_enabled',
     'set_ask_user_question_notification_enabled',
+    'get_task_completion_notification_enabled',
+    'set_task_completion_notification_enabled',
   ] as const;
 
   private readonly store: SettingsStore;
@@ -205,6 +207,18 @@ export class SettingsHandler implements BridgeHandler {
         await this.store.setAskUserQuestionNotificationEnabled(content);
         postJson(webview, 'update_ask_user_question_notification_enabled', {
           askUserQuestionNotificationEnabled: this.store.getAskUserQuestionNotificationEnabled(),
+        });
+        return true;
+
+      case 'get_task_completion_notification_enabled':
+        postJson(webview, 'update_task_completion_notification_enabled', {
+          taskCompletionNotificationEnabled: this.store.getTaskCompletionNotificationEnabled(),
+        });
+        return true;
+      case 'set_task_completion_notification_enabled':
+        await this.store.setTaskCompletionNotificationEnabled(content);
+        postJson(webview, 'update_task_completion_notification_enabled', {
+          taskCompletionNotificationEnabled: this.store.getTaskCompletionNotificationEnabled(),
         });
         return true;
 

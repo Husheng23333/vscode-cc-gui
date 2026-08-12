@@ -56,6 +56,7 @@ export interface SettingsWindowCallbacksDeps {
   setEnableDebugLog?: (enabled: boolean) => void;
   // Sound notification setters
   setSoundNotificationEnabled?: (enabled: boolean) => void;
+  setTaskCompletionNotificationEnabled?: (enabled: boolean) => void;
   setAskUserQuestionNotificationEnabled?: (enabled: boolean) => void;
   setSoundOnlyWhenUnfocused?: (enabled: boolean) => void;
   setSelectedSound?: (soundId: string) => void;
@@ -382,6 +383,20 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
       }
     };
 
+    // Task completion notification config callback (opt-in feature, default false)
+    window.updateTaskCompletionNotificationEnabled = (jsonStr: string) => {
+      try {
+        const data = JSON.parse(jsonStr);
+        if (typeof data.taskCompletionNotificationEnabled === 'boolean') {
+          d().setTaskCompletionNotificationEnabled?.(data.taskCompletionNotificationEnabled);
+        } else if (typeof data.enabled === 'boolean') {
+          d().setTaskCompletionNotificationEnabled?.(data.enabled);
+        }
+      } catch (error) {
+        console.error('[SettingsView] Failed to parse task completion notification config:', error);
+      }
+    };
+
     // Sound notification config callback
     window.updateSoundNotificationConfig = (jsonStr: string) => {
       try {
@@ -539,6 +554,7 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
     sendToJava('get_commit_ai_config:');
     sendToJava('get_prompt_enhancer_config:');
     sendToJava('get_sound_notification_config:');
+    sendToJava('get_task_completion_notification_enabled:');
     sendToJava('get_ask_user_question_notification_enabled:');
     sendToJava('get_commit_generation_enabled:');
     sendToJava('get_ai_title_generation_enabled:');
@@ -577,6 +593,7 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
       window.updatePromptEnhancerConfig = undefined;
       window.updateProjectCommitPrompt = undefined;
       window.updateSoundNotificationConfig = undefined;
+      window.updateTaskCompletionNotificationEnabled = undefined;
       window.updateAskUserQuestionNotificationEnabled = undefined;
       window.updateCommitGenerationEnabled = undefined;
       window.updateAiTitleGenerationEnabled = undefined;

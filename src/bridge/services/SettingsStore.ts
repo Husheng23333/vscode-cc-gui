@@ -100,6 +100,24 @@ export class SettingsStore {
     return this.state.update('ccg.ask_user_question_notification_enabled', enabled);
   }
 
+  /** Opt-in: show VS Code notification when an AI task completes (default false). */
+  getTaskCompletionNotificationEnabled(): boolean {
+    return this.state.get<boolean>('ccg.task_completion_notification_enabled', false);
+  }
+
+  setTaskCompletionNotificationEnabled(content: string): Thenable<void> {
+    const parsed = this.parseJson<Record<string, unknown> | undefined>(content, undefined);
+    let enabled = false;
+    if (typeof parsed?.taskCompletionNotificationEnabled === 'boolean') {
+      enabled = parsed.taskCompletionNotificationEnabled;
+    } else if (typeof parsed?.enabled === 'boolean') {
+      enabled = parsed.enabled;
+    } else {
+      enabled = content === 'true' || content === '1';
+    }
+    return this.state.update('ccg.task_completion_notification_enabled', enabled);
+  }
+
   getCodexSandboxMode(): 'workspace-write' | 'danger-full-access' {
     const mode = this.state.getString('ccg.codex_sandbox_mode', 'workspace-write');
     return mode === 'danger-full-access' ? 'danger-full-access' : 'workspace-write';

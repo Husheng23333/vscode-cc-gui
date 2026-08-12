@@ -282,7 +282,7 @@
         "label": "Task Completion Notification",
         "enabled": "Enabled",
         "disabled": "Disabled",
-        "hint": "When enabled, shows a system notification when AI task completes. When disabled, no notification appears."
+        "hint": "When enabled, shows an in-panel toast when an AI task completes. When disabled, no toast appears."
       },
       "sendShortcut": {
         "label": "Send Shortcut",

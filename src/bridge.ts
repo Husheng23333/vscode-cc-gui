@@ -684,11 +684,64 @@ export class BridgeServer {
 
   private _notifyTaskCompletion(id: string): void {
     if (this._suppressTaskCompletionNotification.has(id)) {
-      this._log.appendLine(`[STREAM] id=${id} → skip task completion notification (interactive turn)`);
+      this._forceLog(
+        `[STREAM] id=${id} → skip task completion notification (user abort / interactive turn)`,
+      );
       return;
     }
 
+    this._maybeShowTaskCompletionNotification(id);
     this._maybePlayTaskCompletionSound();
+  }
+
+  /**
+   * Opt-in in-panel toast when an AI turn completes.
+   * Only the chat webview toast (no VS Code notification / status bar).
+   */
+  private _maybeShowTaskCompletionNotification(id: string): void {
+    try {
+      const enabled = this._settingsStore.getTaskCompletionNotificationEnabled();
+      if (!enabled) {
+        this._forceLog(`[STREAM] id=${id} taskCompletionNotification=off (skipped)`);
+        return;
+      }
+      const preview = (this._latestAssistantPreview.get(id) ?? '').trim();
+      const condensed = this._condenseForNotification(preview);
+      const title = '任务完成';
+      const detail = condensed || 'AI 任务已完成';
+      const toastText = `${title}: ${detail.length > 80 ? `${detail.slice(0, 80)}…` : detail}`;
+
+      this._forceLog(`[STREAM] id=${id} taskCompletionNotification → panel toast "${toastText.slice(0, 120)}"`);
+
+      const webview = this._pendingWebviews.get(id) ?? this._webview;
+      if (!webview) {
+        this._forceLog(`[STREAM] id=${id} taskCompletionNotification skipped: no webview`);
+        return;
+      }
+      webview.postMessage({
+        type: 'js_eval',
+        content:
+          `try{window.addToast&&window.addToast(${JSON.stringify(toastText)},'success');}`
+          + 'catch(e){console.error("[CCG] task toast failed",e);}',
+      });
+    } catch (error) {
+      this._forceLog(`[STREAM] task completion notification failed: ${error}`);
+    }
+  }
+
+  /** Collapse multi-line / code-fenced assistant text for a short notification body. */
+  private _condenseForNotification(raw: string): string {
+    if (!raw) return '';
+    const maxInput = 4096;
+    const input = raw.length > maxInput ? raw.slice(0, maxInput) : raw;
+    const stripped = input
+      .replace(/```[a-zA-Z0-9_+\-]*\n/g, '')
+      .replace(/```/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const maxLen = 220;
+    if (stripped.length <= maxLen) return stripped;
+    return `${stripped.slice(0, maxLen - 3)}...`;
   }
 
   private _maybePlayTaskCompletionSound(): void {
@@ -788,6 +841,15 @@ export class BridgeServer {
    */
   private _postSendError(webview: vscode.Webview, payload: string, requestId?: string): void {
     const content = typeof payload === 'string' ? payload : String(payload ?? 'Unknown error');
+    // User Stop must not surface as a chat ERROR (Codex historically threw "Aborted").
+    if (
+      requestId
+      && this._suppressTaskCompletionNotification.has(requestId)
+      && /Aborted|User interrupted|operation was aborted/i.test(content)
+    ) {
+      this._forceLog(`[CCG_ERROR] id=${requestId} suppress user-abort send_error`);
+      return;
+    }
     const preview = content.length > 800 ? `${content.slice(0, 800)}…` : content;
     this._forceLog(`[CCG_ERROR]${requestId ? ` id=${requestId}` : ''} ${preview}`);
     // When debug is on, also go through the gated logger for continuity in the stream.
@@ -992,6 +1054,11 @@ export class BridgeServer {
         ) {
           targetRequestIds.push(reqId);
         }
+      }
+      // User Stop is not a successful completion — do not fire "任务完成" toast/sound
+      // when the CLI process exits and stream_end is emitted after abort.
+      for (const reqId of targetRequestIds) {
+        this._suppressTaskCompletionNotification.add(reqId);
       }
       params = {
         ...params,
@@ -1328,6 +1395,10 @@ export class BridgeServer {
         // + "2" → "22" for a short answer like 1+1). See _contentStarted in result branch.
         this._contentStarted.add(msg.id);
         webview.postMessage({ type: 'content_delta', content: delta });
+        if (typeof delta === 'string' && delta) {
+          const prev = this._latestAssistantPreview.get(msg.id) ?? '';
+          this._latestAssistantPreview.set(msg.id, prev + delta);
+        }
       } else if (line.startsWith('[CONTENT] ')) {
         const delta = line.slice('[CONTENT] '.length);
         this._inThinking.delete(msg.id); // switch from thinking to content
@@ -1337,6 +1408,10 @@ export class BridgeServer {
         }
         this._contentStarted.add(msg.id);
         webview.postMessage({ type: 'content_delta', content: delta });
+        if (delta) {
+          const prev = this._latestAssistantPreview.get(msg.id) ?? '';
+          this._latestAssistantPreview.set(msg.id, prev ? `${prev}\n${delta}` : delta);
+        }
       } else if (line.startsWith('[THINKING_DELTA] ')) {
         const delta = JSON.parse(line.slice('[THINKING_DELTA] '.length));
         this._emitStreamStart(msg.id, webview);

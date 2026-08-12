@@ -294,6 +294,7 @@ export class CcGuiPanel implements vscode.WebviewViewProvider {
           'session_messages':           'onSessionMessages',
           // Sound
           'update_ask_user_question_notification_enabled': 'updateAskUserQuestionNotificationEnabled',
+          'update_task_completion_notification_enabled': 'updateTaskCompletionNotificationEnabled',
           'update_sound_notification_config': 'updateSoundNotificationConfig',
         };
         window.addEventListener('message', function(event) {
