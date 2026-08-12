@@ -230,7 +230,13 @@ export const ChatScreen = ({
           <SessionIdContext.Provider value={sessionIdCtxValue}>
             <SubagentHistoryContext.Provider value={subagentHistoryCtxValue}>
               <ToolResultRawContext.Provider value={getToolResultRaw}>
+                {/*
+                  Session key remounts MessageList on switch to drop old MessageItem
+                  subtrees / reduce JCEF ghosting. Keep Welcome as a direct child of
+                  .messages-container so height:100% centering still works.
+                */}
                 <MessageList
+                  key={currentSessionId ?? 'new'}
                   ref={messageListRef}
                   messages={mergedMessages}
                   streamingActive={streamingActive}

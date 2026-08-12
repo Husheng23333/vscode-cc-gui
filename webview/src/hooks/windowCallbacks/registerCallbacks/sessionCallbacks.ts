@@ -9,7 +9,10 @@
 import type { MutableRefObject } from 'react';
 import type { UseWindowCallbacksOptions } from '../../useWindowCallbacks';
 import { downloadJSON } from '../../../utils/exportMarkdown';
-import { releaseSessionTransition } from '../sessionTransition';
+import {
+  invalidatePendingMessageSnapshots,
+  releaseSessionTransition,
+} from '../sessionTransition';
 import { drainAndRequestDependencyStatus } from '../settingsBootstrap';
 import { sendBridgeEvent } from '../../../utils/bridge';
 
@@ -22,6 +25,7 @@ export function registerSessionAndSdkCallbacks(
 ): void {
   const {
     addToast,
+    setMessages,
     setCurrentSessionId,
     setSdkStatus,
     setSdkStatusLoaded,
@@ -38,22 +42,33 @@ export function registerSessionAndSdkCallbacks(
   window.setSessionId = (sessionId: string) => {
     const oldId = currentSessionIdRef.current;
     const wasSessionTransitioning = !!window.__sessionTransitioning;
+    const normalizedId = sessionId && sessionId.trim() ? sessionId : null;
+
+    // create_new_session → bridge posts session_id:'' immediately, which used
+    // to release the transition guard while a deferred updateMessages from the
+    // previous stream could still fire and re-populate the chat. For empty
+    // (new) session ids, re-assert a clean slate before releasing the guard.
+    if (!normalizedId) {
+      invalidatePendingMessageSnapshots();
+      setMessages([]);
+    }
+
     releaseSessionTransition();
-    setCurrentSessionId(sessionId);
+    setCurrentSessionId(normalizedId);
 
     // B-011 + B-014: Persist custom title under the real SDK session ID.
     // NOTE: We intentionally do NOT delete the old ID's title to prevent
     // data loss when Codex creates new threads for continued conversations.
     // Orphaned title entries are harmless and cleaned up on session deletion.
     const title = customSessionTitleRef.current;
-    if (title && oldId !== sessionId && !wasSessionTransitioning) {
+    if (title && normalizedId && oldId !== normalizedId && !wasSessionTransitioning) {
       // AI-generated titles can exceed the backend limit. Fall back to
       // local-only update so the UI keeps the title visible without a
       // silent backend write failure.
       if (title.length <= CUSTOM_TITLE_MAX_LENGTH) {
-        updateHistoryTitle(sessionId, title);
+        updateHistoryTitle(normalizedId, title);
       } else {
-        applyHistoryTitleLocal(sessionId, title);
+        applyHistoryTitleLocal(normalizedId, title);
       }
     }
   };

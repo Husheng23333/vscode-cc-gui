@@ -104,11 +104,13 @@ describe('useWindowCallbacks integration', () => {
     window.__sessionTransitionToken = null;
     window.__pendingSessionTransitionToast = undefined;
     window.__deniedToolIds = new Set();
+    window.__minAcceptedUpdateSequence = 0;
     window.sendToJava = vi.fn();
     // The drain test inspects this slot; if a prior test (or earlier suite run)
     // leaked a value onto window we'd see a false-positive drain. Wipe it here
     // so each test starts from a clean pending state.
     delete (window as unknown as Record<string, unknown>).__pendingPermissionDialogTimeout;
+    delete (window as unknown as Record<string, unknown>).__pendingUpdateMessages;
   });
 
   /** Stub timer/rAF globals to execute synchronously for streaming tests. */
@@ -254,6 +256,27 @@ describe('useWindowCallbacks integration', () => {
     expect(opts.setCurrentSessionId).toHaveBeenCalledWith('new-session-123');
   });
 
+  it('setSessionId with empty id clears messages and normalizes to null (new session)', () => {
+    const opts = createOptions();
+    renderHook(() => useWindowCallbacks(opts));
+
+    window.__sessionTransitioning = true;
+    window.__sessionTransitionToken = 'transition-new';
+    window.__minAcceptedUpdateSequence = 5;
+
+    act(() => {
+      // Bridge create_new_session posts session_id:''
+      window.setSessionId!('');
+    });
+
+    expect(window.__sessionTransitioning).toBe(false);
+    expect(opts.setCurrentSessionId).toHaveBeenCalledWith(null);
+    // Re-assert empty chat so a deferred stale snapshot cannot win.
+    expect(opts.setMessages).toHaveBeenCalledWith([]);
+    // Invalidate prior sequence numbers so in-flight old-session snapshots are dropped.
+    expect(window.__minAcceptedUpdateSequence).toBeGreaterThan(5);
+  });
+
   it('setSessionId does not migrate the previous title during a guarded history transition', () => {
     const opts = createOptions({
       customSessionTitleRef: { current: 'Previous Session Title' },
@@ -372,6 +395,76 @@ describe('useWindowCallbacks integration', () => {
 
     // setMessages should NOT be called because guard is active
     expect(opts.setMessages).not.toHaveBeenCalled();
+  });
+
+  it('deferred processUpdateMessages is dropped if transition starts before timer fires', () => {
+    // Reproduces the intermittent "new session still shows old chat" race:
+    // 1) streaming schedules coalesced updateMessages via setTimeout(16)
+    // 2) user clicks new session → __sessionTransitioning = true, setMessages([])
+    // 3) timer fires processUpdateMessages without re-checking the entry guard
+    //    (unless processUpdateMessages itself guards — which we now do)
+    vi.useFakeTimers();
+    const isStreamingRef = { current: true };
+    const opts = createOptions({ isStreamingRef });
+    renderHook(() => useWindowCallbacks(opts));
+
+    const staleMessages: ClaudeMessage[] = [
+      { type: 'user', content: 'old user', timestamp: '2024-01-01T00:00:00Z' },
+      { type: 'assistant', content: 'old assistant', timestamp: '2024-01-01T00:00:01Z' },
+    ];
+
+    // Schedule deferred update while streaming (does not process yet).
+    act(() => {
+      window.updateMessages!(JSON.stringify(staleMessages), 10);
+    });
+    expect(opts.setMessages).not.toHaveBeenCalled();
+
+    // New session transition begins; cancel pending + raise sequence floor.
+    act(() => {
+      window.__sessionTransitioning = true;
+      window.__resetTransientUiState!();
+      opts.setMessages.mockClear();
+    });
+
+    // Timer fires — must NOT re-apply the old snapshot.
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+
+    expect(opts.setMessages).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('resetTransientUiState cancels pending deferred updateMessages', () => {
+    vi.useFakeTimers();
+    const isStreamingRef = { current: true };
+    const opts = createOptions({ isStreamingRef });
+    renderHook(() => useWindowCallbacks(opts));
+
+    act(() => {
+      window.updateMessages!(
+        JSON.stringify([{ type: 'assistant', content: 'will be cancelled', timestamp: 't' }]),
+        3,
+      );
+    });
+
+    act(() => {
+      window.__resetTransientUiState!();
+    });
+
+    // After cancel, even with guard released the deferred payload is gone.
+    window.__sessionTransitioning = false;
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+
+    // setMessages may have been called by reset with loading flags only via
+    // other setters — but not with the stale snapshot array.
+    const messageListWrites = opts.setMessages.mock.calls.filter(
+      (args: unknown[]) => Array.isArray(args[0]),
+    );
+    expect(messageListWrites).toHaveLength(0);
+    vi.useRealTimers();
   });
 
   it('updateMessages works normally after guard is released', () => {
