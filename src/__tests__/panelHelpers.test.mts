@@ -27,9 +27,9 @@ describe('resolveTabTitle', () => {
     assert.equal(resolveTabTitle(undefined, 5), 'AI5');
   });
 
-  it('clamps long titles to 80 chars', () => {
+  it('clamps long titles to 15 chars plus an ellipsis', () => {
     const huge = 'x'.repeat(200);
-    assert.equal(resolveTabTitle(huge, 1).length, 80);
+    assert.equal(resolveTabTitle(huge, 1), `${'x'.repeat(15)}...`);
   });
 });
 
@@ -38,9 +38,13 @@ describe('clampTitle', () => {
     assert.equal(clampTitle('short'), 'short');
   });
 
-  it('truncates titles over 80 chars', () => {
+  it('truncates titles over 15 chars and adds an ellipsis', () => {
     const long = 'a'.repeat(120);
-    assert.equal(clampTitle(long).length, 80);
+    assert.equal(clampTitle(long), `${'a'.repeat(15)}...`);
+  });
+
+  it('counts Chinese characters as one displayed character', () => {
+    assert.equal(clampTitle('安装CCGUI以后在VSCode中新打开窗口'), '安装CCGUI以后在VSCod...');
   });
 });
 
@@ -103,7 +107,7 @@ describe('extractTitleUpdate', () => {
     const huge = 'y'.repeat(120);
     const msg = { type: 'bridge', payload: `update_title:${JSON.stringify({ title: huge })}` };
     const result = extractTitleUpdate(msg);
-    assert.equal(result?.length, 80);
+    assert.equal(result, `${'y'.repeat(15)}...`);
   });
 
   it('returns null for non-title bridge events', () => {

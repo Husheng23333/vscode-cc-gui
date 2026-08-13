@@ -97,7 +97,7 @@ export class ProviderHandler implements BridgeHandler {
           ...provider,
           isActive: targetId === '__disabled__' ? false : provider.id === targetId,
         }));
-        await this.store.saveClaudeProviders(providers);
+        await this.store.saveClaudeProviders(providers, true);
         postJson(webview, 'providers_updated', this.store.getClaudeProviders());
         postJson(webview, 'active_provider_updated', this.store.getActiveClaudeProvider());
         return true;
@@ -125,7 +125,7 @@ export class ProviderHandler implements BridgeHandler {
         }
 
         const merged = this.mergeImportedProviders(this.store.getStoredClaudeProviders(), imported);
-        await this.store.saveClaudeProviders(merged);
+        await this.store.saveClaudeProviders(merged, true);
         const providers = this.store.getClaudeProviders();
         postJson(webview, 'providers_updated', providers);
         postJson(webview, 'active_provider_updated', this.store.getActiveClaudeProvider());

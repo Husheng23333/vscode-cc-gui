@@ -76,7 +76,7 @@ describe('ProviderStore shared config', () => {
         },
         isActive: true,
       },
-    ]);
+    ], true);
 
     const config = readConfig();
     assert.equal(config.version, 2);
@@ -113,7 +113,7 @@ describe('ProviderStore shared config', () => {
     assert.equal(list.find((p: any) => p.id === '__local_settings_json__')?.isActive, false);
   });
 
-  it('migrates legacy Codex globalState into the shared config file', () => {
+  it('reads legacy Codex globalState without rewriting shared config', () => {
     const store = new ProviderStore(
       createContext({
         'ccg.codex_providers': [
@@ -130,12 +130,7 @@ describe('ProviderStore shared config', () => {
     assert.equal(providers[0].isActive, true);
     assert.equal(providers[1].id, 'codex-proxy');
     assert.equal(providers[1].isActive, false);
-
-    const config = readConfig();
-    assert.equal(config.codex.current, '__codex_cli_login__');
-    assert.equal(config.codex.localConfigAuthorized, true);
-    assert.deepEqual(config.codex.providerOrder, ['codex-proxy']);
-    assert.equal(config.codex.providers['codex-proxy'].name, 'Codex Proxy');
+    assert.equal(fs.existsSync(configPath()), false);
   });
 
   it('prefers existing shared config over legacy globalState data', () => {
@@ -172,5 +167,31 @@ describe('ProviderStore shared config', () => {
     assert.equal(store.getActiveClaudeProvider()?.id, 'shared-claude');
     assert.equal(store.getActiveCodexProvider()?.id, 'shared-codex');
     assert.equal(store.isCodexLocalConfigAuthorized(), false);
+  });
+
+  it('does not rewrite shared config during provider reads', () => {
+    fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+    const original = {
+      version: 2,
+      claude: {
+        current: 'missing-provider',
+        providers: {
+          'real-provider': { id: 'real-provider', name: 'Real Provider' },
+        },
+        providerOrder: ['real-provider'],
+      },
+      codex: {
+        current: '',
+        providers: {},
+        localConfigAuthorized: false,
+      },
+    };
+    fs.writeFileSync(configPath(), JSON.stringify(original, null, 2), 'utf8');
+
+    const store = new ProviderStore(createContext(), { syncProviderToDisk: () => {} });
+    const providers = store.getClaudeProviders();
+
+    assert.equal(providers.find((p: any) => p.id === 'real-provider')?.isActive, true);
+    assert.deepEqual(readConfig(), original);
   });
 });
