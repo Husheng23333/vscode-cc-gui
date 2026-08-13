@@ -169,9 +169,6 @@ export class BridgeServer {
     context.subscriptions.push(this._runtimeContext, this._permissionIpc);
     this._dispatcher = this._createDispatcher();
 
-    // Sync the shared Claude provider selection into ~/.claude/settings.json on startup.
-    this._syncProviderToDisk(this._providerStore.getClaudeProviders());
-
     this._startBridge();
 
     // Sync active file context when editor changes

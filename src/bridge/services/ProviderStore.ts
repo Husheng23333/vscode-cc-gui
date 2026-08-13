@@ -113,7 +113,7 @@ export class ProviderStore {
     return toProviderList(config.claude, currentId);
   }
 
-  saveClaudeProviders(providers: any[]): Thenable<void> {
+  saveClaudeProviders(providers: any[], syncToDisk = false): Thenable<void> {
     const config = this.readSharedConfig();
     const section = config.claude;
     const regularProviders = providers
@@ -158,7 +158,9 @@ export class ProviderStore {
     section.providerOrder = orderedIds;
     section.current = currentId;
     this.writeSharedConfig(config);
-    this.callbacks.syncProviderToDisk(this.getClaudeProviders());
+    if (syncToDisk) {
+      this.callbacks.syncProviderToDisk(this.getClaudeProviders());
+    }
     return Promise.resolve();
   }
 
@@ -267,21 +269,16 @@ export class ProviderStore {
     const filePath = this.configFilePath();
     const parsed = readCodemossConfigFile<Record<string, any>>(filePath, {});
     const config = isObject(parsed) ? parsed as SharedConfigFile : this.defaultConfig();
-    let changed = false;
+    const fileMissing = !fs.existsSync(filePath);
 
     if (!Number.isInteger(config.version)) {
       config.version = SHARED_CONFIG_VERSION;
-      changed = true;
     }
 
-    changed = this.ensureSectionShape(config, 'claude') || changed;
-    changed = this.ensureSectionShape(config, 'codex', true) || changed;
-    changed = this.migrateLegacyClaudeIfNeeded(config, !fs.existsSync(filePath)) || changed;
-    changed = this.migrateLegacyCodexIfNeeded(config, !fs.existsSync(filePath)) || changed;
-
-    if (changed) {
-      this.writeSharedConfig(config);
-    }
+    this.ensureSectionShape(config, 'claude');
+    this.ensureSectionShape(config, 'codex', true);
+    this.migrateLegacyClaudeIfNeeded(config, fileMissing);
+    this.migrateLegacyCodexIfNeeded(config, fileMissing);
 
     return config;
   }
@@ -291,31 +288,25 @@ export class ProviderStore {
   }
 
   private ensureSectionShape(config: SharedConfigFile, sectionKey: 'claude' | 'codex', withLocalAuth = false): boolean {
-    let changed = false;
     const section = isObject(config[sectionKey]) ? config[sectionKey] as SharedProviderSection : {} as SharedProviderSection;
     if (!isObject(config[sectionKey])) {
       config[sectionKey] = section;
-      changed = true;
     }
 
     if (typeof section.current !== 'string') {
       section.current = '';
-      changed = true;
     }
     if (!isObject(section.providers)) {
       section.providers = {};
-      changed = true;
     }
     if (section.providerOrder !== undefined && !Array.isArray(section.providerOrder)) {
       delete section.providerOrder;
-      changed = true;
     }
     if (withLocalAuth && typeof section.localConfigAuthorized !== 'boolean') {
       section.localConfigAuthorized = false;
-      changed = true;
     }
 
-    return changed;
+    return true;
   }
 
   private migrateLegacyClaudeIfNeeded(config: SharedConfigFile, fileMissing: boolean): boolean {
@@ -409,7 +400,6 @@ export class ProviderStore {
 
     const fallback = getOrderedIds(section)[0] ?? '';
     section.current = fallback;
-    this.writeSharedConfig(config);
     return fallback;
   }
 
