@@ -15,6 +15,13 @@ const DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS = 300;
 const MIN_PERMISSION_DIALOG_TIMEOUT_SECONDS = 30;
 const MAX_PERMISSION_DIALOG_TIMEOUT_SECONDS = 3600;
 
+/** Frontend stream stall watchdog (seconds of no streaming activity). */
+const DEFAULT_STREAM_STALL_TIMEOUT_SECONDS = 180;
+/** Allow 1s for local testing; no practical upper cap for now. */
+const MIN_STREAM_STALL_TIMEOUT_SECONDS = 1;
+const MAX_STREAM_STALL_TIMEOUT_SECONDS = 86400;
+const LEGACY_STREAM_STALL_TIMEOUT_MINUTES_KEY = 'ccg.stream_stall_timeout_minutes';
+
 type FontMode = 'followEditor' | 'customFile';
 type FontConfig = {
   mode: FontMode;
@@ -349,6 +356,31 @@ export class SettingsStore {
     return this.state.update('ccg.permission_dialog_timeout_seconds', seconds);
   }
 
+  getStreamStallTimeoutSeconds(): number {
+    const storedSeconds = this.state.get<number | undefined>('ccg.stream_stall_timeout_seconds', undefined);
+    if (storedSeconds !== undefined && storedSeconds !== null) {
+      return this.clampStreamStallTimeoutSeconds(storedSeconds);
+    }
+    // One-time migration from the short-lived minutes-based key.
+    const legacyMinutes = this.state.get<number | undefined>(LEGACY_STREAM_STALL_TIMEOUT_MINUTES_KEY, undefined);
+    if (legacyMinutes !== undefined && legacyMinutes !== null && Number.isFinite(legacyMinutes)) {
+      return this.clampStreamStallTimeoutSeconds(Number(legacyMinutes) * 60);
+    }
+    return DEFAULT_STREAM_STALL_TIMEOUT_SECONDS;
+  }
+
+  setStreamStallTimeoutSeconds(content: string): Thenable<void> {
+    const parsed = this.parseJson<Record<string, unknown>>(content, {});
+    // Prefer seconds; migrate legacy minutes field if present.
+    const raw = parsed.streamStallTimeoutSeconds !== undefined && parsed.streamStallTimeoutSeconds !== null
+      ? parsed.streamStallTimeoutSeconds
+      : (parsed.streamStallTimeoutMinutes !== undefined && parsed.streamStallTimeoutMinutes !== null
+        ? Number(parsed.streamStallTimeoutMinutes) * 60
+        : undefined);
+    const seconds = this.clampStreamStallTimeoutSeconds(raw);
+    return this.state.update('ccg.stream_stall_timeout_seconds', seconds);
+  }
+
   getCommitGenerationEnabled(): boolean {
     return this.state.get<boolean>('ccg.commit_generation_enabled', true);
   }
@@ -441,6 +473,19 @@ export class SettingsStore {
         : Number.NaN;
     if (!Number.isFinite(parsed)) return DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS;
     return Math.max(MIN_PERMISSION_DIALOG_TIMEOUT_SECONDS, Math.min(MAX_PERMISSION_DIALOG_TIMEOUT_SECONDS, Math.trunc(parsed)));
+  }
+
+  private clampStreamStallTimeoutSeconds(value: unknown): number {
+    const parsed = typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number(value)
+        : Number.NaN;
+    if (!Number.isFinite(parsed)) return DEFAULT_STREAM_STALL_TIMEOUT_SECONDS;
+    return Math.max(
+      MIN_STREAM_STALL_TIMEOUT_SECONDS,
+      Math.min(MAX_STREAM_STALL_TIMEOUT_SECONDS, Math.trunc(parsed)),
+    );
   }
 
   private getResolvedFontConfig(key: string, options: { appendSansFallback: boolean }): FontConfig {

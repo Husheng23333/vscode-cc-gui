@@ -29,6 +29,7 @@ export const startInitialSettingsRequest = (): void => {
       window.sendToJava('get_send_shortcut:');
       window.sendToJava('get_auto_open_file_enabled:');
       window.sendToJava('get_permission_dialog_timeout:');
+      window.sendToJava('get_stream_stall_timeout:');
       // Sync UI language with VS Code locale / user override (also injected at HTML load)
       window.sendToJava('get_user_language:');
     } else {
@@ -151,6 +152,12 @@ export const drainPendingSettings = (): void => {
     const pending = w.__pendingPermissionDialogTimeout as string;
     delete w.__pendingPermissionDialogTimeout;
     window.updatePermissionDialogTimeout?.(pending);
+  }
+
+  if (w.__pendingStreamStallTimeout) {
+    const pending = w.__pendingStreamStallTimeout as string;
+    delete w.__pendingStreamStallTimeout;
+    window.updateStreamStallTimeout?.(pending);
   }
 
   if (w.__pendingModeReceived) {

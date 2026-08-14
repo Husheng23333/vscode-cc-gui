@@ -14,6 +14,11 @@ import { getStreamEndHandlingMode } from '../messageSync';
 import { applyCodexLiveMessage } from '../../../utils/codexLiveInsert';
 import { createLocalizeMessage } from '../../../utils/localizationUtils';
 import { isEmptyAssistantPlaceholder, parseSendErrorPayload } from '../../../utils/sendErrorPayload';
+import {
+  DEFAULT_STREAM_STALL_TIMEOUT_SECONDS,
+  clampStreamStallTimeoutSeconds,
+  streamStallTimeoutSecondsToMs,
+} from '../../../utils/streamStallTimeout';
 
 function extractRawContent(msg: ClaudeMessage): unknown[] | null {
   if (!msg.raw) return null;
@@ -142,18 +147,29 @@ export function buildInterruptedToolResultMessage(toolIds: string[]): ClaudeMess
 }
 
 /**
- * Timeout (ms) for detecting a stalled stream.  If no content/thinking delta
+ * Timeout for detecting a stalled stream.  If no content/thinking delta
  * arrives for this duration while isStreamingRef is still true, the frontend
  * auto-recovers by forcing the stream-end cleanup.  This guards against the
  * backend onStreamEnd signal being silently dropped by JCEF.
  *
- * Set to 3 minutes to avoid false positives during long tool execution phases
- * (e.g., Codex multi-step turns with command/file ops) where no content deltas
- * arrive but the backend is still actively processing. Codex app-server also
- * emits [STREAM_HEARTBEAT] to bump __lastStreamActivityAt during those phases.
+ * Default is 3 minutes (configurable in Settings → Behavior). Codex app-server
+ * emits [STREAM_HEARTBEAT] to bump __lastStreamActivityAt during long tool phases.
  */
-const STREAM_STALL_TIMEOUT_MS = 180_000;
-const STREAM_STALL_CHECK_INTERVAL_MS = 5_000;
+/** Check every 1s so short timeouts (e.g. 1s for testing) can fire promptly. */
+const STREAM_STALL_CHECK_INTERVAL_MS = 1_000;
+
+function resolveStreamStallTimeoutMs(): number {
+  const seconds = clampStreamStallTimeoutSeconds(
+    typeof window !== 'undefined' ? window.__streamStallTimeoutSeconds : undefined,
+  );
+  return streamStallTimeoutSecondsToMs(seconds);
+}
+
+function resolveStreamStallTimeoutSeconds(): number {
+  return clampStreamStallTimeoutSeconds(
+    typeof window !== 'undefined' ? window.__streamStallTimeoutSeconds : DEFAULT_STREAM_STALL_TIMEOUT_SECONDS,
+  );
+}
 
 export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): void {
   const {
@@ -211,16 +227,25 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
         clearStallWatchdog();
         return;
       }
+      const timeoutMs = resolveStreamStallTimeoutMs();
       const elapsed = Date.now() - (window.__lastStreamActivityAt ?? 0);
-      if (elapsed >= STREAM_STALL_TIMEOUT_MS) {
+      if (elapsed >= timeoutMs) {
+        const seconds = resolveStreamStallTimeoutSeconds();
         console.warn(
-          `[StreamWatchdog] Stream stalled for ${elapsed}ms — forcing stream-end recovery`,
+          `[StreamWatchdog] Stream stalled for ${elapsed}ms (limit=${timeoutMs}ms) — aborting turn`,
         );
         clearStallWatchdog();
-        // Trigger the same cleanup as onStreamEnd
-        if (typeof window.onStreamEnd === 'function') {
-          window.onStreamEnd();
-        }
+        addToast(
+          t('chat.streamStallTimeout', {
+            seconds,
+            defaultValue: `No model response for ${seconds} second(s). This turn was ended automatically.`,
+          }),
+          'warning',
+          10_000, // keep stall notice visible longer; user can also click × to close
+        );
+        // Must abort the daemon/CLI — UI-only onStreamEnd left the process running
+        // and late CONTENT_DELTA revived the turn via ensureStreamingStarted.
+        hardStopStreamingTurn(`stall-watchdog ${seconds}s`);
       }
     }, STREAM_STALL_CHECK_INTERVAL_MS);
   };
@@ -228,6 +253,8 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
   window.onStreamStart = (mode?: string | boolean) => {
     if (window.__sessionTransitioning) return;
     const isReplayStart = mode === 'replay' || mode === true;
+    // New turn from the backend — allow ensureStreamingStarted again.
+    window.__streamHardStopped = false;
     // Clear any stale pending updateMessages from previous turn.
     // This prevents onStreamEnd from using outdated snapshot data.
     if (typeof window.__cancelPendingUpdateMessages === 'function') {
@@ -338,11 +365,31 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
    * Ensure streaming refs are live. STREAM_START can lag behind the first
    * content_delta / tool MESSAGE; without this, onContentDelta / onMessage
    * silently drop payloads while loading stays true (blank "generating" UI).
+   *
+   * Must NOT revive a turn after user Stop or the stall watchdog hard-stop —
+   * otherwise late CONTENT_DELTA restarts the UI while the CLI is still dying.
    */
   const ensureStreamingStarted = (): void => {
     if (window.__sessionTransitioning) return;
+    if (window.__streamHardStopped) return;
     if (isStreamingRef.current) return;
     window.onStreamStart?.();
+  };
+
+  /** Abort backend + freeze UI so late deltas cannot reopen the turn. */
+  const hardStopStreamingTurn = (reason: string) => {
+    window.__streamHardStopped = true;
+    console.warn(`[Stream] hard-stop (${reason}) → interrupt_session + stream-end`);
+    // Kill the in-flight daemon/CLI turn (same path as the Stop button).
+    sendBridgeEvent('interrupt_session');
+    isStreamingRef.current = false;
+    setStreamingActive(false);
+    setLoading(false);
+    setLoadingStartTime(null);
+    setIsThinking(false);
+    if (typeof window.onStreamEnd === 'function') {
+      window.onStreamEnd();
+    }
   };
 
   /**
@@ -394,6 +441,7 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
 
   window.onContentDelta = (delta: string) => {
     if (window.__sessionTransitioning) return;
+    if (window.__streamHardStopped) return;
     ensureStreamingStarted();
     if (!isStreamingRef.current) return;
     window.__lastStreamActivityAt = Date.now();
@@ -403,6 +451,7 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
 
   window.onThinkingDelta = (delta: string) => {
     if (window.__sessionTransitioning) return;
+    if (window.__streamHardStopped) return;
     ensureStreamingStarted();
     if (!isStreamingRef.current) return;
     window.__lastStreamActivityAt = Date.now();
@@ -879,6 +928,8 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
   // computed from snapshots captured before the updater to keep it deterministic.
   window.onMessage = (json: string) => {
     if (window.__sessionTransitioning) return;
+    // After Stop / stall hard-stop, ignore late tool/message frames from the dying CLI.
+    if (window.__streamHardStopped) return;
 
     let incoming: ClaudeRawMessage;
     try {

@@ -93,6 +93,7 @@
     "unknownFile": "未知文件",
     "attachmentsUploaded": "[已上传附件]",
     "streamingConnected": "AI 已成功连接，正在理解问题",
+    "streamStallTimeout": "已连续 {{seconds}} 秒没有收到模型响应，已自动结束本轮。可在 设置 → 行为 中调整「流式无响应超时」。",
     "showEarlierMessages": "显示之前的 {{count}} 条消息",
     "totalDuration": "本次耗时",
     "tokenUsage": "输入 {{input}} / 输出 {{output}}",
@@ -295,6 +296,11 @@
         "label": "权限与提问对话框超时时间",
         "unit": "秒",
         "hint": "设置 AI 提问对话框和权限请求对话框的超时时间（30~3600 秒）。超时后对话框将自动关闭，AI 会继续执行。"
+      },
+      "streamStallTimeout": {
+        "label": "流式无响应超时",
+        "unit": "秒",
+        "hint": "聊天过程中若连续若干秒没有收到模型输出（文字/思考），将自动结束本轮并提示。默认 180 秒，最少 1 秒（便于测试）。工具执行较久时可适当调大。"
       },
       "chatBgColor": {
         "label": "聊天背景色",

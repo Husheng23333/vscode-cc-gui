@@ -59,12 +59,26 @@ describe('CodexSettingsStore.applyProvider', () => {
     const store = new CodexSettingsStore();
     store.applyProvider({
       id: 'p2',
-      configToml: '',
+      configToml: 'model = "gpt-4"\n',
       authJson: '{"tokens":{"access_token":"abc"}}',
     });
     const written = JSON.parse(fs.readFileSync(authPath(), 'utf8'));
     assert.deepEqual(written, { tokens: { access_token: 'abc' } });
     assert.match(fs.readFileSync(authPath(), 'utf8'), /\n {2}"tokens"/);
+  });
+
+  it('does not wipe existing config.toml when provider configToml is empty', () => {
+    fs.mkdirSync(path.join(tmpHome, '.codex'), { recursive: true });
+    fs.writeFileSync(configPath(), 'user_config = true\n', 'utf8');
+    const store = new CodexSettingsStore();
+    store.applyProvider({
+      id: 'p2-empty',
+      configToml: '',
+      authJson: '{"tokens":{"access_token":"abc"}}',
+    });
+    assert.equal(fs.readFileSync(configPath(), 'utf8'), 'user_config = true\n');
+    const written = JSON.parse(fs.readFileSync(authPath(), 'utf8'));
+    assert.deepEqual(written, { tokens: { access_token: 'abc' } });
   });
 
   it('throws on invalid authJson rather than write garbage', () => {

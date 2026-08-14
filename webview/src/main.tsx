@@ -653,6 +653,14 @@ if (typeof window !== 'undefined' && !window.updatePermissionDialogTimeout) {
   };
 }
 
+if (typeof window !== 'undefined' && !window.updateStreamStallTimeout) {
+  debugLog('[Main] Pre-registering updateStreamStallTimeout placeholder');
+  window.updateStreamStallTimeout = (json: string) => {
+    debugLog('[Main] Storing pending stream stall timeout, length=' + (json ? json.length : 0));
+    window.__pendingStreamStallTimeout = json;
+  };
+}
+
 // Pre-register onModeReceived to avoid losing early backend push before React callbacks are ready.
 if (typeof window !== 'undefined' && !window.onModeReceived) {
   debugLog('[Main] Pre-registering onModeReceived placeholder');

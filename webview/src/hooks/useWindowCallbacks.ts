@@ -22,7 +22,7 @@ export interface ContextInfo {
 
 export interface UseWindowCallbacksOptions {
   t: TFunction;
-  addToast: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => void;
+  addToast: (message: string, type?: 'info' | 'success' | 'warning' | 'error', durationMs?: number) => void;
   clearToasts: () => void;
 
   // State setters
@@ -50,6 +50,7 @@ export interface UseWindowCallbacksOptions {
   setSendShortcut: React.Dispatch<React.SetStateAction<'enter' | 'cmdEnter'>>;
   setAutoOpenFileEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   setPermissionDialogTimeoutSeconds: React.Dispatch<React.SetStateAction<number>>;
+  setStreamStallTimeoutSeconds: React.Dispatch<React.SetStateAction<number>>;
   setSdkStatus: React.Dispatch<React.SetStateAction<Record<string, { installed?: boolean; status?: string }>>>;
   setSdkStatusLoaded: React.Dispatch<React.SetStateAction<boolean>>;
   setIsRewinding: (loading: boolean) => void;

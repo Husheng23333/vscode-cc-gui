@@ -12,6 +12,7 @@ import type { PermissionMode } from '../../../components/ChatInputBox/types';
 import { isValidPermissionMode, normalizeClaudeModelId } from '../../../components/ChatInputBox/types';
 import { drainPendingSettings, startInitialSettingsRequest } from '../settingsBootstrap';
 import { clampPermissionDialogTimeoutSeconds } from '../../../utils/permissionDialogTimeout';
+import { clampStreamStallTimeoutSeconds } from '../../../utils/streamStallTimeout';
 
 export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): void {
   const {
@@ -30,6 +31,7 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
     setSendShortcut,
     setAutoOpenFileEnabled,
     setPermissionDialogTimeoutSeconds,
+    setStreamStallTimeoutSeconds,
     currentProviderRef,
     syncActiveProviderModelMapping,
   } = options;
@@ -167,6 +169,23 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
     } catch (error) {
       const errorName = error instanceof Error ? error.name : 'UnknownError';
       console.error(`[Frontend] Failed to parse permission dialog timeout payload: ${errorName}`);
+    }
+  };
+
+  window.updateStreamStallTimeout = (jsonStr: string) => {
+    try {
+      const data = JSON.parse(jsonStr);
+      // Prefer seconds; migrate legacy minutes field if present.
+      const raw = data.streamStallTimeoutSeconds
+        ?? (data.streamStallTimeoutMinutes != null
+          ? Number(data.streamStallTimeoutMinutes) * 60
+          : undefined);
+      const seconds = clampStreamStallTimeoutSeconds(raw);
+      setStreamStallTimeoutSeconds(seconds);
+      window.__streamStallTimeoutSeconds = seconds;
+    } catch (error) {
+      const errorName = error instanceof Error ? error.name : 'UnknownError';
+      console.error(`[Frontend] Failed to parse stream stall timeout payload: ${errorName}`);
     }
   };
 

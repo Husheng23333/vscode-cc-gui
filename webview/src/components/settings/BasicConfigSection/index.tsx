@@ -110,6 +110,9 @@ interface BasicConfigSectionProps {
   // Permission dialog timeout configuration
   permissionDialogTimeoutSeconds?: number;
   onPermissionDialogTimeoutChange?: (seconds: number) => void;
+  // Stream stall timeout (seconds of no streaming activity)
+  streamStallTimeoutSeconds?: number;
+  onStreamStallTimeoutChange?: (seconds: number) => void;
 }
 
 const BasicConfigSection = (props: BasicConfigSectionProps) => {
@@ -201,6 +204,8 @@ const BasicConfigSection = (props: BasicConfigSectionProps) => {
           onDetailedOutputEnabledChange={props.onDetailedOutputEnabledChange}
           permissionDialogTimeoutSeconds={props.permissionDialogTimeoutSeconds}
           onPermissionDialogTimeoutChange={props.onPermissionDialogTimeoutChange}
+          streamStallTimeoutSeconds={props.streamStallTimeoutSeconds}
+          onStreamStallTimeoutChange={props.onStreamStallTimeoutChange}
         />
       )}
 

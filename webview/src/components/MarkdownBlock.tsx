@@ -302,7 +302,160 @@ function makeStreamSafe(content: string): string {
     result = result + '`';
   }
 
+  // Close dangling ** bold markers on the last line so partial emphasis
+  // does not leak literal asterisks while the model is still typing.
+  // Skip when we are still inside an open code fence (already closed above).
+  const boldMarkers = lastLine.match(/\*\*/g);
+  if (boldMarkers && boldMarkers.length % 2 !== 0) {
+    result = result + '**';
+  }
+
   return result;
+}
+
+/** GFM table separator row: | --- | :---: | ---: | (tolerant of 1+ columns). */
+function isStreamTableSeparator(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || !/-{3,}/.test(trimmed)) {
+    return false;
+  }
+  // Only pipes, dashes, colons, and whitespace — classic GFM separator.
+  return /^[\s|:/-]+$/.test(trimmed);
+}
+
+const STREAM_HR_RE = /^\s{0,3}((?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})\s*$/;
+const STREAM_UL_ITEM_RE = /^(\s*)([-*+])\s+(.+)$/;
+const STREAM_OL_ITEM_RE = /^(\s*)(\d{1,9})([.)])\s+(.+)$/;
+
+function parseStreamTableRow(line: string): string[] {
+  let trimmed = line.trim();
+  if (trimmed.startsWith('|')) {
+    trimmed = trimmed.slice(1);
+  }
+  if (trimmed.endsWith('|')) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return trimmed.split('|').map((cell) => cell.trim());
+}
+
+function looksLikeStreamTableRow(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith('```')) {
+    return false;
+  }
+  if (isStreamTableSeparator(trimmed)) {
+    return true;
+  }
+  // Require at least one pipe that is not only at the extreme edges of prose.
+  return trimmed.includes('|');
+}
+
+/**
+ * Render a GFM-ish table block during streaming.
+ * Tolerates incomplete last rows and a missing/partial separator so mid-stream
+ * tables look like tables instead of raw "| a | b |" text.
+ */
+function tryRenderStreamingTable(
+  block: string,
+  capabilities: LinkifyCapabilities,
+): string | null {
+  const lines = block
+    .split('\n')
+    .map((line) => line.replace(/\s+$/, ''))
+    .filter((line) => line.trim().length > 0);
+
+  if (lines.length === 0) {
+    return null;
+  }
+  if (!lines.every((line) => looksLikeStreamTableRow(line))) {
+    return null;
+  }
+  // Need a real data/header row — not only a separator fragment.
+  if (!lines.some((line) => line.includes('|') && !isStreamTableSeparator(line.trim()))) {
+    return null;
+  }
+
+  let headerCells: string[] | null = null;
+  let bodyLines = lines;
+
+  if (lines.length >= 2 && isStreamTableSeparator(lines[1].trim())) {
+    headerCells = parseStreamTableRow(lines[0]);
+    bodyLines = lines.slice(2);
+  } else if (lines.length >= 1 && isStreamTableSeparator(lines[0].trim())) {
+    // Separator arrived before a complete header was usable — skip it.
+    bodyLines = lines.slice(1);
+  }
+
+  const renderCell = (cell: string, tag: 'th' | 'td') =>
+    `<${tag}>${renderStreamingInlineProse(cell, capabilities)}</${tag}>`;
+
+  const parts: string[] = ['<table>'];
+  if (headerCells) {
+    parts.push('<thead><tr>');
+    for (const cell of headerCells) {
+      parts.push(renderCell(cell, 'th'));
+    }
+    parts.push('</tr></thead>');
+  }
+
+  if (bodyLines.length > 0) {
+    parts.push('<tbody>');
+    for (const line of bodyLines) {
+      if (isStreamTableSeparator(line.trim())) {
+        continue;
+      }
+      const cells = parseStreamTableRow(line);
+      parts.push('<tr>');
+      for (const cell of cells) {
+        parts.push(renderCell(cell, headerCells ? 'td' : 'th'));
+      }
+      parts.push('</tr>');
+    }
+    parts.push('</tbody>');
+  }
+
+  parts.push('</table>');
+  return parts.join('');
+}
+
+/**
+ * Render tight unordered/ordered lists during streaming.
+ * Accepts a partial final item so bullets do not flash as plain paragraphs.
+ */
+function tryRenderStreamingList(
+  block: string,
+  capabilities: LinkifyCapabilities,
+): string | null {
+  const lines = block.split('\n').filter((line) => line.trim().length > 0);
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const ulMatches = lines.map((line) => STREAM_UL_ITEM_RE.exec(line));
+  if (ulMatches.every((match) => match)) {
+    const items = ulMatches
+      .map((match) => `<li>${renderStreamingInlineProse(match![3], capabilities)}</li>`)
+      .join('');
+    return `<ul>${items}</ul>`;
+  }
+
+  const olMatches = lines.map((line) => STREAM_OL_ITEM_RE.exec(line));
+  if (olMatches.every((match) => match)) {
+    const items = olMatches
+      .map((match) => `<li>${renderStreamingInlineProse(match![4], capabilities)}</li>`)
+      .join('');
+    return `<ol>${items}</ol>`;
+  }
+
+  return null;
+}
+
+function tryRenderStreamingHorizontalRule(block: string): string | null {
+  const trimmed = block.trim();
+  if (!trimmed || trimmed.includes('\n')) {
+    return null;
+  }
+  return STREAM_HR_RE.test(trimmed) ? '<hr>' : null;
 }
 
 /**
@@ -533,37 +686,58 @@ function renderStreamingInlineText(
     .join('');
 }
 
+/**
+ * Apply streaming inline formatting (code / bold / links) to a raw prose string.
+ * Must run on raw markdown fragments, not already-rendered HTML.
+ */
+function renderStreamingInlineProse(
+  text: string,
+  capabilities: LinkifyCapabilities,
+): string {
+  const cleaned = stripSystemTags(text);
+  const inlineParts = cleaned.split(INLINE_CODE_RE);
+
+  return inlineParts
+    .map((part, idx) => {
+      if (idx % 2 === 1) {
+        const inlineContent = part.slice(1, -1);
+        return `<code>${linkifyPlainTextSegment(inlineContent, capabilities)}</code>`;
+      }
+      return renderStreamingInlineText(escapeXmlTags(part), capabilities, false);
+    })
+    .join('');
+}
+
 function renderStreamingProseSegment(
   segment: string,
   capabilities: LinkifyCapabilities,
 ): string {
-  // First strip system-internal XML tags from the prose segment
-  const cleaned = stripSystemTags(segment);
-
-  // Split by inline code to avoid double-escaping
-  // linkifyPlainTextSegment already handles HTML escaping for inline code content
-  const inlineParts = cleaned.split(INLINE_CODE_RE);
-
-  const processedParts = inlineParts.map((part, idx) => {
-    // Odd indices are inline code — pass to linkifyPlainTextSegment which escapes HTML
-    if (idx % 2 === 1) {
-      const inlineContent = part.slice(1, -1); // Remove surrounding backticks
-      return `<code>${linkifyPlainTextSegment(inlineContent, capabilities)}</code>`;
-    }
-    // Even indices are prose — escape XML tags then render inline formatting
-    return renderStreamingInlineText(escapeXmlTags(part), capabilities, false);
-  });
-
-  // Now wrap in paragraph/heading structure based on paragraph breaks
-  const combined = processedParts.join('');
-  return combined
+  // Detect structural blocks (tables / lists / hr) on raw markdown first.
+  // If we convert bold/code to HTML before table parsing, cell content would be
+  // double-escaped when re-run through the inline formatter.
+  return segment
     .split(/\n{2,}/)
     .filter((block) => block.length > 0)
     .map((block) => {
-      const headingMatch = /^(#{1,6})\s+(.+)$/.exec(block);
+      const hr = tryRenderStreamingHorizontalRule(block);
+      if (hr) {
+        return hr;
+      }
+
+      const table = tryRenderStreamingTable(block, capabilities);
+      if (table) {
+        return table;
+      }
+
+      const list = tryRenderStreamingList(block, capabilities);
+      if (list) {
+        return list;
+      }
+
+      const headingMatch = /^(#{1,6})\s+(.+)$/.exec(block.trim());
       if (headingMatch && !block.includes('\n')) {
         const level = headingMatch[1].length;
-        return `<h${level}>${headingMatch[2]}</h${level}>`;
+        return `<h${level}>${renderStreamingInlineProse(headingMatch[2], capabilities)}</h${level}>`;
       }
 
       // Match marked's `breaks: false` (MarkdownBlock line ~220): a single
@@ -574,7 +748,7 @@ function renderStreamingProseSegment(
       // tool call ends and restarts the stream), that height gap surfaced as
       // a visible collapse-then-reexpand plus a scroll jump. Keeping the two
       // renderers height-aligned lets the renderer switch happen invisibly.
-      return `<p>${block}</p>`;
+      return `<p>${renderStreamingInlineProse(block, capabilities)}</p>`;
     })
     .join('');
 }
@@ -650,7 +824,12 @@ function renderStreamingContent(
   // Sanitize the assembled HTML to prevent XSS even during streaming
   return DOMPurify.sanitize(raw, {
     ...MARKDOWN_LINK_SANITIZE_OPTIONS,
-    ALLOWED_TAGS: ['a', 'p', 'br', 'pre', 'code', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+    ALLOWED_TAGS: [
+      'a', 'p', 'br', 'pre', 'code', 'strong', 'em',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'ul', 'ol', 'li', 'hr',
+      'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    ],
     ALLOWED_ATTR: ['class', 'href', 'data-linkify'],
   });
 }
