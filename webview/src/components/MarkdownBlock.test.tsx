@@ -654,4 +654,62 @@ describe('MarkdownBlock linkify integration', () => {
     expect(finalCodes[0].textContent).toBe('Array<T>');
     expect(finalCodes[1].textContent).toBe('Map<string, number>');
   });
+
+  it('renders GFM tables during streaming instead of raw pipe text', () => {
+    const content = [
+      '| 问题 | 答案 |',
+      '|------|------|',
+      '| Tavily 是哪家？ | Tavily（独立搜索 API） |',
+      '| 会不会联网？ | 取决于是否配置 `tavily_api_key` |',
+    ].join('\n');
+
+    const { rerender } = render(<MarkdownBlock content={content} isStreaming />);
+
+    const table = document.querySelector('table');
+    expect(table).toBeTruthy();
+    expect(table?.querySelectorAll('th').length).toBeGreaterThanOrEqual(2);
+    expect(table?.textContent).toContain('Tavily');
+    expect(table?.textContent).toContain('tavily_api_key');
+    // Must not dump raw markdown pipes into a paragraph as the only representation.
+    expect(document.querySelector('.markdown-content')?.textContent).not.toMatch(/^\| 问题 \|/);
+
+    rerender(<MarkdownBlock content={content} isStreaming={false} />);
+    expect(document.querySelector('table')).toBeTruthy();
+    expect(document.querySelector('table')?.textContent).toContain('Tavily');
+  });
+
+  it('renders incomplete streaming tables once the header row has pipes', () => {
+    // Mid-stream: only the first row has arrived (no separator yet).
+    const partial = '| 问题 | 答案 |';
+    const { rerender } = render(<MarkdownBlock content={partial} isStreaming />);
+    expect(document.querySelector('table')).toBeTruthy();
+    expect(document.querySelector('table')?.textContent).toContain('问题');
+
+    const withSep = [partial, '|------|------|', '| A | B 半'].join('\n');
+    rerender(<MarkdownBlock content={withSep} isStreaming />);
+    expect(document.querySelector('table')).toBeTruthy();
+    expect(document.querySelector('thead')).toBeTruthy();
+    expect(document.querySelector('tbody')?.textContent).toContain('B 半');
+  });
+
+  it('renders horizontal rules and lists during streaming', () => {
+    const content = [
+      '先说结论',
+      '',
+      '---',
+      '',
+      '- 第一点 **重要**',
+      '- 第二点',
+      '',
+      '1. 步骤一',
+      '2. 步骤二',
+    ].join('\n');
+
+    render(<MarkdownBlock content={content} isStreaming />);
+
+    expect(document.querySelector('hr')).toBeTruthy();
+    expect(document.querySelector('ul')).toBeTruthy();
+    expect(document.querySelector('ol')).toBeTruthy();
+    expect(document.querySelector('strong')?.textContent).toBe('重要');
+  });
 });

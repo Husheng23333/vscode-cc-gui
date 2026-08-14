@@ -1,4 +1,5 @@
-const MAX_TAB_TITLE_LENGTH = 80;
+const MAX_TAB_TITLE_LENGTH = 15;
+const TAB_TITLE_ELLIPSIS = '...';
 const TITLE_UPDATE_EVENTS = new Set(['update_title', 'update_history_title']);
 
 export type BridgeMessage = { type?: string; payload?: unknown } | null | undefined;
@@ -10,13 +11,16 @@ export function nextTabName(counter: number): string {
 export function resolveTabTitle(rawTitle: string | undefined, counter: number): string {
   const trimmed = rawTitle?.trim();
   if (trimmed) {
-    return trimmed.slice(0, MAX_TAB_TITLE_LENGTH);
+    return clampTitle(trimmed);
   }
   return nextTabName(counter);
 }
 
 export function clampTitle(title: string): string {
-  return title.slice(0, MAX_TAB_TITLE_LENGTH);
+  const chars = Array.from(title);
+  return chars.length > MAX_TAB_TITLE_LENGTH
+    ? `${chars.slice(0, MAX_TAB_TITLE_LENGTH).join('')}${TAB_TITLE_ELLIPSIS}`
+    : title;
 }
 
 export function parseBridgeEvent(message: BridgeMessage): { event: string; payload: string } | null {

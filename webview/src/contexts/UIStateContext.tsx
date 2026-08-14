@@ -17,7 +17,7 @@ export interface UIStateContextValue {
 
   // Toasts
   toasts: ToastMessage[];
-  addToast: (message: string, type?: ToastMessage['type']) => void;
+  addToast: (message: string, type?: ToastMessage['type'], durationMs?: number) => void;
   dismissToast: (id: string) => void;
   clearToasts: () => void;
 
@@ -62,10 +62,15 @@ export function UIStateProvider({ children }: { children: ReactNode }) {
   const [draftInput, setDraftInput] = useState<string>('');
   const [searchOpen, setSearchOpen] = useState<boolean>(false);
 
-  const addToast = useCallback((message: string, type: ToastMessage['type'] = 'info') => {
+  const addToast = useCallback((message: string, type: ToastMessage['type'] = 'info', durationMs?: number) => {
     if (message === DEFAULT_STATUS || !message) return;
     const id = `toast-${Date.now()}-${Math.random()}`;
-    setToasts((prev) => [...prev, { id, message, type }]);
+    setToasts((prev) => [...prev, {
+      id,
+      message,
+      type,
+      ...(typeof durationMs === 'number' ? { duration: durationMs } : {}),
+    }]);
   }, []);
 
   const dismissToast = useCallback((id: string) => {

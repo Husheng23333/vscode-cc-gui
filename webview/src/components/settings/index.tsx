@@ -54,6 +54,9 @@ interface SettingsViewProps {
   // Permission dialog timeout configuration (passed from App.tsx for state sync)
   permissionDialogTimeoutSeconds?: number;
   onPermissionDialogTimeoutChange?: (seconds: number) => void;
+  // Stream stall timeout (seconds) — passed from App.tsx for state sync
+  streamStallTimeoutSeconds?: number;
+  onStreamStallTimeoutChange?: (seconds: number) => void;
 }
 
 const SettingsView = ({
@@ -68,6 +71,8 @@ const SettingsView = ({
   onAutoOpenFileEnabledChange: onAutoOpenFileEnabledChangeProp,
   permissionDialogTimeoutSeconds: permissionDialogTimeoutSecondsProp,
   onPermissionDialogTimeoutChange: onPermissionDialogTimeoutChangeProp,
+  streamStallTimeoutSeconds: streamStallTimeoutSecondsProp,
+  onStreamStallTimeoutChange: onStreamStallTimeoutChangeProp,
 }: SettingsViewProps) => {
   const { t } = useTranslation();
   const isCodexMode = currentProvider === 'codex';
@@ -208,6 +213,8 @@ const SettingsView = ({
     handleDetailedOutputEnabledChange,
     permissionDialogTimeoutSeconds,
     handlePermissionDialogTimeoutChange,
+    streamStallTimeoutSeconds,
+    handleStreamStallTimeoutChange,
     commitAiConfig,
     setCommitAiConfig,
     handleCommitAiProviderChange,
@@ -225,6 +232,8 @@ const SettingsView = ({
     onAutoOpenFileEnabledChangeProp,
     permissionDialogTimeoutSecondsProp,
     onPermissionDialogTimeoutChangeProp,
+    streamStallTimeoutSecondsProp,
+    onStreamStallTimeoutChangeProp,
   });
 
   // Use provider management hook
@@ -558,6 +567,8 @@ const SettingsView = ({
               onDetailedOutputEnabledChange={handleDetailedOutputEnabledChange}
               permissionDialogTimeoutSeconds={permissionDialogTimeoutSeconds}
               onPermissionDialogTimeoutChange={handlePermissionDialogTimeoutChange}
+              streamStallTimeoutSeconds={streamStallTimeoutSeconds}
+              onStreamStallTimeoutChange={handleStreamStallTimeoutChange}
             />
           </div>
 

@@ -39,6 +39,7 @@ import { useUIState } from './contexts/UIStateContext';
 import { useDialogs } from './contexts/DialogContext';
 import { AppDialogs } from './components/AppDialogs';
 import { DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS } from './utils/permissionDialogTimeout';
+import { DEFAULT_STREAM_STALL_TIMEOUT_SECONDS } from './utils/streamStallTimeout';
 
 const App = () => {
   const { t } = useTranslation();
@@ -96,6 +97,8 @@ const App = () => {
 
   // ── Permission dialog timeout (synced with backend config) ──
   const [permissionDialogTimeoutSeconds, setPermissionDialogTimeoutSeconds] = useState(DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS);
+  // ── Stream stall timeout (seconds of no streaming activity) ──
+  const [streamStallTimeoutSeconds, setStreamStallTimeoutSeconds] = useState(DEFAULT_STREAM_STALL_TIMEOUT_SECONDS);
 
   // ── Local refs (don't trigger re-render, kept in App.tsx) ──
   const isFirstMountRef = useRef(true);
@@ -320,6 +323,7 @@ const App = () => {
     customSessionTitleRef, currentSessionIdRef, updateHistoryTitle, applyHistoryTitleLocal,
     setCustomSessionTitle,
     setPermissionDialogTimeoutSeconds,
+    setStreamStallTimeoutSeconds,
   });
 
   // ── Message processing ──
@@ -478,6 +482,8 @@ const App = () => {
           onAutoOpenFileEnabledChange={handleAutoOpenFileEnabledChange}
           permissionDialogTimeoutSeconds={permissionDialogTimeoutSeconds}
           onPermissionDialogTimeoutChange={setPermissionDialogTimeoutSeconds}
+          streamStallTimeoutSeconds={streamStallTimeoutSeconds}
+          onStreamStallTimeoutChange={setStreamStallTimeoutSeconds}
         />
       ) : currentView === 'chat' ? (
         <ChatScreen

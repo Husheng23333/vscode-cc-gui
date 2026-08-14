@@ -1,10 +1,10 @@
-# CC GUI (Claude and Codex)
+# CCGUI / CC GUI (Claude, Codex, OpenCode, Kimi...)
 
 [中文](./README.zh-CN.md)
 
-A 100% open-source GUI for Claude Code CLI and Codex, shipped as a VS Code extension.  
+**CCGUI** (also known as **CC GUI** / **ccgui**) is a 100% open-source GUI for Claude Code CLI, Codex, OpenCode, Kimi, Grok, and more — shipped as a VS Code extension.
 
-> **Unofficial.** CC GUI is an independent open-source project and is **not affiliated with, endorsed by, or sponsored by** Anthropic, OpenAI, or Microsoft.
+> **Unofficial.** CC GUI is an independent open-source project and is **not affiliated with, endorsed by, or sponsored by** Anthropic, OpenAI, Microsoft, or other third-party tool vendors.
 
 ---
 

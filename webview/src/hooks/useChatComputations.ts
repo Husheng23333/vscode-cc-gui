@@ -20,6 +20,15 @@ import { useFileChanges } from './useFileChanges';
 import { useFileChangesManagement } from './useFileChangesManagement';
 import type { useMessageProcessing } from './useMessageProcessing';
 
+const MAX_SESSION_TITLE_LENGTH = 15;
+
+function displaySessionTitle(title: string): string {
+  const chars = Array.from(title);
+  return chars.length > MAX_SESSION_TITLE_LENGTH
+    ? `${chars.slice(0, MAX_SESSION_TITLE_LENGTH).join('')}...`
+    : title;
+}
+
 interface UseChatComputationsParams {
   t: TFunction;
   messages: ClaudeMessage[];
@@ -190,7 +199,7 @@ export function useChatComputations({
   }, [mergedMessages, currentProvider, canRewindFromMessageIndex, getMessageText]);
 
   const sessionTitle = useMemo(() => {
-    if (customSessionTitle) return customSessionTitle;
+    if (customSessionTitle) return displaySessionTitle(customSessionTitle);
     if (messages.length === 0) return t('common.newSession');
     const firstUserMessage = messages.find((message) => message.type === 'user');
     if (!firstUserMessage) return t('common.newSession');

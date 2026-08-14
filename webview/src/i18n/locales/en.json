@@ -93,6 +93,7 @@
     "unknownFile": "Unknown file",
     "attachmentsUploaded": "[Attachments Uploaded]",
     "streamingConnected": "AI connected, understanding your question",
+    "streamStallTimeout": "No model response for {{seconds}} second(s). This turn was ended automatically. You can change “Stream stall timeout” under Settings → Behavior.",
     "showEarlierMessages": "Show {{count}} earlier messages",
     "totalDuration": "This reply took",
     "tokenUsage": "{{input}} in / {{output}} out",
@@ -295,6 +296,11 @@
         "label": "Permission & Question Dialog Timeout",
         "unit": "seconds",
         "hint": "Set the timeout for AI question dialogs and permission request dialogs (30~3600 seconds). After timeout, the dialog will close automatically and AI will continue."
+      },
+      "streamStallTimeout": {
+        "label": "Stream stall timeout",
+        "unit": "seconds",
+        "hint": "If no model output (text/thinking) arrives for this many seconds, the turn ends automatically with a toast. Default 180 seconds (minimum 1s for testing). Increase for long tool-only phases."
       },
       "chatBgColor": {
         "label": "Chat Background",

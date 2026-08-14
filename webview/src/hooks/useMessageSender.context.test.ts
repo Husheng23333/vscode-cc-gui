@@ -170,6 +170,81 @@ describe('useMessageSender - /context command', () => {
     expect(payload.reasoningEffort).toBe('high');
   });
 
+  it('includes provider and model on send so multi-window requests stay self-contained', () => {
+    const opts = createOptions({
+      currentProvider: 'codex',
+      selectedModel: 'gpt-5.5',
+      longContextEnabled: false,
+    });
+
+    const { result } = renderHook(() => useMessageSender(opts));
+
+    act(() => {
+      result.current.handleSubmit('hello multi-window');
+    });
+
+    const payload = getBridgePayload('send_message');
+    expect(payload.provider).toBe('codex');
+    expect(payload.model).toBe('gpt-5.5');
+  });
+
+  it('applies [1m] model suffix on send when long context is enabled for Claude only', () => {
+    const opts = createOptions({
+      currentProvider: 'claude',
+      selectedModel: 'claude-opus-4-8',
+      longContextEnabled: true,
+    });
+
+    const { result } = renderHook(() => useMessageSender(opts));
+
+    act(() => {
+      result.current.handleSubmit('hello 1m');
+    });
+
+    const payload = getBridgePayload('send_message');
+    expect(payload.provider).toBe('claude');
+    expect(payload.model).toBe('claude-opus-4-8[1m]');
+  });
+
+  it('does not append [1m] to Grok profile ids even when long context is enabled', () => {
+    // Regression: multi-window fix applied apply1MContextSuffix to every provider.
+    // longContext is a Claude-only toggle but was shared globally, turning "grok"
+    // into "grok[1m]" which Grok CLI rejects as unknown model id.
+    const opts = createOptions({
+      currentProvider: 'grok',
+      selectedModel: 'grok',
+      longContextEnabled: true,
+    });
+
+    const { result } = renderHook(() => useMessageSender(opts));
+
+    act(() => {
+      result.current.handleSubmit('hello grok');
+    });
+
+    const payload = getBridgePayload('send_message');
+    expect(payload.provider).toBe('grok');
+    expect(payload.model).toBe('grok');
+  });
+
+  it('does not append [1m] to Codex model ids even when long context is enabled', () => {
+    const opts = createOptions({
+      currentProvider: 'codex',
+      selectedModel: 'gpt-5.6-sol',
+      longContextEnabled: true,
+    });
+
+    const { result } = renderHook(() => useMessageSender(opts));
+
+    act(() => {
+      result.current.handleSubmit('hello codex');
+    });
+
+    const payload = getBridgePayload('send_message');
+    expect(payload.provider).toBe('codex');
+    expect(payload.model).toBe('gpt-5.6-sol');
+  });
+
   it('sends streaming=false when the streaming setting is disabled', () => {
     const opts = createOptions({
       streamingEnabledSetting: false,
