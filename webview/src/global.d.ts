@@ -126,7 +126,7 @@ interface Window {
   /**
    * Add toast notification (called from backend)
    */
-  addToast?: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void;
+  addToast?: (message: string, type: 'success' | 'error' | 'warning' | 'info', durationMs?: number) => void;
 
   /**
    * Toast deferred until a session transition finishes, because backend
@@ -926,6 +926,15 @@ interface Window {
    * Pending permission dialog timeout before React initialization
    */
   __pendingPermissionDialogTimeout?: string;
+  __pendingStreamStallTimeout?: string;
+  /** Seconds of no stream activity before the frontend stall watchdog ends the turn. */
+  __streamStallTimeoutSeconds?: number;
+  updateStreamStallTimeout?: (json: string) => void;
+  /**
+   * Set by Stop button / stall watchdog. While true, late stream deltas must not
+   * call ensureStreamingStarted() and reopen the turn.
+   */
+  __streamHardStopped?: boolean;
 
   __pendingPermissionDialogRequests?: string[];
 

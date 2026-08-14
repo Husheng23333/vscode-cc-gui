@@ -492,6 +492,8 @@ export function useMessageSender({
    * Interrupt the current session
    */
   const interruptSession = useCallback(() => {
+    // Block late CONTENT_DELTA from reviving the turn via ensureStreamingStarted.
+    window.__streamHardStopped = true;
     setLoading(false);
     setLoadingStartTime(null);
     setStreamingActive(false);

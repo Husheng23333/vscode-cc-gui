@@ -49,6 +49,7 @@ describe('useWindowCallbacks integration', () => {
     setSendShortcut: vi.fn(),
     setAutoOpenFileEnabled: vi.fn(),
     setPermissionDialogTimeoutSeconds: vi.fn(),
+    setStreamStallTimeoutSeconds: vi.fn(),
     setSdkStatus: vi.fn(),
     setSdkStatusLoaded: vi.fn(),
     setIsRewinding: vi.fn(),

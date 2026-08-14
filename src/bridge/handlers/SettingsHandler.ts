@@ -60,6 +60,8 @@ export class SettingsHandler implements BridgeHandler {
     'get_ide_theme',
     'get_permission_dialog_timeout',
     'set_permission_dialog_timeout',
+    'get_stream_stall_timeout',
+    'set_stream_stall_timeout',
     'get_commit_generation_enabled',
     'set_commit_generation_enabled',
     'get_status_bar_widget_enabled',
@@ -334,6 +336,18 @@ export class SettingsHandler implements BridgeHandler {
         await this.store.setPermissionDialogTimeoutSeconds(content);
         callWindowFunction(webview, 'updatePermissionDialogTimeout', {
           permissionDialogTimeoutSeconds: this.store.getPermissionDialogTimeoutSeconds(),
+        });
+        return true;
+
+      case 'get_stream_stall_timeout':
+        callWindowFunction(webview, 'updateStreamStallTimeout', {
+          streamStallTimeoutSeconds: this.store.getStreamStallTimeoutSeconds(),
+        });
+        return true;
+      case 'set_stream_stall_timeout':
+        await this.store.setStreamStallTimeoutSeconds(content);
+        callWindowFunction(webview, 'updateStreamStallTimeout', {
+          streamStallTimeoutSeconds: this.store.getStreamStallTimeoutSeconds(),
         });
         return true;
 

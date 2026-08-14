@@ -11,6 +11,10 @@ import {
   clampPermissionDialogTimeoutSeconds,
 } from '../../../utils/permissionDialogTimeout';
 import {
+  DEFAULT_STREAM_STALL_TIMEOUT_SECONDS,
+  clampStreamStallTimeoutSeconds,
+} from '../../../utils/streamStallTimeout';
+import {
   getSkipNewSessionConfirm,
   SKIP_NEW_SESSION_CONFIRM_EVENT,
   type SkipNewSessionConfirmChangedDetail,
@@ -37,6 +41,8 @@ export interface UseSettingsBasicActionsProps {
   onAutoOpenFileEnabledChangeProp?: (enabled: boolean) => void;
   permissionDialogTimeoutSecondsProp?: number;
   onPermissionDialogTimeoutChangeProp?: (seconds: number) => void;
+  streamStallTimeoutSecondsProp?: number;
+  onStreamStallTimeoutChangeProp?: (seconds: number) => void;
 }
 
 export interface UseSettingsBasicActionsReturn {
@@ -89,6 +95,8 @@ export interface UseSettingsBasicActionsReturn {
   taskCompletionNotificationEnabled: boolean;
   askUserQuestionNotificationEnabled: boolean;
   detailedOutputEnabled: boolean;
+  permissionDialogTimeoutSeconds: number;
+  streamStallTimeoutSeconds: number;
   commitAiConfig: CommitAiConfig;
   promptEnhancerConfig: PromptEnhancerConfig;
 
@@ -124,8 +132,8 @@ export interface UseSettingsBasicActionsReturn {
   handleTaskCompletionNotificationEnabledChange: (enabled: boolean) => void;
   handleAskUserQuestionNotificationEnabledChange: (enabled: boolean) => void;
   handleDetailedOutputEnabledChange: (enabled: boolean) => void;
-  permissionDialogTimeoutSeconds: number;
   handlePermissionDialogTimeoutChange: (seconds: number) => void;
+  handleStreamStallTimeoutChange: (seconds: number) => void;
   handleCommitAiProviderChange: (provider: CommitAiProvider) => void;
   handleCommitAiModelChange: (model: string) => void;
   handleCommitAiResetToDefault: () => void;
@@ -190,6 +198,8 @@ export function useSettingsBasicActions({
   onAutoOpenFileEnabledChangeProp,
   permissionDialogTimeoutSecondsProp,
   onPermissionDialogTimeoutChangeProp,
+  streamStallTimeoutSecondsProp,
+  onStreamStallTimeoutChangeProp,
 }: UseSettingsBasicActionsProps): UseSettingsBasicActionsReturn {
   // Node.js path
   const [nodePath, setNodePath] = useState('');
@@ -319,6 +329,10 @@ export function useSettingsBasicActions({
   // by accident in future refactors.
   const permissionDialogTimeoutSeconds =
     permissionDialogTimeoutSecondsProp ?? DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS;
+
+  // Stream stall timeout — also owned by App.tsx for the live chat watchdog.
+  const streamStallTimeoutSeconds =
+    streamStallTimeoutSecondsProp ?? DEFAULT_STREAM_STALL_TIMEOUT_SECONDS;
 
   const [commitAiConfig, setCommitAiConfig] = useState<CommitAiConfig>(
     DEFAULT_COMMIT_AI_CONFIG
@@ -554,6 +568,17 @@ export function useSettingsBasicActions({
     sendToJava(`set_permission_dialog_timeout:${JSON.stringify(payload)}`);
   }, [onPermissionDialogTimeoutChangeProp]);
 
+  const handleStreamStallTimeoutChange = useCallback((seconds: number) => {
+    const clamped = clampStreamStallTimeoutSeconds(seconds);
+    onStreamStallTimeoutChangeProp?.(clamped);
+    // Keep the streaming watchdog in sync immediately (no wait for round-trip).
+    if (typeof window !== 'undefined') {
+      window.__streamStallTimeoutSeconds = clamped;
+    }
+    const payload = { streamStallTimeoutSeconds: clamped };
+    sendToJava(`set_stream_stall_timeout:${JSON.stringify(payload)}`);
+  }, [onStreamStallTimeoutChangeProp]);
+
   const handleCommitAiProviderChange = useCallback((provider: CommitAiProvider) => {
     const providerAvailable = commitAiConfig.availability[provider];
     const nextConfig: CommitAiConfig = {
@@ -766,6 +791,8 @@ export function useSettingsBasicActions({
     handleDetailedOutputEnabledChange,
     permissionDialogTimeoutSeconds,
     handlePermissionDialogTimeoutChange,
+    streamStallTimeoutSeconds,
+    handleStreamStallTimeoutChange,
     commitAiConfig,
     setCommitAiConfig,
     handleCommitAiProviderChange,

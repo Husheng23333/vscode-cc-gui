@@ -2,6 +2,12 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import styles from './style.module.less';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS } from '../../../utils/permissionDialogTimeout';
+import {
+  DEFAULT_STREAM_STALL_TIMEOUT_SECONDS,
+  MAX_STREAM_STALL_TIMEOUT_SECONDS,
+  MIN_STREAM_STALL_TIMEOUT_SECONDS,
+  clampStreamStallTimeoutSeconds,
+} from '../../../utils/streamStallTimeout';
 import { PermissionDialogTimeoutSetting } from './PermissionDialogTimeoutSetting';
 
 /** Upward-opening custom select for sound selection (avoids JCEF clipping) */
@@ -118,6 +124,8 @@ export interface BehaviorTabProps {
   onDetailedOutputEnabledChange?: (enabled: boolean) => void;
   permissionDialogTimeoutSeconds?: number;
   onPermissionDialogTimeoutChange?: (seconds: number) => void;
+  streamStallTimeoutSeconds?: number;
+  onStreamStallTimeoutChange?: (seconds: number) => void;
 }
 
 const BehaviorTab = ({
@@ -158,8 +166,21 @@ const BehaviorTab = ({
   onDetailedOutputEnabledChange = () => {},
   permissionDialogTimeoutSeconds = DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS,
   onPermissionDialogTimeoutChange = () => {},
+  streamStallTimeoutSeconds = DEFAULT_STREAM_STALL_TIMEOUT_SECONDS,
+  onStreamStallTimeoutChange = () => {},
 }: BehaviorTabProps) => {
   const { t } = useTranslation();
+  const [stallTimeoutInput, setStallTimeoutInput] = useState(String(streamStallTimeoutSeconds));
+
+  useEffect(() => {
+    setStallTimeoutInput(String(streamStallTimeoutSeconds));
+  }, [streamStallTimeoutSeconds]);
+
+  const commitStallTimeout = () => {
+    const clamped = clampStreamStallTimeoutSeconds(stallTimeoutInput);
+    onStreamStallTimeoutChange(clamped);
+    setStallTimeoutInput(String(clamped));
+  };
 
   const soundOptions = useMemo(() => [
     { value: 'default', label: t('settings.basic.soundNotification.soundDefault') },
@@ -211,6 +232,37 @@ const BehaviorTab = ({
         permissionDialogTimeoutSeconds={permissionDialogTimeoutSeconds}
         onPermissionDialogTimeoutChange={onPermissionDialogTimeoutChange}
       />
+
+      {/* Stream stall timeout — no content/thinking activity for N seconds */}
+      <div className={styles.streamingSection}>
+        <div className={styles.fieldHeader}>
+          <span className="codicon codicon-watch" />
+          <span className={styles.fieldLabel}>{t('settings.basic.streamStallTimeout.label')}</span>
+        </div>
+        <div className={`${styles.nodePathInputWrapper} ${styles.timeoutInputWrapper}`}>
+          <input
+            type="number"
+            className={styles.nodePathInput}
+            aria-label={t('settings.basic.streamStallTimeout.label')}
+            min={MIN_STREAM_STALL_TIMEOUT_SECONDS}
+            max={MAX_STREAM_STALL_TIMEOUT_SECONDS}
+            value={stallTimeoutInput}
+            onChange={(e) => setStallTimeoutInput(e.target.value)}
+            onBlur={commitStallTimeout}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitStallTimeout();
+              }
+            }}
+          />
+          <span className={styles.formHint}>{t('settings.basic.streamStallTimeout.unit')}</span>
+        </div>
+        <small className={styles.formHint}>
+          <span className="codicon codicon-info" />
+          <span>{t('settings.basic.streamStallTimeout.hint')}</span>
+        </small>
+      </div>
 
       {/* Streaming configuration */}
       <div className={styles.streamingSection}>

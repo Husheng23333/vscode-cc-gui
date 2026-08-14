@@ -4,6 +4,8 @@ export interface ToastMessage {
   id: string;
   message: string;
   type?: 'info' | 'success' | 'warning' | 'error';
+  /** Auto-dismiss delay in ms. Omit to use type defaults. */
+  duration?: number;
 }
 
 interface ToastProps {
@@ -16,6 +18,10 @@ const Toast: React.FC<ToastProps> = ({ message, onDismiss, duration = 1000 }) =>
   const [isExiting, setIsExiting] = useState(false);
 
   useEffect(() => {
+    // duration <= 0 means stay until user clicks close.
+    if (duration <= 0) {
+      return;
+    }
     const timer = setTimeout(() => {
       setIsExiting(true);
       setTimeout(() => onDismiss(message.id), 300); // Wait for exit animation
@@ -29,7 +35,9 @@ const Toast: React.FC<ToastProps> = ({ message, onDismiss, duration = 1000 }) =>
       <div className="toast-content">
         <span className="toast-message">{message.message}</span>
         <button
+          type="button"
           className="toast-close"
+          aria-label="Close"
           onClick={() => {
             setIsExiting(true);
             setTimeout(() => onDismiss(message.id), 300);
@@ -54,9 +62,12 @@ const TOAST_DURATION = {
   default: 2000, // Other messages display for 2 seconds
 } as const;
 
-// Set different display durations based on message type
-const getDuration = (type?: ToastMessage['type']) => {
-  switch (type) {
+// Set different display durations based on message type (overridable per toast)
+const getDuration = (msg: ToastMessage) => {
+  if (typeof msg.duration === 'number') {
+    return msg.duration;
+  }
+  switch (msg.type) {
     case 'error':
       return TOAST_DURATION.error;
     case 'warning':
@@ -74,7 +85,7 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({ messages, onDism
           key={msg.id}
           message={msg}
           onDismiss={onDismiss}
-          duration={getDuration(msg.type)}
+          duration={getDuration(msg)}
         />
       ))}
     </div>
