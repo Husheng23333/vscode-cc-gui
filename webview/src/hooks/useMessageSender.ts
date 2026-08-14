@@ -277,8 +277,25 @@ export function useMessageSender({
           threadId: currentSessionId,
         }
       : {};
+    // Self-contained request identity for multi-window safety.
+    // Do not rely on the last set_provider/set_model on the shared bridge singleton —
+    // concurrent tabs race those globals and mix provider/model across windows.
+    //
+    // [1m] is a Claude-only long-context marker (Anthropic SDK / settings mapping).
+    // Applying it to Codex/Grok/etc. produces unknown model ids like:
+    //   grok[1m], gpt-5.6-sol[1m]
+    // which the upstream APIs reject. Only Claude gets the suffix.
+    const requestModel =
+      currentProvider === 'claude'
+        ? apply1MContextSuffix(selectedModel, longContextEnabled ?? false)
+        : selectedModel;
+    const requestIdentityPayload = {
+      provider: currentProvider,
+      model: requestModel,
+    };
     console.debug('[CCG_DEBUG] sendMessageToBackend', {
       provider: currentProvider,
+      model: requestIdentityPayload.model,
       currentSessionId: currentSessionId || '',
       hasAttachments,
       requestedPermissionMode,
@@ -301,6 +318,7 @@ export function useMessageSender({
           fileTags: fileTagsInfo,
           permissionMode: effectivePermissionMode,
           streaming: streamingEnabledSetting,
+          ...requestIdentityPayload,
           ...sessionResumePayload,
           ...reasoningEffortPayload,
           codexFastMode,
@@ -314,6 +332,7 @@ export function useMessageSender({
           fileTags: fileTagsInfo,
           permissionMode: effectivePermissionMode,
           streaming: streamingEnabledSetting,
+          ...requestIdentityPayload,
           ...sessionResumePayload,
           ...reasoningEffortPayload,
           codexFastMode,
@@ -327,13 +346,14 @@ export function useMessageSender({
         fileTags: fileTagsInfo,
         permissionMode: effectivePermissionMode,
         streaming: streamingEnabledSetting,
+        ...requestIdentityPayload,
         ...sessionResumePayload,
         ...reasoningEffortPayload,
         codexFastMode,
       });
       sendBridgeEvent('send_message', payload);
     }
-  }, [codexFastMode, currentProvider, currentSessionId, selectedModel, reasoningEffort, streamingEnabledSetting]);
+  }, [codexFastMode, currentProvider, currentSessionId, longContextEnabled, selectedModel, reasoningEffort, streamingEnabledSetting]);
 
   /**
    * Execute message sending (from queue or directly)

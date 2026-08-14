@@ -50,6 +50,7 @@ import {
   isNodeVersionSupported,
   readNodeVersion,
 } from './nodeRequirements';
+import { planClaudeSettingsSync } from './bridge/services/claudeSettingsSync';
 
 type MessageCallback = (event: string, content: string) => void;
 type CreateTabCallback = () => void;
@@ -2009,18 +2010,16 @@ export class BridgeServer {
   /**
    * Sync the active Claude provider env into ~/.claude/settings.json so the
    * daemon and CLI follow the shared provider selection stored in ~/.codemoss/config.json.
+   *
+   * Safety rules (prevents wiping cc-switch / user CLI credentials):
+   * - Never write when no managed provider is active (local / disabled / null).
+   * - Never clear managed env keys unless we have a non-empty env payload or CLI-login mode.
    */
   private _syncProviderToDisk(providers: any[]) {
     const active = providers.find((p: any) => p.isActive) ?? null;
 
-    // Skip for local mode: the user manages settings.json themselves.
-    if (active?.id === '__local_settings_json__') { return; }
-
     try {
       const claudeDir = path.join(os.homedir(), '.claude');
-      if (!fs.existsSync(claudeDir)) {
-        fs.mkdirSync(claudeDir, { recursive: true });
-      }
       const settingsPath = path.join(claudeDir, 'settings.json');
       let settings: any = {};
       try {
@@ -2029,29 +2028,19 @@ export class BridgeServer {
         }
       } catch { /* start fresh */ }
 
-      if (!settings.env) { settings.env = {}; }
-
-      // Clear all provider-managed auth/config keys before setting new ones
-      const MANAGED_ENV_KEYS = [
-        'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
-        'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_URL',
-        'ANTHROPIC_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL',
-        'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
-        'CLAUDE_CODE_USE_BEDROCK',
-        'API_TIMEOUT_MS', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
-        'CCGUI_CLI_LOGIN_AUTHORIZED',
-      ];
-      for (const key of MANAGED_ENV_KEYS) {
-        delete settings.env[key];
+      const decision = planClaudeSettingsSync(settings, active);
+      if (decision.action === 'skip') {
+        this._log.appendLine(
+          `[bridge] Skip settings.json sync: ${decision.reason}`
+          + (active?.id ? ` (active=${active.id})` : ''),
+        );
+        return;
       }
 
-      if (active?.id === '__cli_login__') {
-        settings.env.CCGUI_CLI_LOGIN_AUTHORIZED = '1';
-      } else if (active?.settingsConfig?.env) {
-        Object.assign(settings.env, active.settingsConfig.env);
+      if (!fs.existsSync(claudeDir)) {
+        fs.mkdirSync(claudeDir, { recursive: true });
       }
-
-      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+      fs.writeFileSync(settingsPath, JSON.stringify(decision.nextSettings, null, 2));
     } catch (e: any) {
       console.error('[bridge] Failed to write ~/.claude/settings.json:', e.message);
     }

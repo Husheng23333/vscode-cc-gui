@@ -152,7 +152,9 @@ const GROK_DEFAULT_PROFILE_ID = 'grok';
  */
 function resolveGrokModelFlag(model) {
   if (model == null) return null;
-  const trimmed = String(model).trim();
+  // Claude-only long-context marker must never reach Grok CLI `-m`.
+  // e.g. webview once sent "grok[1m]" when longContext was left on from Claude.
+  const trimmed = String(model).trim().replace(/\[1m\]$/i, '');
   if (!trimmed) return null;
   const lower = trimmed.toLowerCase();
   if (

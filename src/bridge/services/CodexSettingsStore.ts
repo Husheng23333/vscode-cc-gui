@@ -14,7 +14,10 @@ export class CodexSettingsStore {
       return;
     }
 
-    if (typeof provider.configToml === 'string') {
+    // Never overwrite ~/.codex/config.toml with an empty payload.
+    // Empty configToml is common for incomplete/imported providers; writing it
+    // would wipe the user's cc-switch / CLI config on provider switch.
+    if (typeof provider.configToml === 'string' && provider.configToml.trim()) {
       this.writeFileAtomically(this.configTomlPath(), provider.configToml);
     }
 
