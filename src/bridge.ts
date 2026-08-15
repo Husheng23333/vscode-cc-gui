@@ -1283,10 +1283,20 @@ export class BridgeServer {
   }
 
   private _handleDaemonLine(msg: any) {
-    // Daemon lifecycle events (no id)
+    // Daemon lifecycle / side-channel events (no request id)
     if (msg.type === 'daemon') {
       if (msg.event === 'ready') {
         if (this._webview) this._webview.postMessage({ type: 'js_eval', content: 'window.onSdkLoaded && window.onSdkLoaded()' });
+      } else if (msg.event === 'title_generated') {
+        const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId.trim() : '';
+        const title = typeof msg.title === 'string' ? msg.title.trim() : '';
+        if (sessionId && title && this._webview) {
+          this._callWebviewArgs(this._webview, 'updateSessionTitle', [sessionId, title]);
+        }
+      } else if (msg.event === 'title_log') {
+        const level = typeof msg.level === 'string' ? msg.level : 'info';
+        const message = typeof msg.message === 'string' ? msg.message : '';
+        this._log.appendLine(`[TITLE] ${level}: ${message}`.slice(0, 400));
       }
       return;
     }
@@ -1637,18 +1647,43 @@ export class BridgeServer {
         // Daemon request-result envelopes (no protocol tag) must never become chat text.
         // Codex/Claude print e.g. {"success":true,"threadId":"...","result":"3","transport":"app-server"}
         // at end of turn for demux — showing them as content_delta leaks JSON into the UI.
+        // Same for structured daemon events (title_log / title_generated) that may still
+        // arrive tagged with a request id if demux missed the pass-through path.
         const trimmedBare = line.trim();
-        if (trimmedBare.startsWith('{') && trimmedBare.includes('"success"')) {
+        if (trimmedBare.startsWith('{')) {
           try {
             const parsedBare = JSON.parse(trimmedBare) as {
+              type?: unknown;
+              event?: unknown;
               success?: unknown;
               error?: unknown;
               threadId?: unknown;
               sessionId?: unknown;
+              title?: unknown;
               result?: unknown;
               transport?: unknown;
               details?: unknown;
+              level?: unknown;
+              message?: unknown;
             };
+            if (parsedBare && typeof parsedBare === 'object' && parsedBare.type === 'daemon') {
+              if (parsedBare.event === 'title_generated') {
+                const sessionId = typeof parsedBare.sessionId === 'string' ? parsedBare.sessionId.trim() : '';
+                const title = typeof parsedBare.title === 'string' ? parsedBare.title.trim() : '';
+                if (sessionId && title) {
+                  this._callWebviewArgs(webview, 'updateSessionTitle', [sessionId, title]);
+                }
+              } else if (parsedBare.event === 'title_log') {
+                const level = typeof parsedBare.level === 'string' ? parsedBare.level : 'info';
+                const message = typeof parsedBare.message === 'string' ? parsedBare.message : '';
+                this._log.appendLine(`[TITLE] ${level}: ${message}`.slice(0, 400));
+              } else {
+                this._log.appendLine(
+                  `[STREAM] id=${msg.id} swallow daemon event event=${String(parsedBare.event ?? '')}`,
+                );
+              }
+              return;
+            }
             if (parsedBare && typeof parsedBare === 'object' && 'success' in parsedBare) {
               if (parsedBare.success === false) {
                 this._postSendError(webview, trimmedBare, msg.id);

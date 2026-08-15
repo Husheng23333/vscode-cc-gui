@@ -128,9 +128,10 @@ const resolveMappedModelName = (
 const MODEL_DROPDOWN_MAX_HEIGHT = 300;
 
 /**
- * Resolve the display model name for dropdown row icon matching.
- * For mapped Claude models, returns the mapped name; otherwise the original ID.
- * Note: the closed button trigger uses CLI/provider icon only; list rows use model icons.
+ * Resolve the model name used for icon matching.
+ * For mapped Claude slots (sonnet/opus/haiku), returns the mapped vendor model id
+ * (e.g. deepseek-v4-pro) so both the closed trigger and dropdown rows show the
+ * actual model vendor icon instead of always defaulting to Claude.
  */
 const resolveModelIdForIcon = (
   modelId: string,
@@ -302,6 +303,11 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
       >
         <ProviderModelIcon
           providerId={currentProvider}
+          modelId={
+            currentModel
+              ? resolveModelIdForIcon(currentModel.id, modelMapping, MODEL_ID_TO_MAPPING_KEY)
+              : undefined
+          }
           size={12}
           colored
         />

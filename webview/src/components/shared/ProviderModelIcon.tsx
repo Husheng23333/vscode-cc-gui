@@ -2,8 +2,8 @@
  * Shared icon component that renders the correct vendor icon based on
  * provider ID and/or model ID.
  *
- * Used by ModelSelect (button = CLI; list rows = model vendor), ProviderSelect,
- * BlinkingLogo (CLI only), HistoryView, and provider settings panels.
+ * Used by ModelSelect (trigger + list rows use mapped model vendor when known),
+ * ProviderSelect, BlinkingLogo (CLI only), HistoryView, and provider settings panels.
  */
 import ClaudeColor from '@lobehub/icons/es/Claude/components/Color';
 import ClaudeMono from '@lobehub/icons/es/Claude/components/Mono';

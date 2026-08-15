@@ -48,6 +48,7 @@ import { isWebviewControlledEnvVar, isDangerousEnvVar } from './config/api-confi
 import { cleanupStaleTempImages } from './services/claude/attachment-service.js';
 import { requestContext, getRequestId } from './utils/request-context.js';
 import { abortCliProcesses } from './utils/cli-process-registry.js';
+import { isDaemonEventJsonLine } from './utils/daemon-line.js';
 
 // =============================================================================
 // Network Environment Setup (must run before any HTTPS connection)
@@ -231,11 +232,18 @@ process.stdout.write = function (chunk, encoding, callback) {
   const activeRequestId = getActiveRequestId();
 
   if (activeRequestId) {
-    // Tag output with request ID for demuxing on the extension host
+    // Tag output with request ID for demuxing on the extension host.
+    // Exception: structured daemon events (title_log / title_generated / etc.)
+    // written from fire-and-forget work that still inherits ALS must pass
+    // through unscoped — otherwise bridge treats them as chat content_delta.
     const lines = text.split('\n');
     for (const line of lines) {
       if (line.length > 0) {
-        writeRawLine({ id: activeRequestId, line });
+        if (isDaemonEventJsonLine(line)) {
+          _originalStdoutWrite(line.endsWith('\n') ? line : `${line}\n`, 'utf8');
+        } else {
+          writeRawLine({ id: activeRequestId, line });
+        }
       }
     }
     if (typeof callback === 'function') callback();
