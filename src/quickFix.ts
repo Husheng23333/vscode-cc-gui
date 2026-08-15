@@ -18,12 +18,12 @@ export class ClaudeQuickFixProvider implements vscode.CodeActionProvider {
 
     return context.diagnostics.map(diag => {
       const action = new vscode.CodeAction(
-        `Fix with Claude: ${diag.message.slice(0, 60)}${diag.message.length > 60 ? '...' : ''}`,
+        `Fix with CC GUI: ${diag.message.slice(0, 60)}${diag.message.length > 60 ? '...' : ''}`,
         vscode.CodeActionKind.QuickFix
       );
       action.command = {
         command: 'ccGui.quickFixWithClaude',
-        title: 'Fix with Claude',
+        title: 'Fix with CC GUI',
         arguments: [{ uri: document.uri, diagnostic: diag } satisfies QuickFixCommandArgs],
       };
       action.diagnostics = [diag];

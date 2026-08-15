@@ -137,6 +137,22 @@ async function createRuntime(requestContext, callbacks) {
     }]
   };
 
+  // Bind canUseTool to this runtime's active bridge request so multi-tab dialogs
+  // always route to the webview that owns the turn (even when ALS is lost).
+  const baseCanUseTool = options.canUseTool;
+  if (typeof baseCanUseTool === 'function') {
+    options.canUseTool = async (toolName, input, toolOptions = {}) => {
+      const bridgeRequestId = runtime.activeBridgeRequestId || undefined;
+      const nextInput = (input && typeof input === 'object' && !Array.isArray(input))
+        ? { ...input, ...(bridgeRequestId ? { __bridgeRequestId: bridgeRequestId } : {}) }
+        : input;
+      return baseCanUseTool(toolName, nextInput, {
+        ...toolOptions,
+        bridgeRequestId,
+      });
+    };
+  }
+
   runtime.query = queryFn({
     prompt: runtime.inputStream,
     options

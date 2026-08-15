@@ -470,11 +470,20 @@
     overflow: hidden;
     text-overflow: ellipsis;
     margin-right: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .permission-dialog-v3-command-header .command-arrow {
     color: var(--color-success);
-    margin-right: 6px;
+    flex-shrink: 0;
+}
+
+.permission-dialog-v3-command-header .command-cwd {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .permission-dialog-v3-command-header .command-toggle {
@@ -675,8 +684,14 @@
     border-radius: 6px;
     color: var(--text-warning);
     font-size: 13px;
-    margin: -8px 0 0 0;
+    margin: 8px 0 0 0;
+    flex-shrink: 0;
     animation: slideIn 0.3s ease-out;
+}
+
+/* When the timeout banner is visible, tighten the subtitle top spacing */
+.timeout-warning-banner + .permission-dialog-v3-subtitle {
+    margin-top: 10px;
 }
 
 .timeout-warning-banner .codicon {

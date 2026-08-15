@@ -103,7 +103,7 @@ export async function collectQuickFixActions(
     const summaries: QuickFixActionSummary[] = [];
     for (const action of actions) {
       const title = typeof action?.title === 'string' ? action.title.trim() : '';
-      if (!title || title.startsWith('Fix with Claude')) continue;
+      if (!title || title.startsWith('Fix with CC GUI') || title.startsWith('Fix with Claude')) continue;
       const key = title.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);

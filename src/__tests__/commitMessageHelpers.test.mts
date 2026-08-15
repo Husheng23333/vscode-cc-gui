@@ -4,6 +4,7 @@ import {
   buildCommitPrompt,
   cleanupCommitMessage,
   getUserAdditionalPrompt,
+  normalizeCommitMessage,
   truncateDiff,
 } from '../commitMessageHelpers.ts';
 
@@ -80,6 +81,33 @@ describe('cleanupCommitMessage', () => {
     const result = cleanupCommitMessage(raw);
     assert.ok(!result.includes('analysis here'));
     assert.match(result, /^feat: x/);
+  });
+
+  it('repairs missing space after type colon', () => {
+    assert.equal(cleanupCommitMessage('<commit>chore:bump deps</commit>'), 'chore: bump deps');
+  });
+
+  it('repairs hyphen-glued multi-change subject from streaming bug', () => {
+    const raw =
+      '<commit>chore:Refreshcommentsandeditorstate-Rewordprogresscommentsforclarity-KeepREADME</commit>';
+    const result = cleanupCommitMessage(raw);
+    assert.match(result, /^chore: /);
+    assert.ok(result.includes('\n'));
+    assert.ok(result.includes('- '));
+    assert.ok(!result.includes('chore:Refresh'));
+  });
+});
+
+describe('normalizeCommitMessage', () => {
+  it('inserts space after colon', () => {
+    assert.equal(normalizeCommitMessage('feat:add login'), 'feat: add login');
+  });
+
+  it('splits hyphen-glued description into subject and body', () => {
+    const result = normalizeCommitMessage('chore:AlphaChange-BetaChange-GammaChange');
+    assert.match(result, /^chore: alpha change/i);
+    assert.match(result, /- beta change/i);
+    assert.match(result, /- gamma change/i);
   });
 });
 

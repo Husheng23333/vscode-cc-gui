@@ -11,6 +11,8 @@ export interface PermissionRequest {
   channelId: string;
   toolName: string;
   inputs: Record<string, any>;
+  /** Working directory from the bridge (top-level field, not only inside inputs). */
+  cwd?: string;
   suggestions?: any;
 }
 
@@ -21,6 +23,47 @@ interface PermissionDialogProps {
   onSkip: (channelId: string) => void;
   onApproveAlways: (channelId: string) => void;
   timeoutSeconds?: number;
+}
+
+/**
+ * Resolve the path label shown next to the command arrow.
+ * Prefer bridge top-level cwd, then tool inputs; fall back to "~".
+ * Never prefixes an extra "~" (that used to produce "→ ~ ~").
+ */
+export function resolvePermissionWorkingDirectory(
+  request: Pick<PermissionRequest, 'cwd' | 'inputs'>,
+): string {
+  const candidates = [
+    request.cwd,
+    request.inputs?.cwd,
+    request.inputs?.file_path,
+    request.inputs?.path,
+  ];
+  for (const value of candidates) {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+    }
+  }
+  return '~';
+}
+
+/**
+ * Pretty-print a working directory for the dialog header.
+ * Collapses the user's home directory prefix to "~" when possible.
+ */
+export function formatPermissionWorkingDirectoryDisplay(cwd: string): string {
+  const trimmed = (cwd || '').trim();
+  if (!trimmed || trimmed === '~') {
+    return '~';
+  }
+  // Already home-relative (e.g. "~/project")
+  if (trimmed === '~' || trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
+    return trimmed;
+  }
+  return trimmed;
 }
 
 const PermissionDialog = ({
@@ -145,20 +188,6 @@ const PermissionDialog = ({
       .join('\n');
   };
 
-  // Get working directory
-  const getWorkingDirectory = (): string => {
-    if (request.inputs.cwd) {
-      return request.inputs.cwd;
-    }
-    if (request.inputs.file_path) {
-      return request.inputs.file_path;
-    }
-    if (request.inputs.path) {
-      return request.inputs.path;
-    }
-    return '~';
-  };
-
   // Map tool name to display title
   const getToolTitle = (toolName: string): string => {
     const key = `permission.tools.${toolName}`;
@@ -171,7 +200,9 @@ const PermissionDialog = ({
   };
 
   const commandContent = getCommandContent();
-  const workingDirectory = getWorkingDirectory();
+  const workingDirectory = formatPermissionWorkingDirectoryDisplay(
+    resolvePermissionWorkingDirectory(request),
+  );
 
   return (
     <div className="permission-dialog-overlay">
@@ -198,8 +229,9 @@ const PermissionDialog = ({
 
         <div className="permission-dialog-v3-command-box">
           <div className="permission-dialog-v3-command-header">
-            <span className="command-path">
-              <span className="command-arrow">→</span> ~ {workingDirectory}
+            <span className="command-path" title={workingDirectory}>
+              <span className="command-arrow">→</span>
+              <span className="command-cwd">{workingDirectory}</span>
             </span>
             <button
               className="command-toggle"

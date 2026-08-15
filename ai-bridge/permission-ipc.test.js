@@ -11,8 +11,25 @@ import {
   describeContentForLog,
   describeInputForLog,
   parsePermissionAllowResponse,
+  resolveBridgeRequestId,
   resolvePermissionRequestSafetyNetMs,
 } from './permission-ipc.js';
+import {
+  clearActiveTurnRuntime,
+  setActiveTurnRuntime,
+} from './services/claude/runtime-registry.js';
+
+test('resolveBridgeRequestId prefers explicit id then active-turn runtime stamp', () => {
+  clearActiveTurnRuntime();
+  assert.equal(resolveBridgeRequestId('explicit-1'), 'explicit-1');
+  assert.equal(resolveBridgeRequestId('  '), undefined);
+
+  setActiveTurnRuntime({ activeBridgeRequestId: 'runtime-turn-9' });
+  assert.equal(resolveBridgeRequestId(undefined), 'runtime-turn-9');
+  assert.equal(resolveBridgeRequestId('explicit-wins'), 'explicit-wins');
+  clearActiveTurnRuntime();
+  assert.equal(resolveBridgeRequestId(undefined), undefined);
+});
 
 test('default safety net is derived from the default user-facing timeout plus buffer', () => {
   assert.equal(MAX_PERMISSION_DIALOG_TIMEOUT_SECONDS, 3600);

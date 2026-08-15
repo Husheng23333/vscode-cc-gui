@@ -30,6 +30,11 @@ export function sliceLatestConversationTurn(messages: ClaudeMessage[]): ClaudeMe
   return start >= 0 ? messages.slice(start) : [];
 }
 
+/**
+ * When the parent turn settles, promote stuck in_progress todos to completed.
+ * Todos do not outlive the turn the way background agents do — an unfinished
+ * in_progress item after end_turn is almost always a missed TodoWrite update.
+ */
 export function finalizeTodosForSettledTurn(todos: TodoItem[], isStreaming: boolean): TodoItem[] {
   if (isStreaming) return todos;
   return todos.map((todo) => (
@@ -39,10 +44,19 @@ export function finalizeTodosForSettledTurn(todos: TodoItem[], isStreaming: bool
   ));
 }
 
+/**
+ * When the parent turn settles, only force-complete *sync* subagents that are
+ * still marked running (orphan tool_use without a tool_result).
+ *
+ * Async agents (run_in_background:true) intentionally outlive the parent turn:
+ * their launch tool_result is only an ACK, and terminal status arrives later
+ * via task_notification / sidechain history. Force-completing them here made
+ * StatusPanel show "2/2 completed" while the inline cards were still spinning.
+ */
 export function finalizeSubagentsForSettledTurn(subagents: SubagentInfo[], isStreaming: boolean): SubagentInfo[] {
   if (isStreaming) return subagents;
   return subagents.map((subagent) => (
-    subagent.status === 'running'
+    subagent.status === 'running' && !subagent.isAsync
       ? { ...subagent, status: 'completed' }
       : subagent
   ));

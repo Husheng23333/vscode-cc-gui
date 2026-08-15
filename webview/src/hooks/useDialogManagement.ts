@@ -258,6 +258,48 @@ export function useDialogManagement({ t }: UseDialogManagementOptions): UseDialo
     setCurrentPlanApprovalRequest(null);
   }, []);
 
+  // Close the currently visible permission dialog only when the decision belongs
+  // to that request. A late timeout/decision for request A must not dismiss
+  // request B that is already on screen (multi-dialog queue cross-talk).
+  const closePermissionDialogIfCurrent = useCallback((channelId: string) => {
+    pendingPermissionRequestsRef.current = pendingPermissionRequestsRef.current.filter(
+      (item) => item.channelId !== channelId
+    );
+    if (currentPermissionRequestRef.current?.channelId !== channelId) {
+      return;
+    }
+    permissionDialogOpenRef.current = false;
+    currentPermissionRequestRef.current = null;
+    setPermissionDialogOpen(false);
+    setCurrentPermissionRequest(null);
+  }, []);
+
+  const closeAskUserQuestionDialogIfCurrent = useCallback((requestId: string) => {
+    pendingAskUserQuestionRequestsRef.current = pendingAskUserQuestionRequestsRef.current.filter(
+      (item) => item.requestId !== requestId
+    );
+    if (currentAskUserQuestionRequestRef.current?.requestId !== requestId) {
+      return;
+    }
+    askUserQuestionDialogOpenRef.current = false;
+    currentAskUserQuestionRequestRef.current = null;
+    setAskUserQuestionDialogOpen(false);
+    setCurrentAskUserQuestionRequest(null);
+  }, []);
+
+  const closePlanApprovalDialogIfCurrent = useCallback((requestId: string) => {
+    pendingPlanApprovalRequestsRef.current = pendingPlanApprovalRequestsRef.current.filter(
+      (item) => item.requestId !== requestId
+    );
+    if (currentPlanApprovalRequestRef.current?.requestId !== requestId) {
+      return;
+    }
+    planApprovalDialogOpenRef.current = false;
+    currentPlanApprovalRequestRef.current = null;
+    setPlanApprovalDialogOpen(false);
+    setCurrentPlanApprovalRequest(null);
+  }, []);
+
   // Permission handlers
   const handlePermissionApprove = useCallback((channelId: string) => {
     const payload = JSON.stringify({
@@ -267,14 +309,8 @@ export function useDialogManagement({ t }: UseDialogManagementOptions): UseDialo
       rejectMessage: null,
     });
     sendBridgeEvent('permission_decision', payload);
-    pendingPermissionRequestsRef.current = pendingPermissionRequestsRef.current.filter(
-      (item) => item.channelId !== channelId
-    );
-    permissionDialogOpenRef.current = false;
-    currentPermissionRequestRef.current = null;
-    setPermissionDialogOpen(false);
-    setCurrentPermissionRequest(null);
-  }, []);
+    closePermissionDialogIfCurrent(channelId);
+  }, [closePermissionDialogIfCurrent]);
 
   const handlePermissionApproveAlways = useCallback((channelId: string) => {
     const payload = JSON.stringify({
@@ -284,14 +320,8 @@ export function useDialogManagement({ t }: UseDialogManagementOptions): UseDialo
       rejectMessage: null,
     });
     sendBridgeEvent('permission_decision', payload);
-    pendingPermissionRequestsRef.current = pendingPermissionRequestsRef.current.filter(
-      (item) => item.channelId !== channelId
-    );
-    permissionDialogOpenRef.current = false;
-    currentPermissionRequestRef.current = null;
-    setPermissionDialogOpen(false);
-    setCurrentPermissionRequest(null);
-  }, []);
+    closePermissionDialogIfCurrent(channelId);
+  }, [closePermissionDialogIfCurrent]);
 
   const handlePermissionSkip = useCallback((channelId: string) => {
     const payload = JSON.stringify({
@@ -301,14 +331,8 @@ export function useDialogManagement({ t }: UseDialogManagementOptions): UseDialo
       rejectMessage: t('permission.userDenied'),
     });
     sendBridgeEvent('permission_decision', payload);
-    pendingPermissionRequestsRef.current = pendingPermissionRequestsRef.current.filter(
-      (item) => item.channelId !== channelId
-    );
-    permissionDialogOpenRef.current = false;
-    currentPermissionRequestRef.current = null;
-    setPermissionDialogOpen(false);
-    setCurrentPermissionRequest(null);
-  }, [t]);
+    closePermissionDialogIfCurrent(channelId);
+  }, [t, closePermissionDialogIfCurrent]);
 
   // AskUserQuestion handlers
   const handleAskUserQuestionSubmit = useCallback((requestId: string, answers: Record<string, string | string[]>) => {
@@ -317,11 +341,8 @@ export function useDialogManagement({ t }: UseDialogManagementOptions): UseDialo
       answers,
     });
     sendBridgeEvent('ask_user_question_response', payload);
-    askUserQuestionDialogOpenRef.current = false;
-    currentAskUserQuestionRequestRef.current = null;
-    setAskUserQuestionDialogOpen(false);
-    setCurrentAskUserQuestionRequest(null);
-  }, []);
+    closeAskUserQuestionDialogIfCurrent(requestId);
+  }, [closeAskUserQuestionDialogIfCurrent]);
 
   const handleAskUserQuestionCancel = useCallback((requestId: string) => {
     const payload = JSON.stringify({
@@ -329,11 +350,8 @@ export function useDialogManagement({ t }: UseDialogManagementOptions): UseDialo
       answers: {},
     });
     sendBridgeEvent('ask_user_question_response', payload);
-    askUserQuestionDialogOpenRef.current = false;
-    currentAskUserQuestionRequestRef.current = null;
-    setAskUserQuestionDialogOpen(false);
-    setCurrentAskUserQuestionRequest(null);
-  }, []);
+    closeAskUserQuestionDialogIfCurrent(requestId);
+  }, [closeAskUserQuestionDialogIfCurrent]);
 
   // PlanApproval handlers
   const handlePlanApprovalApprove = useCallback((requestId: string, targetMode: string) => {
@@ -343,11 +361,8 @@ export function useDialogManagement({ t }: UseDialogManagementOptions): UseDialo
       targetMode,
     });
     sendBridgeEvent('plan_approval_response', payload);
-    planApprovalDialogOpenRef.current = false;
-    currentPlanApprovalRequestRef.current = null;
-    setPlanApprovalDialogOpen(false);
-    setCurrentPlanApprovalRequest(null);
-  }, []);
+    closePlanApprovalDialogIfCurrent(requestId);
+  }, [closePlanApprovalDialogIfCurrent]);
 
   const handlePlanApprovalReject = useCallback((requestId: string) => {
     const payload = JSON.stringify({
@@ -356,11 +371,8 @@ export function useDialogManagement({ t }: UseDialogManagementOptions): UseDialo
       targetMode: 'default',
     });
     sendBridgeEvent('plan_approval_response', payload);
-    planApprovalDialogOpenRef.current = false;
-    currentPlanApprovalRequestRef.current = null;
-    setPlanApprovalDialogOpen(false);
-    setCurrentPlanApprovalRequest(null);
-  }, []);
+    closePlanApprovalDialogIfCurrent(requestId);
+  }, [closePlanApprovalDialogIfCurrent]);
 
   // Context usage dialog handlers
   const isCurrentContextUsageRequest = useCallback((requestId?: string | null) => {

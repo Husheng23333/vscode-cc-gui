@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next';
 import type {
   ClaudeMessage,
   ClaudeRawMessage,
+  SubagentHistoryResponse,
   ToolResultBlock,
 } from '../types';
 import type { GetToolResultRawFn } from '../contexts/SubagentContext';
@@ -38,6 +39,7 @@ interface UseChatComputationsParams {
   currentProvider: string;
   currentSessionId: string | null;
   currentSessionIdRef: RefObject<string | null>;
+  subagentHistories: Record<string, SubagentHistoryResponse>;
   getMessageText: ReturnType<typeof useMessageProcessing>['getMessageText'];
   getContentBlocks: ReturnType<typeof useMessageProcessing>['getContentBlocks'];
 }
@@ -58,6 +60,7 @@ export function useChatComputations({
   currentProvider,
   currentSessionId,
   currentSessionIdRef,
+  subagentHistories,
   getMessageText,
   getContentBlocks,
 }: UseChatComputationsParams) {
@@ -111,6 +114,9 @@ export function useChatComputations({
   const fileChanges = useFileChanges({
     messages, getContentBlocks, findToolResult,
     startFromIndex: fileChangeMgmt.baseMessageIndex,
+    // Async subagent Write/Edit only appear on sidechain transcripts loaded into
+    // subagentHistories — without this the StatusPanel "编辑" tab stays empty.
+    subagentHistories,
   });
 
   const filteredFileChanges = useMemo(() => {
@@ -125,6 +131,7 @@ export function useChatComputations({
     getContentBlocks,
     findToolResult,
     getToolResultRaw,
+    subagentHistories,
   });
 
   const subagents = useMemo(

@@ -7,6 +7,26 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { getRequestId } from './utils/request-context.js';
+import { getActiveTurnRuntime } from './services/claude/runtime-registry.js';
+
+/**
+ * Resolve which bridge/webview request owns this permission dialog.
+ * Prefer AsyncLocalStorage (concurrent-safe). Fall back to the runtime that is
+ * currently executing a turn — SDK PreToolUse/canUseTool sometimes lose ALS.
+ * Without either id, multi-tab UIs cannot route the dialog and will defer.
+ */
+export function resolveBridgeRequestId(explicitId) {
+  if (typeof explicitId === 'string' && explicitId.trim()) {
+    return explicitId.trim();
+  }
+  const fromAls = getRequestId();
+  if (fromAls) return fromAls;
+  const fromRuntime = getActiveTurnRuntime()?.activeBridgeRequestId;
+  if (typeof fromRuntime === 'string' && fromRuntime.trim()) {
+    return fromRuntime.trim();
+  }
+  return undefined;
+}
 
 // ========== Debug logging ==========
 export function debugLog(tag, message, data = null) {
@@ -134,7 +154,7 @@ export async function requestAskUserQuestionAnswers(input) {
       questions: input.questions || [],
       timestamp: new Date().toISOString(),
       cwd: process.cwd(),
-      bridgeRequestId: getRequestId() || undefined,
+      bridgeRequestId: resolveBridgeRequestId(),
     };
 
     debugLog('ASK_USER_QUESTION_FILE_WRITE', `Writing question request file`, { requestFile, responseFile });
@@ -235,7 +255,7 @@ export async function requestPlanApproval(input) {
       allowedPrompts,
       timestamp: new Date().toISOString(),
       cwd: process.cwd(),
-      bridgeRequestId: getRequestId() || undefined,
+      bridgeRequestId: resolveBridgeRequestId(),
     };
 
     debugLog('PLAN_APPROVAL_FILE_WRITE', `Writing plan approval request file`, { requestFile, responseFile });
@@ -336,12 +356,19 @@ export async function requestPermissionFromJava(toolName, input) {
     const responseFile = join(PERMISSION_DIR, `response-${SESSION_ID}-${requestId}.json`);
 
     // Route the UI dialog to the webview that owns this daemon turn (multi-window).
-    const bridgeRequestId = getRequestId() || undefined;
+    const bridgeRequestId = resolveBridgeRequestId(input?.__bridgeRequestId);
+
+    // Never persist the internal routing marker into the request payload shown in UI.
+    let inputsForUi = input;
+    if (input && typeof input === 'object' && !Array.isArray(input) && '__bridgeRequestId' in input) {
+      const { __bridgeRequestId: _ignored, ...rest } = input;
+      inputsForUi = rest;
+    }
 
     const requestData = {
       requestId,
       toolName,
-      inputs: input,
+      inputs: inputsForUi,
       timestamp: new Date().toISOString(),
       cwd: process.cwd(),
       bridgeRequestId,

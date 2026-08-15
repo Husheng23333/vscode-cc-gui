@@ -3,6 +3,10 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { convertClaudeSessionEntrypoint, cwdMatchesProject, findClaudeSessionFile, isValidSessionId, sanitizeProjectPath, shouldIncludeClaudeHistorySession } from './historyEntrypoint';
+import {
+  isSubagentSidechainCompletedFromJsonl,
+  resolveSubagentSidechainFile,
+} from './subagentSidechain';
 import { loadCodexHistoryRowsFromFile, summarizeCodexHistoryRows, transformCodexHistoryRows } from './codexHistoryTransform';
 import { imageBlockFromLocalPath, restoreClaudeImageReferencesInContent } from './claudeImageRestore';
 import { codemossConfigPath, readCodemossConfigFile, writeCodemossConfigFile } from './codemossJsonStore';
@@ -786,9 +790,16 @@ export class HistoryService {
     const toolUseId = payload.toolUseId ? String(payload.toolUseId) : undefined;
     const agentId = payload.agentId ? String(payload.agentId) : undefined;
     try {
-      const messages = sessionId ? this.readSessionMessages(sessionId) : [];
+      // Claude Code stores background-agent transcripts beside the parent session:
+      //   ~/.claude/projects/<project>/<sessionId>/subagents/agent-<agentId>.jsonl
+      // Reading the parent session JSONL here previously returned the wrong
+      // messages and never set `completed`, so StatusPanel polling could not
+      // recover after a missed live task_notification.
+      const sidechain = this.readSubagentSidechainMessages(sessionId, agentId);
+      const messages = sidechain.messages;
       this.callWebviewJson(webview, 'onSubagentHistoryLoaded', {
         success: messages.length > 0,
+        completed: sidechain.completed,
         sessionId,
         toolUseId,
         agentId,
@@ -798,6 +809,7 @@ export class HistoryService {
     } catch (e: any) {
       this.callWebviewJson(webview, 'onSubagentHistoryLoaded', {
         success: false,
+        completed: false,
         sessionId,
         toolUseId,
         agentId,
@@ -805,6 +817,64 @@ export class HistoryService {
         error: e.message,
       });
     }
+  }
+
+  /**
+   * Locate and parse a background-agent sidechain transcript.
+   * Returns empty messages when the file is not present yet (agent still starting).
+   */
+  private readSubagentSidechainMessages(
+    parentSessionId: string,
+    agentId: string | undefined,
+  ): { messages: any[]; completed: boolean } {
+    if (!parentSessionId || !agentId) {
+      return { messages: [], completed: false };
+    }
+    const filePath = this.findSubagentSidechainFile(parentSessionId, agentId);
+    if (!filePath) {
+      return { messages: [], completed: false };
+    }
+    // Sidechain rows are the same Claude JSONL shape as parent sessions; reuse
+    // the normalizer but do not restore stored user inputs (agents have none).
+    const messages = this.readClaudeSessionFile(filePath, parentSessionId, false);
+    return {
+      messages,
+      completed: this.isSubagentTranscriptCompleted(filePath, messages),
+    };
+  }
+
+  private findSubagentSidechainFile(parentSessionId: string, agentId: string): string | null {
+    const projectsDir = this.getClaudeProjectsDir();
+    if (!fs.existsSync(projectsDir)) return null;
+    return resolveSubagentSidechainFile(
+      projectsDir,
+      this.getClaudeProjectDirsToScan(projectsDir),
+      parentSessionId,
+      agentId,
+    );
+  }
+
+  /**
+   * A sidechain is complete when an assistant message ends with stop_reason
+   * end_turn (or equivalent terminal reasons). Prefer scanning the raw file so
+   * we still detect completion if message normalization drops stop_reason.
+   */
+  private isSubagentTranscriptCompleted(filePath: string, messages: any[]): boolean {
+    try {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      if (isSubagentSidechainCompletedFromJsonl(raw)) return true;
+    } catch {
+      // fall through to message-list heuristic
+    }
+
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (msg?.type !== 'assistant') continue;
+      const stop = msg?.raw?.message?.stop_reason ?? msg?.raw?.stop_reason;
+      if (stop === 'end_turn' || stop === 'stop_sequence') return true;
+      break;
+    }
+    return false;
   }
 
   convertToCliSession(content: string, webview: vscode.Webview): void {

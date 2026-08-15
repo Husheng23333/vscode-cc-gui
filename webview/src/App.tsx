@@ -411,7 +411,7 @@ const App = () => {
     filteredFileChanges, subagents, globalTodos, rewindableMessages, sessionTitle,
   } = useChatComputations({
     t, messages, mergedMessages, customSessionTitle, streamingActive, currentProvider,
-    currentSessionId, currentSessionIdRef,
+    currentSessionId, currentSessionIdRef, subagentHistories,
     getMessageText, getContentBlocks,
   });
 

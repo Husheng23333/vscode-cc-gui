@@ -24,6 +24,9 @@ const BUILTIN_COMMIT_PROMPT = `你是一个专门负责 GitHub commit 的高级�
 - 保持简洁专业
 - **必须用 \`<commit></commit>\` 标签包裹，标签外不要有任何内容**
 - 语言默认使用英文
+- **type/scope 冒号后必须有一个空格**（正确：\`feat: add login\`，错误：\`feat:add login\`）
+- **单词之间必须有空格**，禁止把多个变更粘成无空格长串
+- 多条独立变更：主题只写一句概括，细节放到 body 分点列表，不要用连字符硬拼进主题行
 
 ## 提交类型映射
 
@@ -128,6 +131,7 @@ export function buildCommitPrompt(diff: string, userAdditionalPrompt = '', proje
     '重要规则：',
     '1. 必须使用 <commit> 和 </commit> 标签包裹',
     '2. 标签外不要有任何其他内容（不要分析、不要解释、不要说明）',
+    '3. 冒号后必须有空格；单词之间必须有空格',
   ].join('\n'));
 
   return prompt.join('\n\n');
@@ -143,7 +147,9 @@ export function cleanupCommitMessage(message: string | null | undefined): string
   const endIdx = cleaned.indexOf(COMMIT_TAG_END);
 
   if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-    return convertLiteralNewlines(cleaned.slice(startIdx + COMMIT_TAG_START.length, endIdx).trim());
+    return normalizeCommitMessage(
+      convertLiteralNewlines(cleaned.slice(startIdx + COMMIT_TAG_START.length, endIdx).trim()),
+    );
   }
 
   if (cleaned.includes('```')) {
@@ -152,7 +158,9 @@ export function cleanupCommitMessage(message: string | null | undefined): string
     if (contentStart !== -1) {
       const codeBlockEnd = cleaned.indexOf('```', contentStart);
       if (codeBlockEnd !== -1) {
-        return convertLiteralNewlines(cleaned.slice(contentStart + 1, codeBlockEnd).trim());
+        return normalizeCommitMessage(
+          convertLiteralNewlines(cleaned.slice(contentStart + 1, codeBlockEnd).trim()),
+        );
       }
     }
   }
@@ -160,7 +168,7 @@ export function cleanupCommitMessage(message: string | null | undefined): string
   const lines = cleaned.split('\n');
   for (let idx = 0; idx < lines.length; idx++) {
     const line = lines[idx].trim();
-    if (!isConventionalCommitLine(line)) {
+    if (!isConventionalCommitLine(line) && !isLooseConventionalCommitLine(line)) {
       continue;
     }
 
@@ -182,7 +190,7 @@ export function cleanupCommitMessage(message: string | null | undefined): string
         break;
       }
     }
-    return convertLiteralNewlines(result.join('\n').trim());
+    return normalizeCommitMessage(convertLiteralNewlines(result.join('\n').trim()));
   }
 
   const fallback: string[] = [];
@@ -199,7 +207,91 @@ export function cleanupCommitMessage(message: string | null | undefined): string
     }
   }
 
-  return convertLiteralNewlines(fallback.join('\n').trim());
+  return normalizeCommitMessage(convertLiteralNewlines(fallback.join('\n').trim()));
+}
+
+/**
+ * Repair common model / streaming artifacts in conventional commit text.
+ * - ensure space after `type:` / `type(scope):`
+ * - split hyphen-glued multi-change subjects into subject + body bullets
+ */
+export function normalizeCommitMessage(message: string): string {
+  if (!message) {
+    return '';
+  }
+
+  const text = convertLiteralNewlines(message).trim();
+  if (!text) {
+    return '';
+  }
+
+  const lines = text.split('\n');
+  const subjectRaw = lines[0]?.trim() ?? '';
+  const rest = lines.slice(1);
+
+  const match = subjectRaw.match(
+    /^(feat|fix|refactor|docs|test|chore|perf|ci|style|build|revert)(\([^)]+\))?(!)?:\s*(.*)$/i,
+  );
+  if (!match) {
+    return text;
+  }
+
+  const type = match[1].toLowerCase();
+  const scope = match[2] ?? '';
+  const breaking = match[3] ?? '';
+  let description = (match[4] ?? '').trim();
+
+  // Hyphen-glued multi-change dump: "RefreshFoo-RewordBar-KeepBaz"
+  const hyphenParts = description
+    .split('-')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const looksGlued =
+    hyphenParts.length >= 2
+    && !description.includes(' ')
+    && hyphenParts.every((part) => /^[A-Za-z]/.test(part) && part.length >= 4);
+
+  let bodyFromSubject: string[] = [];
+  if (looksGlued) {
+    description = humanizeGluedSegment(hyphenParts[0]);
+    bodyFromSubject = hyphenParts.slice(1).map((part) => `- ${humanizeGluedSegment(part)}`);
+  } else {
+    description = softSpaceCamelCase(description);
+  }
+
+  // Cap extremely long subjects after repair
+  if (description.length > 72) {
+    const cut = description.slice(0, 72);
+    const lastSpace = cut.lastIndexOf(' ');
+    description = (lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trim();
+  }
+
+  const subject = `${type}${scope}${breaking}: ${description}`.replace(/:\s+/, ': ').trim();
+  const bodyLines = [...bodyFromSubject, ...rest.map((line) => line.trimEnd())]
+    .join('\n')
+    .replace(/^\n+/, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return bodyLines ? `${subject}\n\n${bodyLines}` : subject;
+}
+
+/** "Refreshcommentsandeditorstate" → keep as-is if no camelCase cues; soft-split camelCase. */
+function humanizeGluedSegment(segment: string): string {
+  const spaced = softSpaceCamelCase(segment);
+  // Prefer sentence case for bullet/subject fragments that start with a capital run
+  if (/^[A-Z]/.test(spaced)) {
+    return spaced.charAt(0).toLowerCase() + spaced.slice(1);
+  }
+  return spaced;
+}
+
+function softSpaceCamelCase(text: string): string {
+  return text
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 export function getUserAdditionalPrompt(prompt: string): string {
@@ -227,6 +319,11 @@ function convertLiteralNewlines(text: string): string {
 
 function isConventionalCommitLine(line: string): boolean {
   return /^(feat|fix|refactor|docs|test|chore|perf|ci|style|build|revert)(\([^)]+\))?!?:\s+\S/.test(line);
+}
+
+/** Accepts `chore:Foo` (missing space) so cleanup can still recover it. */
+function isLooseConventionalCommitLine(line: string): boolean {
+  return /^(feat|fix|refactor|docs|test|chore|perf|ci|style|build|revert)(\([^)]+\))?!?:\S/.test(line);
 }
 
 function isAnalysisSection(line: string): boolean {
