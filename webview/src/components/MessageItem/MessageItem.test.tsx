@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ClaudeContentBlock, ClaudeMessage, ToolResultBlock } from '../../types';
 import { extractMarkdownContent } from '../../utils/copyUtils';
@@ -16,12 +16,49 @@ vi.mock('../toolBlocks', () => ({
   BashToolBlock: () => <div data-testid="bash-tool-block">bash</div>,
   BashToolGroupBlock: () => <div data-testid="bash-tool-group-block">bash-group</div>,
   SearchToolGroupBlock: () => <div data-testid="search-tool-group-block">search-group</div>,
+  AgentGroupBlock: () => <div data-testid="agent-group-block">agent-group</div>,
 }));
 
+// Lightweight stand-in that still honors expand state + toggle so MessageItem
+// can own thinking open/close logic without pulling in the full renderer.
 vi.mock('./ContentBlockRenderer', () => ({
-  ContentBlockRenderer: ({ block }: { block: ClaudeContentBlock }) => (
-    <div data-testid={`content-block-${block.type}`}>{block.type}</div>
-  ),
+  ContentBlockRenderer: ({
+    block,
+    isThinkingExpanded,
+    isThinking,
+    isLastMessage,
+    isLastBlock,
+    onToggleThinking,
+    t: translate,
+  }: {
+    block: ClaudeContentBlock;
+    isThinkingExpanded?: boolean;
+    isThinking?: boolean;
+    isLastMessage?: boolean;
+    isLastBlock?: boolean;
+    onToggleThinking?: () => void;
+    t: (key: string) => string;
+  }) => {
+    if (block.type === 'thinking') {
+      const title =
+        isThinking && isLastMessage && isLastBlock
+          ? translate('common.thinkingProcess')
+          : translate('common.thinking');
+      const body = (block as { thinking?: string; text?: string }).thinking
+        ?? (block as { text?: string }).text
+        ?? '';
+      return (
+        <div data-testid="content-block-thinking">
+          <div onClick={onToggleThinking}>
+            <span>{title}</span>
+            <span>{isThinkingExpanded ? '▼' : '▶'}</span>
+          </div>
+          {isThinkingExpanded ? <div data-testid="markdown-block">{body}</div> : null}
+        </div>
+      );
+    }
+    return <div data-testid={`content-block-${block.type}`}>{block.type}</div>;
+  },
 }));
 
 vi.mock('./ProviderNotConfiguredCard', () => ({
@@ -31,6 +68,9 @@ vi.mock('./ProviderNotConfiguredCard', () => ({
 
 const t = ((key: string, opts?: Record<string, string>) => {
   const translations: Record<string, string> = {
+    'common.thinking': '思考',
+    'common.thinkingProcess': '思考过程',
+    'chat.noThinkingContent': '无思考内容',
     'markdown.copyMessage': '复制消息',
     'markdown.copySuccess': '已复制',
     'chat.streamingConnected': '已连接',
@@ -336,3 +376,144 @@ describe('MessageItem token usage display', () => {
     expect(screen.queryByText(/输入/)).toBeNull();
   });
 });
+
+function makeThinkingMessage(thinkingText: string, extraBlocks: ClaudeContentBlock[] = []): ClaudeMessage {
+  return {
+    type: 'assistant',
+    content: thinkingText,
+    raw: {
+      content: [
+        {
+          type: 'thinking',
+          thinking: thinkingText,
+          text: thinkingText,
+        },
+        ...extraBlocks,
+      ],
+    },
+  } as ClaudeMessage;
+}
+
+function renderThinkingMessage(
+  message: ClaudeMessage,
+  options: { streamingActive?: boolean; isThinking?: boolean; isLast?: boolean } = {},
+) {
+  return render(
+    <MessageItem
+      message={message}
+      messageIndex={0}
+      messageKey="message-0"
+      isLast={options.isLast ?? true}
+      streamingActive={options.streamingActive ?? true}
+      isThinking={options.isThinking ?? true}
+      t={t}
+      getMessageText={getMessageText}
+      getContentBlocks={getContentBlocks}
+      findToolResult={findToolResult}
+      extractMarkdownContent={extractMarkdownContent}
+    />,
+  );
+}
+
+describe('MessageItem thinking collapse during conversation', () => {
+  it('auto-expands the latest thinking block while streaming', () => {
+    renderThinkingMessage(makeThinkingMessage('auto expand me'));
+
+    expect(screen.getByTestId('markdown-block')).toBeTruthy();
+    expect(screen.getByText('auto expand me')).toBeTruthy();
+    expect(screen.getByText('▼')).toBeTruthy();
+  });
+
+  it('lets the user collapse thinking while streaming and keeps it collapsed as content grows', () => {
+    const { rerender } = renderThinkingMessage(makeThinkingMessage('first chunk'));
+
+    expect(screen.getByText('first chunk')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('思考过程'));
+
+    expect(screen.queryByText('first chunk')).toBeNull();
+    expect(screen.getByText('▶')).toBeTruthy();
+
+    rerender(
+      <MessageItem
+        message={makeThinkingMessage('first chunk\nsecond chunk of reasoning')}
+        messageIndex={0}
+        messageKey="message-0"
+        isLast
+        streamingActive
+        isThinking
+        t={t}
+        getMessageText={getMessageText}
+        getContentBlocks={getContentBlocks}
+        findToolResult={findToolResult}
+        extractMarkdownContent={extractMarkdownContent}
+      />,
+    );
+
+    expect(screen.queryByText(/second chunk/)).toBeNull();
+    expect(screen.getByText('▶')).toBeTruthy();
+  });
+
+  it('lets the user re-expand after collapsing during streaming', () => {
+    renderThinkingMessage(makeThinkingMessage('toggle me'));
+
+    fireEvent.click(screen.getByText('思考过程'));
+    expect(screen.queryByText('toggle me')).toBeNull();
+
+    fireEvent.click(screen.getByText('思考过程'));
+    expect(screen.getByText('toggle me')).toBeTruthy();
+    expect(screen.getByText('▼')).toBeTruthy();
+  });
+
+  it('keeps a user-collapsed thinking block collapsed when a later tool block arrives', () => {
+    const { rerender } = renderThinkingMessage(makeThinkingMessage('keep me closed'));
+
+    fireEvent.click(screen.getByText('思考过程'));
+    expect(screen.queryByText('keep me closed')).toBeNull();
+
+    const withTool = makeThinkingMessage('keep me closed', [
+      {
+        type: 'tool_use',
+        id: 'tool-1',
+        name: 'Bash',
+        input: { command: 'ls' },
+      } as ClaudeContentBlock,
+    ]);
+
+    rerender(
+      <MessageItem
+        message={withTool}
+        messageIndex={0}
+        messageKey="message-0"
+        isLast
+        streamingActive
+        isThinking
+        t={t}
+        getMessageText={getMessageText}
+        getContentBlocks={getContentBlocks}
+        findToolResult={findToolResult}
+        extractMarkdownContent={extractMarkdownContent}
+      />,
+    );
+
+    expect(screen.queryByText('keep me closed')).toBeNull();
+    expect(screen.getByText('▶')).toBeTruthy();
+  });
+
+  it('allows collapsing thinking after the stream has ended', () => {
+    renderThinkingMessage(makeThinkingMessage('finished turn'), {
+      streamingActive: false,
+      isThinking: false,
+    });
+
+    expect(screen.queryByText('finished turn')).toBeNull();
+    expect(screen.getByText('▶')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('思考'));
+    expect(screen.getByText('finished turn')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('思考'));
+    expect(screen.queryByText('finished turn')).toBeNull();
+  });
+});
+

@@ -363,22 +363,21 @@ export const MessageItem = memo(function MessageItem({
 
   // Manage thinking expansion state locally to avoid prop drilling and unnecessary re-renders
   const [expandedThinking, setExpandedThinking] = useState<Record<number, boolean>>({});
-  // Track which thinking blocks were manually expanded by the user
-  const [manuallyExpandedThinking, setManuallyExpandedThinking] = useState<Record<number, boolean>>({});
+  // Indices the user has manually toggled. Once set, auto-expand during
+  // streaming must not override that choice (collapse or expand).
+  // Previously this stored the expanded boolean itself, so a manual collapse
+  // looked identical to "never touched" and streaming re-opened the block.
+  const [userControlledThinking, setUserControlledThinking] = useState<Record<number, true>>({});
 
   const toggleThinking = useCallback((blockIndex: number) => {
-    setExpandedThinking((prev) => {
-      const newExpanded = !prev[blockIndex];
-      // Mark this block as manually toggled by the user
-      setManuallyExpandedThinking((manualPrev) => ({
-        ...manualPrev,
-        [blockIndex]: newExpanded,
-      }));
-      return {
-        ...prev,
-        [blockIndex]: newExpanded,
-      };
-    });
+    setUserControlledThinking((prev) => ({
+      ...prev,
+      [blockIndex]: true,
+    }));
+    setExpandedThinking((prev) => ({
+      ...prev,
+      [blockIndex]: !prev[blockIndex],
+    }));
   }, []);
 
   const isThinkingExpanded = useCallback(
@@ -471,7 +470,8 @@ export const MessageItem = memo(function MessageItem({
   // Ref to track the last auto-expanded thinking block index to avoid overriding user interaction
   const lastAutoExpandedIndexRef = useRef<number>(-1);
 
-  // Auto-expand the latest thinking block during streaming
+  // Auto-expand the latest thinking block during streaming, but never override
+  // a block the user has already toggled in this message.
   useEffect(() => {
     if (!isMessageStreaming) return;
 
@@ -486,22 +486,21 @@ export const MessageItem = memo(function MessageItem({
     if (lastThinkingIndex !== lastAutoExpandedIndexRef.current) {
       setExpandedThinking((prev) => {
         const newState = { ...prev };
-        // Only collapse thinking blocks that were NOT manually expanded by the user
+        // Collapse older thinking blocks that the user has not taken control of
         thinkingIndices.forEach((idx) => {
-          // Preserve manually expanded state
-          if (!manuallyExpandedThinking[idx]) {
+          if (!userControlledThinking[idx] && idx !== lastThinkingIndex) {
             newState[idx] = false;
           }
         });
-        // Auto-expand the latest one (unless user manually collapsed it)
-        if (!manuallyExpandedThinking[lastThinkingIndex] || prev[lastThinkingIndex] === undefined) {
+        // Auto-expand the latest one only if the user has not toggled it
+        if (!userControlledThinking[lastThinkingIndex]) {
           newState[lastThinkingIndex] = true;
         }
         return newState;
       });
       lastAutoExpandedIndexRef.current = lastThinkingIndex;
     }
-  }, [renderedBlocks, isMessageStreaming, manuallyExpandedThinking]);
+  }, [renderedBlocks, isMessageStreaming, userControlledThinking]);
 
   const groupedBlocks = useMemo(() => groupBlocks(renderedBlocks), [renderedBlocks]);
 
