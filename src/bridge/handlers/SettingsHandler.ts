@@ -185,11 +185,25 @@ export class SettingsHandler implements BridgeHandler {
         return true;
 
       case 'get_auto_open_file_enabled':
-        postJson(webview, 'update_auto_open_file_enabled', { autoOpenFileEnabled: this.store.getAutoOpenFileEnabled() });
+        {
+          const autoOpenFileEnabled = this.store.getAutoOpenFileEnabled();
+          postJson(webview, 'update_auto_open_file_enabled', { autoOpenFileEnabled });
+          // Startup / remount: if the setting is already on, push after the gate opens.
+          if (autoOpenFileEnabled) {
+            this.context.callbacks.getActiveFile(webview);
+          }
+        }
         return true;
       case 'set_auto_open_file_enabled':
         await this.store.setAutoOpenFileEnabled(content);
-        postJson(webview, 'update_auto_open_file_enabled', { autoOpenFileEnabled: this.store.getAutoOpenFileEnabled() });
+        {
+          const autoOpenFileEnabled = this.store.getAutoOpenFileEnabled();
+          postJson(webview, 'update_auto_open_file_enabled', { autoOpenFileEnabled });
+          // Re-sync current editor file when the user turns the feature back on.
+          if (autoOpenFileEnabled) {
+            this.context.callbacks.getActiveFile(webview);
+          }
+        }
         return true;
 
       case 'get_thinking_enabled':

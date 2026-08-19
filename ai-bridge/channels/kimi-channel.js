@@ -4,6 +4,7 @@
  */
 import { sendMessage as kimiSendMessage } from '../services/kimi/message-service.js';
 import { listModels as kimiListModels } from '../services/kimi/models-service.js';
+import { applyOpenedFilesToCliMessage } from '../services/cli-opened-files.js';
 
 /**
  * Execute a Kimi command.
@@ -21,9 +22,10 @@ export async function handleKimiCommand(command, args, stdinData) {
           cwd,
           model,
           reasoningEffort,
+          openedFiles,
         } = stdinData;
         await kimiSendMessage(
-          message,
+          applyOpenedFilesToCliMessage(message, openedFiles || null),
           sessionId || '',
           cwd || '',
           model || '',

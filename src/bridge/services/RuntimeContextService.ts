@@ -187,8 +187,14 @@ export class RuntimeContextService implements vscode.Disposable {
   enrichSendParams(params: Record<string, any>, options: EnrichSendParamsOptions = {}): void {
     const fileTags = Array.isArray(params.fileTags) ? params.fileTags as FileTagInfo[] : [];
     const includeEditorContext = options.includeEditorContext ?? true;
+    const contextBarFile = typeof params.contextBarFile === 'string'
+      ? params.contextBarFile.trim()
+      : '';
     if (includeEditorContext || fileTags.length > 0) {
-      const generated = this.buildOpenedFilesContext(fileTags, { includeEditorContext });
+      const generated = this.buildOpenedFilesContext(fileTags, {
+        includeEditorContext,
+        contextBarFile: contextBarFile || undefined,
+      });
       params.openedFiles = this.mergeOpenedFiles(params.openedFiles, generated);
     }
 
@@ -203,7 +209,7 @@ export class RuntimeContextService implements vscode.Disposable {
 
   private buildOpenedFilesContext(
     fileTags: FileTagInfo[],
-    options: { includeEditorContext: boolean },
+    options: { includeEditorContext: boolean; contextBarFile?: string },
   ): OpenedFilesContext {
     const workspaceRoot = this.getWorkspacePath() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
     const context: OpenedFilesContext = options.includeEditorContext
@@ -233,6 +239,10 @@ export class RuntimeContextService implements vscode.Disposable {
         } else {
           context.active = filePath;
         }
+      } else if (options.contextBarFile) {
+        // Webview focus can clear activeTextEditor; ContextBar chip is the user's
+        // visible "selected for AI" file and must still reach the model.
+        context.active = options.contextBarFile.replace(/^@/, '');
       }
 
       const otherFiles = new Set<string>();

@@ -38,6 +38,10 @@ import { PermissionIpcService } from './bridge/services/PermissionIpcService';
 import { ProviderStore } from './bridge/services/ProviderStore';
 import { SlashCommandService } from './bridge/services/SlashCommandService';
 import { SettingsStore } from './bridge/services/SettingsStore';
+import {
+  formatActiveFileSelectionInfo,
+  shouldSyncActiveFileToWebview,
+} from './bridge/activeFileSync';
 import { sanitizeUserMessagePayload } from './bridge/services/userMessageSanitizer';
 import type { SessionTemplate } from './sessionTemplate';
 import type { RuntimeProviderId } from './bridge/types';
@@ -576,6 +580,10 @@ export class BridgeServer {
   private _pushActiveFile(editor?: vscode.TextEditor, targetWebview?: vscode.Webview) {
     const webview = targetWebview ?? this._webview;
     if (!webview) return;
+    // Respect "发送打开的文件路径" — when closed, do not auto-select files in ContextBar.
+    if (!shouldSyncActiveFileToWebview(this._settingsStore.getAutoOpenFileEnabled())) {
+      return;
+    }
     if (!editor || editor.document.uri.scheme !== 'file') {
       return;
     }
@@ -584,15 +592,12 @@ export class BridgeServer {
     const sel = editor.selection;
     const startLine = sel.start.line + 1;
     const endLine = sel.end.line + 1;
-
-    let selectionInfo: string;
-    if (!sel.isEmpty) {
-      selectionInfo = startLine === endLine
-        ? `@${filePath}#L${startLine}`
-        : `@${filePath}#L${startLine}-${endLine}`;
-    } else {
-      selectionInfo = `@${filePath}`;
-    }
+    const selectionInfo = formatActiveFileSelectionInfo(
+      filePath,
+      startLine,
+      endLine,
+      sel.isEmpty,
+    );
 
     webview.postMessage({ type: 'add_selection_info', content: selectionInfo });
   }
