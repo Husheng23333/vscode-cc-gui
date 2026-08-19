@@ -154,6 +154,7 @@ export const AppDialogs = ({
         onCancel={onCancelInterrupt}
       />
       <PermissionDialog
+        key={currentPermissionRequest?.channelId ?? 'permission-idle'}
         isOpen={permissionDialogOpen}
         request={currentPermissionRequest}
         onApprove={handlePermissionApprove}
@@ -162,6 +163,7 @@ export const AppDialogs = ({
         timeoutSeconds={permissionDialogTimeoutSeconds}
       />
       <AskUserQuestionDialog
+        key={currentAskUserQuestionRequest?.requestId ?? 'ask-idle'}
         isOpen={askUserQuestionDialogOpen}
         request={currentAskUserQuestionRequest}
         onSubmit={handleAskUserQuestionSubmit}
@@ -169,6 +171,7 @@ export const AppDialogs = ({
         timeoutSeconds={permissionDialogTimeoutSeconds}
       />
       <PlanApprovalDialog
+        key={currentPlanApprovalRequest?.requestId ?? 'plan-idle'}
         isOpen={planApprovalDialogOpen}
         request={currentPlanApprovalRequest}
         onApprove={handlePlanApprovalApprove}

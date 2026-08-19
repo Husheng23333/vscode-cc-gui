@@ -30,6 +30,8 @@ export class PermissionIpcService implements vscode.Disposable {
   private readonly getWebview: () => vscode.Webview | undefined;
   /** Map daemon/bridge request id → owning webview (multi-window routing). */
   private readonly getWebviewForBridgeRequestId?: (bridgeRequestId: string) => vscode.Webview | undefined;
+  /** Number of live CC GUI webviews (tabs/sidebars). Used to avoid cross-tab fallback. */
+  private readonly getKnownWebviewCount?: () => number;
   private readonly globalState?: vscode.Memento;
 
   constructor(
@@ -37,15 +39,25 @@ export class PermissionIpcService implements vscode.Disposable {
     getWebview: () => vscode.Webview | undefined,
     globalState?: vscode.Memento,
     getWebviewForBridgeRequestId?: (bridgeRequestId: string) => vscode.Webview | undefined,
+    getKnownWebviewCount?: () => number,
   ) {
     this.log = log;
     this.getWebview = getWebview;
     this.globalState = globalState;
     this.getWebviewForBridgeRequestId = getWebviewForBridgeRequestId;
+    this.getKnownWebviewCount = getKnownWebviewCount;
   }
 
   /**
-   * Prefer the webview that owns the in-flight bridge request; fall back to last webview.
+   * Resolve which webview should show a permission / ask / plan dialog.
+   *
+   * Multi-window rule: when a bridgeRequestId is present, ONLY that turn's
+   * webview may show the dialog. Falling back to the "last active" webview
+   * causes cross-talk (串台) — dialogs from tab A pop on tab B / every page.
+   * If the mapping is not ready yet, return undefined so the scanner defers.
+   *
+   * When bridgeRequestId is missing: only fall back to the last active webview
+   * if a single webview is open. With multiple tabs, defer to avoid 串台.
    */
   private resolveTargetWebview(bridgeRequestId?: string | null): vscode.Webview | undefined {
     if (bridgeRequestId && this.getWebviewForBridgeRequestId) {
@@ -54,8 +66,17 @@ export class PermissionIpcService implements vscode.Disposable {
         return owned;
       }
       this.log.appendLine(
-        `[BRIDGE] No webview mapped for bridgeRequestId=${bridgeRequestId}; falling back to default webview`,
+        `[BRIDGE] No webview mapped for bridgeRequestId=${bridgeRequestId}; deferring dialog (no cross-tab fallback)`,
       );
+      return undefined;
+    }
+
+    const knownCount = this.getKnownWebviewCount?.() ?? 0;
+    if (knownCount > 1) {
+      this.log.appendLine(
+        `[BRIDGE] Permission dialog missing bridgeRequestId with ${knownCount} webviews; deferring (no cross-tab fallback)`,
+      );
+      return undefined;
     }
     return this.getWebview();
   }

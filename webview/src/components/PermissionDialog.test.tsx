@@ -1,6 +1,10 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import PermissionDialog, { type PermissionRequest } from './PermissionDialog';
+import PermissionDialog, {
+  formatPermissionWorkingDirectoryDisplay,
+  resolvePermissionWorkingDirectory,
+  type PermissionRequest,
+} from './PermissionDialog';
 import { resetLinkifyCapabilities, setLinkifyCapabilities } from '../utils/linkifyCapabilities';
 
 vi.mock('../hooks/useDialogResize', () => ({
@@ -24,6 +28,50 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+describe('resolvePermissionWorkingDirectory', () => {
+  it('prefers top-level cwd from the bridge over inputs', () => {
+    expect(
+      resolvePermissionWorkingDirectory({
+        cwd: '/Users/hpstream/project',
+        inputs: { cwd: '/tmp/other' },
+      }),
+    ).toBe('/Users/hpstream/project');
+  });
+
+  it('falls back to inputs.cwd then file_path/path', () => {
+    expect(
+      resolvePermissionWorkingDirectory({
+        inputs: { cwd: 'src/components' },
+      }),
+    ).toBe('src/components');
+    expect(
+      resolvePermissionWorkingDirectory({
+        inputs: { file_path: 'README.md' },
+      }),
+    ).toBe('README.md');
+  });
+
+  it('returns ~ when cwd is missing or blank (no double tilde source)', () => {
+    expect(resolvePermissionWorkingDirectory({ inputs: {} })).toBe('~');
+    expect(resolvePermissionWorkingDirectory({ cwd: '  ', inputs: { cwd: '' } })).toBe('~');
+  });
+});
+
+describe('formatPermissionWorkingDirectoryDisplay', () => {
+  it('never produces a double tilde label', () => {
+    expect(formatPermissionWorkingDirectoryDisplay('~')).toBe('~');
+    expect(formatPermissionWorkingDirectoryDisplay('')).toBe('~');
+    expect(formatPermissionWorkingDirectoryDisplay('  ')).toBe('~');
+  });
+
+  it('keeps absolute and home-relative paths intact', () => {
+    expect(formatPermissionWorkingDirectoryDisplay('/Users/hpstream/project')).toBe(
+      '/Users/hpstream/project',
+    );
+    expect(formatPermissionWorkingDirectoryDisplay('~/Desktop')).toBe('~/Desktop');
+  });
+});
+
 describe('PermissionDialog', () => {
   const buildRequest = (overrides: Partial<PermissionRequest> = {}): PermissionRequest => ({
     channelId: 'perm-1',
@@ -43,6 +91,43 @@ describe('PermissionDialog', () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it('renders a single working-directory label (not "→ ~ ~") when cwd is missing', () => {
+    render(
+      <PermissionDialog
+        isOpen
+        request={buildRequest({ cwd: undefined, inputs: { command: 'echo CCG_CLEAR_TEST_2134' } })}
+        onApprove={() => {}}
+        onSkip={() => {}}
+        onApproveAlways={() => {}}
+      />,
+    );
+
+    const path = document.querySelector('.command-path');
+    // Arrow and cwd are separate nodes spaced by CSS gap (textContent may be "→~")
+    expect(path?.querySelector('.command-arrow')?.textContent).toBe('→');
+    expect(path?.querySelector('.command-cwd')?.textContent).toBe('~');
+    expect(path?.textContent).not.toMatch(/~\s*~/);
+  });
+
+  it('renders top-level bridge cwd in the path header', () => {
+    render(
+      <PermissionDialog
+        isOpen
+        request={buildRequest({
+          cwd: '/Users/hpstream/Desktop/github/vscode-cc-gui',
+          inputs: { command: 'echo hello' },
+        })}
+        onApprove={() => {}}
+        onSkip={() => {}}
+        onApproveAlways={() => {}}
+      />,
+    );
+
+    expect(document.querySelector('.command-cwd')?.textContent).toBe(
+      '/Users/hpstream/Desktop/github/vscode-cc-gui',
+    );
   });
 
   it('reuses MarkdownBlock linkify inside the command content area', () => {

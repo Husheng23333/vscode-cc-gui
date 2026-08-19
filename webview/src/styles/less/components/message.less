@@ -927,6 +927,8 @@
     opacity: 0.8;
 }
 
+/* Body is only mounted when expanded (see ContentBlockRenderer). The
+   `.expanded` class remains for styling hooks / future transitions. */
 .thinking-content {
     margin-top: 8px;
     padding-left: 12px;
@@ -938,6 +940,10 @@
     word-wrap: break-word;
     overflow-wrap: break-word;
     max-width: 100%;
+}
+
+.thinking-content:not(.expanded) {
+    display: none;
 }
 
 .thinking-content .markdown-content {

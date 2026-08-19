@@ -13,6 +13,26 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    version: '0.1.5',
+    date: '2026-08-19',
+    content: {
+      en: `- Bump version to 0.1.5
+- Fix auto-open-file: closing the setting no longer keeps auto-selecting ContextBar files
+- Inject active file path into CLI providers (OpenCode / Grok / Kimi / Pi) so path questions work
+- Use ContextBar chip path as send fallback when active editor is unavailable
+- Track async subagents, sidechain edits, and multi-window permissions more reliably
+- Allow collapsing thinking blocks during conversation
+- Stop title-generation logs from leaking into chat; improve DeepSeek UX`,
+      zh: `- 版本升级到 0.1.5
+- 修复关闭「发送打开的文件路径」后 ContextBar 仍自动选中文件
+- CLI Provider（OpenCode / Grok / Kimi / Pi）发送时注入当前活动文件路径
+- ContextBar 芯片路径作为发送回退，避免 webview 焦点丢失编辑器上下文
+- 异步子代理跟踪、侧链编辑与多窗口权限稳定性改进
+- 允许对话中折叠 thinking 块
+- 修复标题生成日志泄漏到聊天；优化 DeepSeek UX`,
+    },
+  },
+  {
     version: '0.1.3',
     date: '2026-08-12',
     content: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PROVIDER_PRESETS } from './provider';
+import { CODEX_PROVIDER_PRESETS, PROVIDER_PRESETS } from './provider';
 
 describe('PROVIDER_PRESETS', () => {
   it('uses the current DeepSeek Anthropic-compatible defaults', () => {
@@ -23,5 +23,11 @@ describe('PROVIDER_PRESETS', () => {
       ANTHROPIC_DEFAULT_SONNET_MODEL: 'mimo-v2.5-pro',
       ANTHROPIC_DEFAULT_OPUS_MODEL: 'mimo-v2.5-pro',
     });
+  });
+});
+
+describe('CODEX_PROVIDER_PRESETS', () => {
+  it('does not include DeepSeek (Claude Anthropic-compatible only)', () => {
+    expect(CODEX_PROVIDER_PRESETS.find(preset => preset.id === 'deepseek')).toBeUndefined();
   });
 });

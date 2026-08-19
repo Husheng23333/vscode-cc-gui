@@ -176,14 +176,27 @@ export async function canUseTool(toolName, input, options = {}) {
 
   // All other tools require explicit permission
   debugLog('PERMISSION_NEEDED', `Tool ${toolName} requires permission, calling requestPermissionFromJava`);
-  const allowed = await requestPermissionFromJava(toolName, input);
+  // Prefer explicit bridgeRequestId from the runtime-bound canUseTool wrapper so
+  // multi-tab permission dialogs never fall back to the "active" webview.
+  const permissionInput = (input && typeof input === 'object' && !Array.isArray(input))
+    ? {
+        ...input,
+        ...(typeof options?.bridgeRequestId === 'string' && options.bridgeRequestId
+          ? { __bridgeRequestId: options.bridgeRequestId }
+          : {}),
+      }
+    : input;
+  const allowed = await requestPermissionFromJava(toolName, permissionInput);
   const elapsed = Date.now() - callStartTime;
+
+  // Never forward the internal routing marker to the tool itself.
+  const sanitizedInput = stripInternalPermissionFields(input);
 
   if (allowed) {
     debugLog('PERMISSION_GRANTED', `User allowed ${toolName}`, { elapsed: `${elapsed}ms` });
     return {
       behavior: 'allow',
-      updatedInput: input
+      updatedInput: sanitizedInput
     };
   } else {
     debugLog('PERMISSION_DENIED', `User denied ${toolName}`, { elapsed: `${elapsed}ms` });
@@ -192,4 +205,15 @@ export async function canUseTool(toolName, input, options = {}) {
       message: `User denied permission for ${toolName} tool`
     };
   }
+}
+
+function stripInternalPermissionFields(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return input;
+  }
+  if (!Object.prototype.hasOwnProperty.call(input, '__bridgeRequestId')) {
+    return input;
+  }
+  const { __bridgeRequestId: _ignored, ...rest } = input;
+  return rest;
 }

@@ -19,6 +19,12 @@ describe('modelIconMapping', () => {
     expect(resolveIconVendor('xiaomi-plan')).toBe('xiaomi');
   });
 
+  it('resolves DeepSeek mapped models before falling back to Claude provider icons', () => {
+    expect(resolveModelVendor('deepseek-v4-pro[1m]')).toBe('deepseek');
+    expect(resolveModelVendor('deepseek-v4-flash')).toBe('deepseek');
+    expect(resolveIconVendor('claude', 'deepseek-v4-pro[1m]')).toBe('deepseek');
+  });
+
   it('resolves expanded third-party provider preset icons', () => {
     expect(resolveIconVendor('kimi-coding')).toBe('kimi');
     expect(resolveIconVendor('bailian')).toBe('bailian');

@@ -644,6 +644,15 @@ if (typeof window !== 'undefined' && !window.updateSendShortcut) {
   };
 }
 
+// Pre-register updateAutoOpenFileEnabled to handle backend status responses that arrive before React initializes
+if (typeof window !== 'undefined' && !window.updateAutoOpenFileEnabled) {
+  debugLog('[Main] Pre-registering updateAutoOpenFileEnabled placeholder');
+  window.updateAutoOpenFileEnabled = (json: string) => {
+    debugLog('[Main] Storing pending auto open file enabled status, length=' + (json ? json.length : 0));
+    window.__pendingAutoOpenFileEnabled = json;
+  };
+}
+
 // Pre-register updatePermissionDialogTimeout to handle backend responses that arrive before React initializes
 if (typeof window !== 'undefined' && !window.updatePermissionDialogTimeout) {
   debugLog('[Main] Pre-registering updatePermissionDialogTimeout placeholder');

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { sendBridgeEvent } from '../../utils/bridge';
 import { writeClaudeModelMapping } from '../../utils/claudeModelMapping';
+import { setAutoOpenFileGateEnabled } from '../../utils/autoOpenFileGate';
 import type { ProviderConfig } from '../../types/provider';
 import type { SelectedAgent } from '../../components/ChatInputBox/types';
 
@@ -92,7 +93,14 @@ export function useProviderSettings({ addToast, t }: UseProviderSettingsOptions)
   }, []);
 
   const handleAutoOpenFileEnabledChange = useCallback((enabled: boolean) => {
+    // Update the bridge callback gate immediately so late add_selection_info
+    // messages cannot re-select a file while the settings round-trip is in flight.
+    setAutoOpenFileGateEnabled(enabled);
     setAutoOpenFileEnabled(enabled);
+    if (!enabled) {
+      // Optimistically clear ContextBar chip; echo path also clears as backup.
+      window.clearSelectionInfo?.();
+    }
     sendBridgeEvent('set_auto_open_file_enabled', JSON.stringify({ autoOpenFileEnabled: enabled }));
     addToast(
       enabled ? t('settings.basic.autoOpenFile.enabled') : t('settings.basic.autoOpenFile.disabled'),

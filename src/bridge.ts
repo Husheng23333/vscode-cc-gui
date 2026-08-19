@@ -38,6 +38,10 @@ import { PermissionIpcService } from './bridge/services/PermissionIpcService';
 import { ProviderStore } from './bridge/services/ProviderStore';
 import { SlashCommandService } from './bridge/services/SlashCommandService';
 import { SettingsStore } from './bridge/services/SettingsStore';
+import {
+  formatActiveFileSelectionInfo,
+  shouldSyncActiveFileToWebview,
+} from './bridge/activeFileSync';
 import { sanitizeUserMessagePayload } from './bridge/services/userMessageSanitizer';
 import type { SessionTemplate } from './sessionTemplate';
 import type { RuntimeProviderId } from './bridge/types';
@@ -51,6 +55,7 @@ import {
   readNodeVersion,
 } from './nodeRequirements';
 import { planClaudeSettingsSync } from './bridge/services/claudeSettingsSync';
+import { dedupeTextChunks } from './bridge/services/textChunkDedupe';
 
 type MessageCallback = (event: string, content: string) => void;
 type CreateTabCallback = () => void;
@@ -64,6 +69,8 @@ export class BridgeServer {
   private _bridgePath: string;
   private _workspacePath: string;
   private _webview?: vscode.Webview;
+  /** All live CC GUI webviews (sidebar + editor tabs) for multi-window routing. */
+  private readonly _knownWebviews = new Set<vscode.Webview>();
   /** Flag-gated facade passed to services (append* no-op when debug log is off). */
   private _log: vscode.OutputChannel;
   /** Underlying OutputChannel — never monkey-patched. */
@@ -154,6 +161,8 @@ export class BridgeServer {
       this.context.globalState,
       // Multi-window: route permission dialogs to the webview that owns the daemon turn.
       (bridgeRequestId) => this._pendingWebviews.get(bridgeRequestId),
+      // Used to refuse "active webview" fallback when multiple tabs are open.
+      () => this._knownWebviews.size,
     );
     this._settingsStore = new SettingsStore(context);
     this._providerStore = new ProviderStore(context, {
@@ -422,11 +431,31 @@ export class BridgeServer {
 
   setWebview(webview: vscode.Webview) {
     this._webview = webview;
+    this._knownWebviews.add(webview);
     this._permissionIpc.start();
     // Push UI language early so first paint can follow VS Code locale / user override
     this.pushLanguageConfig(webview);
     // Push current active file immediately when webview is ready
     setTimeout(() => this._pushActiveFile(vscode.window.activeTextEditor), 500);
+  }
+
+  /** Register a webview without making it the active target (multi-tab isolation). */
+  registerWebview(webview: vscode.Webview): void {
+    this._knownWebviews.add(webview);
+  }
+
+  /** Drop a disposed webview so permission routing count stays accurate. */
+  unregisterWebview(webview: vscode.Webview): void {
+    this._knownWebviews.delete(webview);
+    if (this._webview === webview) {
+      this._webview = undefined;
+    }
+    // Drop request→webview mappings that pointed at the disposed surface.
+    for (const [id, mapped] of this._pendingWebviews.entries()) {
+      if (mapped === webview) {
+        this._pendingWebviews.delete(id);
+      }
+    }
   }
 
   /** Effective language config for HTML injection / webview bootstrap. */
@@ -551,6 +580,10 @@ export class BridgeServer {
   private _pushActiveFile(editor?: vscode.TextEditor, targetWebview?: vscode.Webview) {
     const webview = targetWebview ?? this._webview;
     if (!webview) return;
+    // Respect "发送打开的文件路径" — when closed, do not auto-select files in ContextBar.
+    if (!shouldSyncActiveFileToWebview(this._settingsStore.getAutoOpenFileEnabled())) {
+      return;
+    }
     if (!editor || editor.document.uri.scheme !== 'file') {
       return;
     }
@@ -559,15 +592,12 @@ export class BridgeServer {
     const sel = editor.selection;
     const startLine = sel.start.line + 1;
     const endLine = sel.end.line + 1;
-
-    let selectionInfo: string;
-    if (!sel.isEmpty) {
-      selectionInfo = startLine === endLine
-        ? `@${filePath}#L${startLine}`
-        : `@${filePath}#L${startLine}-${endLine}`;
-    } else {
-      selectionInfo = `@${filePath}`;
-    }
+    const selectionInfo = formatActiveFileSelectionInfo(
+      filePath,
+      startLine,
+      endLine,
+      sel.isEmpty,
+    );
 
     webview.postMessage({ type: 'add_selection_info', content: selectionInfo });
   }
@@ -1283,10 +1313,20 @@ export class BridgeServer {
   }
 
   private _handleDaemonLine(msg: any) {
-    // Daemon lifecycle events (no id)
+    // Daemon lifecycle / side-channel events (no request id)
     if (msg.type === 'daemon') {
       if (msg.event === 'ready') {
         if (this._webview) this._webview.postMessage({ type: 'js_eval', content: 'window.onSdkLoaded && window.onSdkLoaded()' });
+      } else if (msg.event === 'title_generated') {
+        const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId.trim() : '';
+        const title = typeof msg.title === 'string' ? msg.title.trim() : '';
+        if (sessionId && title && this._webview) {
+          this._callWebviewArgs(this._webview, 'updateSessionTitle', [sessionId, title]);
+        }
+      } else if (msg.event === 'title_log') {
+        const level = typeof msg.level === 'string' ? msg.level : 'info';
+        const message = typeof msg.message === 'string' ? msg.message : '';
+        this._log.appendLine(`[TITLE] ${level}: ${message}`.slice(0, 400));
       }
       return;
     }
@@ -1604,6 +1644,16 @@ export class BridgeServer {
             }
             this._log.appendLine(`[STREAM] id=${msg.id} buffered [MESSAGE] type=${parsed.type} toolUse=${hasToolUse}`);
           }
+          // Background Agent lifecycle: SDK emits type=system subtype=task_notification
+          // after the parent turn's result. Webview StatusPanel listens on
+          // window.onTaskEvent — without this fan-out async agents stay "running"
+          // forever after the main conversation settles.
+          if (parsed.type === 'system' && parsed.subtype === 'task_notification') {
+            this._callWebviewJson(webview, 'onTaskEvent', parsed);
+            this._log.appendLine(
+              `[STREAM] id=${msg.id} task_notification tool_use_id=${parsed.tool_use_id ?? ''} status=${parsed.status ?? ''}`,
+            );
+          }
         } catch { /* ignore */ }
         webview.postMessage({ type: 'message_data', content: payload });
       } else if (line.startsWith('[SEND_ERROR] ') || line.startsWith('[ERROR] ')) {
@@ -1637,18 +1687,43 @@ export class BridgeServer {
         // Daemon request-result envelopes (no protocol tag) must never become chat text.
         // Codex/Claude print e.g. {"success":true,"threadId":"...","result":"3","transport":"app-server"}
         // at end of turn for demux — showing them as content_delta leaks JSON into the UI.
+        // Same for structured daemon events (title_log / title_generated) that may still
+        // arrive tagged with a request id if demux missed the pass-through path.
         const trimmedBare = line.trim();
-        if (trimmedBare.startsWith('{') && trimmedBare.includes('"success"')) {
+        if (trimmedBare.startsWith('{')) {
           try {
             const parsedBare = JSON.parse(trimmedBare) as {
+              type?: unknown;
+              event?: unknown;
               success?: unknown;
               error?: unknown;
               threadId?: unknown;
               sessionId?: unknown;
+              title?: unknown;
               result?: unknown;
               transport?: unknown;
               details?: unknown;
+              level?: unknown;
+              message?: unknown;
             };
+            if (parsedBare && typeof parsedBare === 'object' && parsedBare.type === 'daemon') {
+              if (parsedBare.event === 'title_generated') {
+                const sessionId = typeof parsedBare.sessionId === 'string' ? parsedBare.sessionId.trim() : '';
+                const title = typeof parsedBare.title === 'string' ? parsedBare.title.trim() : '';
+                if (sessionId && title) {
+                  this._callWebviewArgs(webview, 'updateSessionTitle', [sessionId, title]);
+                }
+              } else if (parsedBare.event === 'title_log') {
+                const level = typeof parsedBare.level === 'string' ? parsedBare.level : 'info';
+                const message = typeof parsedBare.message === 'string' ? parsedBare.message : '';
+                this._log.appendLine(`[TITLE] ${level}: ${message}`.slice(0, 400));
+              } else {
+                this._log.appendLine(
+                  `[STREAM] id=${msg.id} swallow daemon event event=${String(parsedBare.event ?? '')}`,
+                );
+              }
+              return;
+            }
             if (parsedBare && typeof parsedBare === 'object' && 'success' in parsedBare) {
               if (parsedBare.success === false) {
                 this._postSendError(webview, trimmedBare, msg.id);
@@ -1745,9 +1820,12 @@ export class BridgeServer {
       if (line.startsWith('[CONTENT_DELTA] ')) {
         const rawDelta = line.slice('[CONTENT_DELTA] '.length);
         try {
-          request.chunks.push(JSON.parse(rawDelta));
+          const parsed = JSON.parse(rawDelta);
+          request.chunks.push(typeof parsed === 'string' ? parsed : String(parsed ?? ''));
         } catch {
-          request.chunks.push(rawDelta.trim().replace(/^"|"$/g, ''));
+          // Keep whitespace; only strip wrapping JSON quotes when present.
+          const unquoted = rawDelta.replace(/^"/, '').replace(/"$/, '');
+          request.chunks.push(unquoted);
         }
         this._emitInternalTextProgress(request);
         return true;
@@ -1782,7 +1860,7 @@ export class BridgeServer {
         request.reject(new Error(msg.error ?? 'Internal AI text request failed'));
         return true;
       }
-      request.resolve(this._dedupeTextChunks(request.chunks));
+      request.resolve(dedupeTextChunks(request.chunks));
       return true;
     }
 
@@ -1794,7 +1872,7 @@ export class BridgeServer {
     onProgress?: (partial: string) => void;
   }): void {
     if (!request.onProgress) return;
-    const partial = this._dedupeTextChunks(request.chunks);
+    const partial = dedupeTextChunks(request.chunks);
     if (partial) {
       try {
         request.onProgress(partial);
@@ -1818,16 +1896,6 @@ export class BridgeServer {
       return parsed.text;
     }
     return '';
-  }
-
-  private _dedupeTextChunks(chunks: string[]): string {
-    const normalized = chunks.map((chunk) => chunk.trim()).filter(Boolean);
-    if (normalized.length === 0) {
-      return '';
-    }
-    const last = normalized[normalized.length - 1];
-    const withoutLast = normalized.slice(0, -1).join('');
-    return withoutLast && last.includes(withoutLast) ? last : normalized.join('');
   }
 
   private _handleMcpLine(line: string, requestEvent: string | undefined, webview: vscode.Webview): boolean {

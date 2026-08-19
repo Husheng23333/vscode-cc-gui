@@ -11,6 +11,22 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+vi.mock('../../shared/ProviderModelIcon', () => ({
+  ProviderModelIcon: ({
+    providerId,
+    modelId,
+  }: {
+    providerId?: string;
+    modelId?: string;
+  }) => (
+    <span
+      data-testid="model-icon"
+      data-provider-id={providerId ?? ''}
+      data-model-id={modelId ?? ''}
+    />
+  ),
+}));
+
 describe('ModelSelect', () => {
   const sonnetModel: ModelInfo = {
     id: 'claude-sonnet-4-6',
@@ -54,6 +70,27 @@ describe('ModelSelect', () => {
     );
 
     expect(screen.getByRole('button').textContent).toContain('glm-5');
+  });
+
+  it('closed trigger uses mapped model id for icon (e.g. DeepSeek, not Claude)', () => {
+    localStorage.setItem(
+      STORAGE_KEYS.CLAUDE_MODEL_MAPPING,
+      JSON.stringify({ sonnet: 'deepseek-v4-pro[1m]' }),
+    );
+
+    render(
+      <ModelSelect
+        value={sonnetModel.id}
+        onChange={vi.fn()}
+        models={[sonnetModel]}
+        currentProvider="claude"
+      />,
+    );
+
+    const triggerIcon = screen.getByRole('button').querySelector('[data-testid="model-icon"]');
+    expect(triggerIcon).not.toBeNull();
+    expect(triggerIcon?.getAttribute('data-provider-id')).toBe('claude');
+    expect(triggerIcon?.getAttribute('data-model-id')).toBe('deepseek-v4-pro[1m]');
   });
 
   it('没有具体映射时应回退到全局 main 映射', () => {

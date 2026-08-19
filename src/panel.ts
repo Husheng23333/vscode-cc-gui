@@ -54,6 +54,7 @@ export class CcGuiPanel implements vscode.WebviewViewProvider {
     disposables?.forEach((disposable) => disposable.dispose());
     this._sidebarDisposables.delete(webviewView);
     this._sidebarViews.delete(webviewView);
+    this.bridge.unregisterWebview(webviewView.webview);
 
     if (this._activeWebview === webviewView.webview) {
       this._activeWebview = this._firstSidebarWebview();
@@ -95,6 +96,7 @@ export class CcGuiPanel implements vscode.WebviewViewProvider {
       messageDisposables.forEach((disposable) => disposable.dispose());
       viewStateDisposable.dispose();
       disposeDisposable.dispose();
+      this.bridge.unregisterWebview(panel.webview);
       if (this._activeWebview === panel.webview) {
         this._activeWebview = this._firstSidebarWebview();
         this._activePanel = undefined;
@@ -154,6 +156,9 @@ export class CcGuiPanel implements vscode.WebviewViewProvider {
   }
 
   private _activateWebview(webview: vscode.Webview, panel?: vscode.WebviewPanel): void {
+    // Always register so multi-tab permission routing knows how many surfaces exist,
+    // even when this webview is already "active".
+    this.bridge.registerWebview(webview);
     if (this._activeWebview === webview) {
       if (panel) {
         this._activePanel = panel;

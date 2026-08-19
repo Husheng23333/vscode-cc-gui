@@ -10,7 +10,6 @@ interface SubagentListProps {
   subagents: SubagentInfo[];
   histories?: Record<string, SubagentHistoryResponse>;
   currentSessionId?: string | null;
-  isStreaming?: boolean;
 }
 
 interface SubagentRowProps {
@@ -64,7 +63,7 @@ const SubagentRow = memo(({ subagent, isExpanded, history, canLoad, onToggle, t 
 
 SubagentRow.displayName = 'SubagentRow';
 
-const SubagentList = memo(({ subagents, histories = {}, currentSessionId, isStreaming = false }: SubagentListProps) => {
+const SubagentList = memo(({ subagents, histories = {}, currentSessionId }: SubagentListProps) => {
   const { t } = useTranslation();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -85,21 +84,29 @@ const SubagentList = memo(({ subagents, histories = {}, currentSessionId, isStre
     }));
   }, [currentSessionId]);
 
+  // Re-run the effect when the expanded row's status changes so the interval
+  // is torn down once the agent reaches a terminal state.
+  const expandedStatus = expandedId
+    ? subagents.find((item) => item.id === expandedId)?.status
+    : undefined;
+
   useEffect(() => {
-    if (!expandedId) return;
+    if (!expandedId || !currentSessionId) return;
     const subagent = subagentsRef.current.find((item) => item.id === expandedId);
-    if (!subagent || !currentSessionId) return;
+    if (!subagent) return;
     if (!historiesRef.current[expandedId]) {
       requestHistory(subagent);
     }
-    if (!isStreaming || subagent.status !== 'running') return;
+    // Async agents outlive the parent stream — poll while the expanded row is
+    // still running, independent of the main turn's isStreaming flag.
+    if (expandedStatus !== 'running') return;
     const timer = window.setInterval(() => {
       const current = subagentsRef.current.find((item) => item.id === expandedId);
       if (!current || current.status !== 'running') return;
       requestHistory(current);
     }, 2_000);
     return () => window.clearInterval(timer);
-  }, [currentSessionId, expandedId, isStreaming, requestHistory]);
+  }, [currentSessionId, expandedId, expandedStatus, requestHistory]);
 
   const historyById = useMemo(() => histories, [histories]);
 

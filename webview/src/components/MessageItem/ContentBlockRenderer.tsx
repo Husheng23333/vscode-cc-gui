@@ -276,29 +276,43 @@ export function ContentBlockRenderer({
   }
 
   if (block.type === 'thinking') {
+    // Collapsed thinking must not mount body content. Previously the body was
+    // always rendered and only the header chevron flipped, so users could not
+    // actually collapse thinking mid-conversation (or after the turn ended).
     return (
       <div className="thinking-block">
         <div
           className="thinking-header"
           onClick={onToggleThinking}
+          role="button"
+          tabIndex={0}
+          aria-expanded={isThinkingExpanded}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onToggleThinking();
+            }
+          }}
         >
           <span className="thinking-title">
             {isThinking && isLastMessage && isLastBlock
               ? t('common.thinkingProcess')
               : t('common.thinking')}
           </span>
-          <span className="thinking-icon">
+          <span className="thinking-icon" aria-hidden="true">
             {isThinkingExpanded ? '▼' : '▶'}
           </span>
         </div>
-        <div className={`thinking-content ${isThinkingExpanded ? 'expanded' : ''}`}>
-          <div className="thinking-content-inner">
-            <MarkdownBlock
-              content={block.thinking ?? block.text ?? t('chat.noThinkingContent')}
-              isStreaming={isActivelyStreaming}
-            />
+        {isThinkingExpanded && (
+          <div className="thinking-content expanded">
+            <div className="thinking-content-inner">
+              <MarkdownBlock
+                content={block.thinking ?? block.text ?? t('chat.noThinkingContent')}
+                isStreaming={isActivelyStreaming}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }

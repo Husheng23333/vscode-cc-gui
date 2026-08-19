@@ -17,6 +17,7 @@ import {
   setModelEnvironmentVariables
 } from '../../utils/model-utils.js';
 import { canUseTool } from '../../permission-handler.js';
+import { getRequestId } from '../../utils/request-context.js';
 import { buildContentBlocks, loadAttachments } from './attachment-service.js';
 import { buildIDEContextPrompt } from '../system-prompts.js';
 import { buildQuickFixPrompt } from '../quickfix-prompts.js';
@@ -244,6 +245,88 @@ const _sessionCleanupTimer = setInterval(async () => {
 // unref() so the timer does not prevent natural process exit
 _sessionCleanupTimer.unref();
 
+/**
+ * Serialize query.next() so the idle task-notification drain and the next
+ * executeTurn never race on the same async iterator. Prefetched messages from
+ * the drain handoff are consumed first.
+ */
+function nextQueryMessage(runtime) {
+  if (!runtime._nextChain) {
+    runtime._nextChain = Promise.resolve();
+  }
+  const result = runtime._nextChain.then(async () => {
+    if (Array.isArray(runtime.prefetchedMessages) && runtime.prefetchedMessages.length > 0) {
+      return runtime.prefetchedMessages.shift();
+    }
+    return runtime.query.next();
+  });
+  // Keep the chain alive even when a consumer drops the promise.
+  runtime._nextChain = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+function isTaskLifecycleSystemMessage(msg) {
+  if (!msg || msg.type !== 'system') return false;
+  const subtype = msg.subtype;
+  return subtype === 'task_notification'
+    || subtype === 'task_started'
+    || subtype === 'task_progress'
+    || subtype === 'background_tasks_changed';
+}
+
+/**
+ * Background agents (run_in_background) complete *after* the parent turn's
+ * result message. The SDK pushes task_notification on the same query stream;
+ * consumers must keep reading between turns or StatusPanel stays stuck on
+ * "running" forever. This drain owns query.next() only while activeTurnCount
+ * is 0 and hands off any message that arrives once a new turn has started.
+ */
+function ensureIdleTaskDrain(runtime) {
+  if (!runtime || runtime.closed || runtime.idleTaskDrainActive) return;
+  runtime.idleTaskDrainActive = true;
+  void (async () => {
+    try {
+      while (!runtime.closed) {
+        if ((runtime.activeTurnCount || 0) > 0) {
+          return;
+        }
+        let next;
+        try {
+          next = await nextQueryMessage(runtime);
+        } catch {
+          return;
+        }
+        // A new turn may have started while we were awaiting next().
+        if ((runtime.activeTurnCount || 0) > 0) {
+          if (!Array.isArray(runtime.prefetchedMessages)) runtime.prefetchedMessages = [];
+          runtime.prefetchedMessages.push(next);
+          return;
+        }
+        if (next.done) return;
+
+        touchRuntime(runtime);
+        const msg = next.value;
+        if (isTaskLifecycleSystemMessage(msg)) {
+          // Always emit — bridge maps task_notification → window.onTaskEvent.
+          console.log('[MESSAGE]', JSON.stringify(msg));
+          if (msg.session_id) {
+            registerRuntimeSession(runtime, msg.session_id, { registerActiveQueryResult, removeSession });
+          }
+          continue;
+        }
+
+        // Non-task traffic between turns is rare; buffer for the next turn and
+        // stop draining so we do not mis-handle mid-turn frames while idle.
+        if (!Array.isArray(runtime.prefetchedMessages)) runtime.prefetchedMessages = [];
+        runtime.prefetchedMessages.push(next);
+        return;
+      }
+    } finally {
+      runtime.idleTaskDrainActive = false;
+    }
+  })();
+}
+
 async function executeTurn(runtime, requestContext, turnMeta) {
   if (!runtime || runtime.closed) {
     const err = new Error('Runtime is closed');
@@ -260,6 +343,11 @@ async function executeTurn(runtime, requestContext, turnMeta) {
     turnMeta.state = turnState;
   }
 
+  // Stamp the owning bridge request id on the runtime so permission/ask/plan
+  // IPC can route dialogs to the correct webview even when SDK hooks lose ALS.
+  const turnBridgeRequestId = getRequestId() || null;
+  runtime.activeBridgeRequestId = turnBridgeRequestId;
+
   try {
     beginRuntimeTurn(runtime);
     console.log('[MESSAGE_START]');
@@ -268,7 +356,7 @@ async function executeTurn(runtime, requestContext, turnMeta) {
     while (true) {
       let next;
       try {
-        next = await runtime.query.next();
+        next = await nextQueryMessage(runtime);
       } catch (error) {
         const wrapped = new Error(error?.message || String(error));
         wrapped.runtimeTerminated = true;
@@ -365,7 +453,15 @@ async function executeTurn(runtime, requestContext, turnMeta) {
   } finally {
     endRuntimeTurn(runtime);
     // Only clear if this runtime still owns the pointer (not cleared by abort)
+    if (runtime.activeBridgeRequestId === turnBridgeRequestId) {
+      runtime.activeBridgeRequestId = null;
+    }
     clearActiveTurnRuntimeIf(runtime);
+    // Parent turn is done — keep reading for late task_notification events from
+    // background agents that outlive this turn.
+    if (!runtime.closed) {
+      ensureIdleTaskDrain(runtime);
+    }
   }
 }
 

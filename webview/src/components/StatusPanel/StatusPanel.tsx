@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { FileChangeSummary } from '../../types';
-import { undoFileChanges, sendToJava } from '../../utils/bridge';
+import { undoFileChanges, sendToJava, sendBridgeEvent } from '../../utils/bridge';
 import { getFileName } from '../../utils/helpers';
 import TodoList from './TodoList';
 import SubagentList from './SubagentList';
@@ -15,6 +15,8 @@ const StatusPanel = ({ todos, fileChanges, subagents, subagentHistories, current
   const { t } = useTranslation();
   const [openPopover, setOpenPopover] = useState<TabType | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const subagentsRef = useRef(subagents);
+  useEffect(() => { subagentsRef.current = subagents; }, [subagents]);
 
   // Undo related state
   const [undoingFile, setUndoingFile] = useState<string | null>(null);
@@ -41,6 +43,65 @@ const StatusPanel = ({ todos, fileChanges, subagents, subagentHistories, current
     const running = subagents.some((s) => s.status === 'running');
     return { subagentCompletedCount: completed, subagentTotalCount: subagents.length, hasRunningSubagent: running };
   }, [subagents]);
+
+  // Load / poll sidechain transcripts for async agents:
+  // - running: poll until terminal so StatusPanel progress flips
+  // - completed/error without history yet: fetch once so Write/Edit ops surface
+  //   in the "编辑" tab (file changes live only on the sidechain)
+  const asyncHistoryKey = useMemo(() => {
+    const histories = subagentHistories ?? {};
+    return subagents
+      .filter((item) => item.isAsync)
+      .map((item) => {
+        const hasHistory = Boolean(
+          histories[item.id]
+          || (item.agentId ? histories[item.agentId] : undefined),
+        );
+        // Keep polling while running; re-fetch completed agents that still lack history.
+        if (item.status === 'running' || !hasHistory) {
+          return `${item.id}:${item.status}:${item.agentId ?? ''}:${hasHistory ? '1' : '0'}`;
+        }
+        return null;
+      })
+      .filter((key): key is string => Boolean(key))
+      .sort()
+      .join('|');
+  }, [subagents, subagentHistories]);
+
+  useEffect(() => {
+    if (!expanded || !currentSessionId || !asyncHistoryKey) return;
+
+    const requestHistory = (item: typeof subagents[number]) => {
+      sendBridgeEvent('load_subagent_session', JSON.stringify({
+        sessionId: currentSessionId,
+        agentId: item.agentId,
+        description: item.description,
+        toolUseId: item.id,
+      }));
+    };
+
+    const pollNeeded = () => {
+      const histories = subagentHistories ?? {};
+      for (const item of subagentsRef.current) {
+        if (!item.isAsync) continue;
+        const hasHistory = Boolean(
+          histories[item.id]
+          || (item.agentId ? histories[item.agentId] : undefined),
+        );
+        if (item.status === 'running' || !hasHistory) {
+          requestHistory(item);
+        }
+      }
+    };
+
+    pollNeeded();
+    const needsInterval = subagentsRef.current.some(
+      (item) => item.isAsync && item.status === 'running',
+    );
+    if (!needsInterval) return undefined;
+    const timer = window.setInterval(pollNeeded, 2_000);
+    return () => window.clearInterval(timer);
+  }, [expanded, currentSessionId, asyncHistoryKey, subagentHistories]);
 
   // Calculate total file changes stats
   const { totalAdditions, totalDeletions } = useMemo(() => {
@@ -207,7 +268,7 @@ const StatusPanel = ({ todos, fileChanges, subagents, subagentHistories, current
       case 'todo':
         return <TodoList todos={todos} />;
       case 'subagent':
-        return <SubagentList subagents={subagents} histories={subagentHistories} currentSessionId={currentSessionId} isStreaming={isStreaming} />;
+        return <SubagentList subagents={subagents} histories={subagentHistories} currentSessionId={currentSessionId} />;
       case 'files':
         return (
           <FileChangesList
@@ -240,6 +301,8 @@ const StatusPanel = ({ todos, fileChanges, subagents, subagentHistories, current
               {completedCount}/{totalCount}
             </span>
           )}
+          {/* Todos can stay in_progress only while the parent turn streams
+              (finalizeTodos promotes them once settled), so gate on isStreaming. */}
           {isStreaming && hasInProgressTodo && (
             <span className="codicon codicon-loading status-panel-tab-loading" />
           )}
@@ -257,7 +320,9 @@ const StatusPanel = ({ todos, fileChanges, subagents, subagentHistories, current
               {subagentCompletedCount}/{subagentTotalCount}
             </span>
           )}
-          {isStreaming && hasRunningSubagent && (
+          {/* Async agents outlive the parent stream — keep the spinner as long
+              as any subagent is still running, not only while isStreaming. */}
+          {hasRunningSubagent && (
             <span className="codicon codicon-loading status-panel-tab-loading" />
           )}
         </div>

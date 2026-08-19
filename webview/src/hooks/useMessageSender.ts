@@ -65,6 +65,9 @@ export interface UseMessageSenderOptions {
   longContextEnabled?: boolean;
   openContextUsageDialog: (requestId?: string | null, loading?: boolean) => void;
   closeContextUsageDialog: (requestId?: string | null) => boolean;
+  /** ContextBar selected file path (with optional #Lx-y), when auto-open-file is on */
+  contextBarFile?: string | null;
+  autoOpenFileEnabled?: boolean;
 }
 
 /**
@@ -100,6 +103,8 @@ export function useMessageSender({
   longContextEnabled,
   openContextUsageDialog,
   closeContextUsageDialog,
+  contextBarFile = null,
+  autoOpenFileEnabled = false,
 }: UseMessageSenderOptions) {
   /**
    * Check if the input is a new session command
@@ -305,6 +310,10 @@ export function useMessageSender({
       sessionResumePayload,
     });
 
+    const contextBarPayload = autoOpenFileEnabled && contextBarFile
+      ? { contextBarFile }
+      : {};
+
     if (hasAttachments) {
       try {
         const payload = JSON.stringify({
@@ -321,6 +330,7 @@ export function useMessageSender({
           ...requestIdentityPayload,
           ...sessionResumePayload,
           ...reasoningEffortPayload,
+          ...contextBarPayload,
           codexFastMode,
         });
         sendBridgeEvent('send_message_with_attachments', payload);
@@ -335,6 +345,7 @@ export function useMessageSender({
           ...requestIdentityPayload,
           ...sessionResumePayload,
           ...reasoningEffortPayload,
+          ...contextBarPayload,
           codexFastMode,
         });
         sendBridgeEvent('send_message', fallbackPayload);
@@ -349,11 +360,22 @@ export function useMessageSender({
         ...requestIdentityPayload,
         ...sessionResumePayload,
         ...reasoningEffortPayload,
+        ...contextBarPayload,
         codexFastMode,
       });
       sendBridgeEvent('send_message', payload);
     }
-  }, [codexFastMode, currentProvider, currentSessionId, longContextEnabled, selectedModel, reasoningEffort, streamingEnabledSetting]);
+  }, [
+    autoOpenFileEnabled,
+    codexFastMode,
+    contextBarFile,
+    currentProvider,
+    currentSessionId,
+    longContextEnabled,
+    selectedModel,
+    reasoningEffort,
+    streamingEnabledSetting,
+  ]);
 
   /**
    * Execute message sending (from queue or directly)

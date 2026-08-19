@@ -91,7 +91,7 @@ const App = () => {
     currentView, setCurrentView,
     settingsInitialTab, setSettingsInitialTab,
     toasts, addToast, dismissToast, clearToasts,
-    setContextInfo,
+    contextInfo, setContextInfo,
     searchOpen, setSearchOpen,
   } = useUIState();
 
@@ -357,6 +357,8 @@ const App = () => {
     longContextEnabled,
     openContextUsageDialog,
     closeContextUsageDialog,
+    contextBarFile: contextInfo?.raw?.replace(/^@/, '') || contextInfo?.file || null,
+    autoOpenFileEnabled,
   });
 
   // ── Message queue ──
@@ -411,7 +413,7 @@ const App = () => {
     filteredFileChanges, subagents, globalTodos, rewindableMessages, sessionTitle,
   } = useChatComputations({
     t, messages, mergedMessages, customSessionTitle, streamingActive, currentProvider,
-    currentSessionId, currentSessionIdRef,
+    currentSessionId, currentSessionIdRef, subagentHistories,
     getMessageText, getContentBlocks,
   });
 

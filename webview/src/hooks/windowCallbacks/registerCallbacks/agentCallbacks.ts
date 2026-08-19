@@ -7,6 +7,11 @@
  */
 
 import type { UseWindowCallbacksOptions } from '../../useWindowCallbacks';
+import { isAutoOpenFileGateEnabled } from '../../../utils/autoOpenFileGate';
+import {
+  parseSelectionInfo,
+  shouldApplyAutoSelectionInfo,
+} from '../../../utils/selectionInfo';
 
 export function registerAgentAndSelectionCallbacks(options: UseWindowCallbacksOptions): void {
   const {
@@ -15,20 +20,14 @@ export function registerAgentAndSelectionCallbacks(options: UseWindowCallbacksOp
   } = options;
 
   window.addSelectionInfo = (selectionInfo) => {
-    if (selectionInfo) {
-      const match = selectionInfo.match(/^@([^#]+)(?:#L(\d+)(?:-(\d+))?)?$/);
-      if (match) {
-        const file = match[1];
-        const startLine = match[2] ? parseInt(match[2], 10) : undefined;
-        const endLine =
-          match[3] ? parseInt(match[3], 10) : startLine !== undefined ? startLine : undefined;
-        setContextInfo({
-          file,
-          startLine,
-          endLine,
-          raw: selectionInfo,
-        });
-      }
+    // Auto file sync must respect "发送打开的文件路径". Manual snippet insert uses
+    // insertCodeSnippetAtCursor / addCodeSnippet and is intentionally not gated.
+    if (!shouldApplyAutoSelectionInfo(isAutoOpenFileGateEnabled())) {
+      return;
+    }
+    const parsed = parseSelectionInfo(selectionInfo);
+    if (parsed) {
+      setContextInfo(parsed);
     }
   };
 

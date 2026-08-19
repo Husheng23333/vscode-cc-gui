@@ -13,6 +13,8 @@ import { isValidPermissionMode, normalizeClaudeModelId } from '../../../componen
 import { drainPendingSettings, startInitialSettingsRequest } from '../settingsBootstrap';
 import { clampPermissionDialogTimeoutSeconds } from '../../../utils/permissionDialogTimeout';
 import { clampStreamStallTimeoutSeconds } from '../../../utils/streamStallTimeout';
+import { setAutoOpenFileGateEnabled } from '../../../utils/autoOpenFileGate';
+import { sendBridgeEvent } from '../../../utils/bridge';
 
 export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): void {
   const {
@@ -32,6 +34,7 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
     setAutoOpenFileEnabled,
     setPermissionDialogTimeoutSeconds,
     setStreamStallTimeoutSeconds,
+    setContextInfo,
     currentProviderRef,
     syncActiveProviderModelMapping,
   } = options;
@@ -156,7 +159,16 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
   window.updateAutoOpenFileEnabled = (jsonStr: string) => {
     try {
       const data = JSON.parse(jsonStr);
-      setAutoOpenFileEnabled(data.autoOpenFileEnabled ?? false);
+      const enabled = data.autoOpenFileEnabled ?? false;
+      setAutoOpenFileGateEnabled(enabled);
+      setAutoOpenFileEnabled(enabled);
+      if (!enabled) {
+        // Closing the setting must also drop any auto-selected ContextBar chip.
+        setContextInfo(null);
+      } else {
+        // Gate may have dropped an earlier push; request a fresh active-file sync.
+        sendBridgeEvent('get_active_file');
+      }
     } catch (error) {
       console.error('[Frontend] Failed to parse auto open file enabled:', error);
     }

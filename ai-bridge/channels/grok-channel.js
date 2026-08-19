@@ -3,6 +3,7 @@
  * Grok has no official SDK; this channel shells out to the local CLI.
  */
 import { sendMessage as grokSendMessage } from '../services/grok/message-service.js';
+import { applyOpenedFilesToCliMessage } from '../services/cli-opened-files.js';
 
 /**
  * Execute a Grok command.
@@ -21,9 +22,10 @@ export async function handleGrokCommand(command, args, stdinData) {
           model,
           reasoningEffort,
           attachments,
+          openedFiles,
         } = stdinData;
         await grokSendMessage(
-          message,
+          applyOpenedFilesToCliMessage(message, openedFiles || null),
           sessionId || '',
           cwd || '',
           model || '',

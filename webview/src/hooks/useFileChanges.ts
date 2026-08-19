@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { ClaudeMessage, ClaudeContentBlock, ToolResultBlock } from '../types';
+import type { ClaudeMessage, ClaudeContentBlock, SubagentHistoryResponse, ToolResultBlock } from '../types';
 import type { FileChangeSummary, EditOperation, FileChangeStatus } from '../types/fileChanges';
 import { getFileName } from '../utils/helpers';
 import { FILE_MODIFY_TOOL_NAMES, isToolName, normalizeToolName } from '../utils/toolConstants';
@@ -279,12 +279,198 @@ function isSuccessfulResult(result?: ToolResultBlock | null): boolean {
   return result !== undefined && result !== null && result.is_error !== true;
 }
 
+function appendOperation(
+  fileOperationsMap: Map<string, EditOperation[]>,
+  filePath: string,
+  operation: EditOperation,
+): void {
+  const existing = fileOperationsMap.get(filePath) ?? [];
+  existing.push(operation);
+  fileOperationsMap.set(filePath, existing);
+}
+
+function recordFileModifyToolUse(
+  fileOperationsMap: Map<string, EditOperation[]>,
+  block: ClaudeContentBlock,
+  result: ToolResultBlock | null,
+): void {
+  if (block.type !== 'tool_use') return;
+
+  const toolName = normalizeToolName(block.name ?? '');
+  if (!isToolName(toolName, FILE_MODIFY_TOOL_NAMES)) return;
+
+  const rawInput = block.input as Record<string, unknown> | undefined;
+  const input = rawInput ? normalizeToolInput(block.name, rawInput) as Record<string, unknown> : undefined;
+  if (!input) return;
+
+  const filePath = extractFilePath(input);
+  if (!filePath) return;
+
+  if (!isSuccessfulResult(result)) return;
+
+  const { oldString, newString, replaceAll } = extractStrings(input);
+  const { additions, deletions } = resolveLineStats(input, toolName, oldString, newString);
+  const lineInfo = getToolLineInfo(input, undefined, result);
+
+  appendOperation(fileOperationsMap, filePath, {
+    toolName,
+    oldString,
+    newString,
+    additions,
+    deletions,
+    replaceAll,
+    lineStart: lineInfo.start,
+    lineEnd: lineInfo.end,
+  });
+}
+
+type ToolUseContentBlock = Extract<ClaudeContentBlock, { type: 'tool_use' }>;
+
+/**
+ * Extract tool_use blocks from a sidechain / history message without full
+ * localization. History rows carry either raw.message.content or message.content.
+ */
+function getSidechainToolUseBlocks(message: unknown): ToolUseContentBlock[] {
+  if (!message || typeof message !== 'object') return [];
+  const record = message as Record<string, unknown>;
+  if (record.type !== 'assistant') return [];
+
+  const raw = record.raw;
+  const rawObj = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : null;
+  const rawMessage = rawObj?.message && typeof rawObj.message === 'object' && !Array.isArray(rawObj.message)
+    ? rawObj.message as Record<string, unknown>
+    : null;
+  const content = rawMessage?.content
+    ?? (record.message && typeof record.message === 'object' && !Array.isArray(record.message)
+      ? (record.message as Record<string, unknown>).content
+      : undefined)
+    ?? record.content;
+
+  if (!Array.isArray(content)) return [];
+  return content.filter(
+    (block): block is ToolUseContentBlock =>
+      Boolean(block)
+      && typeof block === 'object'
+      && (block as { type?: string }).type === 'tool_use',
+  );
+}
+
+/**
+ * Find a tool_result for toolUseId inside a sidechain message list.
+ */
+export function findSidechainToolResult(
+  messages: unknown[],
+  toolUseId: string | undefined,
+): ToolResultBlock | null {
+  if (!toolUseId) return null;
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    const record = message as Record<string, unknown>;
+    if (record.type !== 'user') continue;
+
+    const raw = record.raw;
+    const rawObj = raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? raw as Record<string, unknown>
+      : null;
+    const rawMessage = rawObj?.message && typeof rawObj.message === 'object' && !Array.isArray(rawObj.message)
+      ? rawObj.message as Record<string, unknown>
+      : null;
+    const content = rawMessage?.content
+      ?? rawObj?.content
+      ?? (record.message && typeof record.message === 'object' && !Array.isArray(record.message)
+        ? (record.message as Record<string, unknown>).content
+        : undefined)
+      ?? record.content;
+
+    if (!Array.isArray(content)) continue;
+    const hit = content.find(
+      (block): block is ToolResultBlock =>
+        Boolean(block)
+        && typeof block === 'object'
+        && (block as { type?: string }).type === 'tool_result'
+        && (block as { tool_use_id?: string }).tool_use_id === toolUseId,
+    );
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Collect successful Write/Edit operations from background-agent sidechain
+ * transcripts. Main-turn messages alone never contain these tool_use blocks
+ * when the agent ran with run_in_background:true.
+ */
+export function collectFileOperationsFromSubagentHistories(
+  histories: Record<string, SubagentHistoryResponse> | undefined,
+  fileOperationsMap: Map<string, EditOperation[]> = new Map(),
+): Map<string, EditOperation[]> {
+  if (!histories) return fileOperationsMap;
+
+  for (const history of Object.values(histories)) {
+    if (!history?.success || !Array.isArray(history.messages) || history.messages.length === 0) {
+      continue;
+    }
+    const sidechainMessages = history.messages;
+    for (const message of sidechainMessages) {
+      for (const block of getSidechainToolUseBlocks(message)) {
+        const result = findSidechainToolResult(sidechainMessages, block.id);
+        recordFileModifyToolUse(fileOperationsMap, block, result);
+      }
+    }
+  }
+
+  return fileOperationsMap;
+}
+
+function summariesFromOperationsMap(
+  fileOperationsMap: Map<string, EditOperation[]>,
+): FileChangeSummary[] {
+  const summaries: FileChangeSummary[] = [];
+
+  fileOperationsMap.forEach((operations, filePath) => {
+    const totalAdditions = operations.reduce((sum, op) => sum + (op.additions || 0), 0);
+    const totalDeletions = operations.reduce((sum, op) => sum + (op.deletions || 0), 0);
+
+    const rawStatus = determineFileStatus(operations);
+    const status: FileChangeStatus = rawStatus === 'A' ? 'A' : 'M';
+
+    const firstLineOperation = operations.find((op) => typeof op.lineStart === 'number');
+
+    summaries.push({
+      filePath: String(filePath || ''),
+      fileName: String(getFileName(filePath) || filePath || 'unknown'),
+      status,
+      additions: totalAdditions,
+      deletions: totalDeletions,
+      lineStart: firstLineOperation?.lineStart,
+      lineEnd: firstLineOperation?.lineEnd,
+      operations,
+    });
+  });
+
+  summaries.sort((a, b) => {
+    if (a.status !== b.status) {
+      return a.status === 'A' ? -1 : 1;
+    }
+    return a.filePath.localeCompare(b.filePath);
+  });
+
+  return summaries;
+}
+
 interface UseFileChangesParams {
   messages: ClaudeMessage[];
   getContentBlocks: (message: ClaudeMessage) => ClaudeContentBlock[];
   findToolResult: (toolUseId?: string, messageIndex?: number) => ToolResultBlock | null;
   /** Start processing messages from this index (for Keep All feature) */
   startFromIndex?: number;
+  /**
+   * Background agent sidechain transcripts. File edits performed by async
+   * subagents live only here — they never appear as tool_use on the parent turn.
+   */
+  subagentHistories?: Record<string, SubagentHistoryResponse>;
 }
 
 /**
@@ -295,95 +481,27 @@ export function useFileChanges({
   getContentBlocks,
   findToolResult,
   startFromIndex = 0,
+  subagentHistories,
 }: UseFileChangesParams): FileChangeSummary[] {
   return useMemo(() => {
-    // Map to collect operations by file path
     const fileOperationsMap = new Map<string, EditOperation[]>();
 
-    // Iterate through messages starting from startFromIndex
+    // Parent-turn file edits (sync tools run by the main agent).
     messages.forEach((message, messageIndex) => {
-      // Skip messages before startFromIndex
       if (messageIndex < startFromIndex) return;
-
       if (message.type !== 'assistant') return;
 
       const blocks = getContentBlocks(message);
-
       blocks.forEach((block) => {
         if (block.type !== 'tool_use') return;
-
-        const toolName = normalizeToolName(block.name ?? '');
-
-        // Check if this is a file modification tool
-        if (!isToolName(toolName, FILE_MODIFY_TOOL_NAMES)) return;
-
-        const rawInput = block.input as Record<string, unknown> | undefined;
-        const input = rawInput ? normalizeToolInput(block.name, rawInput) as Record<string, unknown> : undefined;
-        if (!input) return;
-
-        const filePath = extractFilePath(input);
-        if (!filePath) return;
-
-        // Check if operation completed successfully
         const result = findToolResult(block.id, messageIndex);
-        if (!isSuccessfulResult(result)) return;
-
-        const { oldString, newString, replaceAll } = extractStrings(input);
-        const { additions, deletions } = resolveLineStats(input, toolName, oldString, newString);
-        const lineInfo = getToolLineInfo(input, undefined, result);
-
-        const operation: EditOperation = {
-          toolName,
-          oldString,
-          newString,
-          additions,
-          deletions,
-          replaceAll,
-          lineStart: lineInfo.start,
-          lineEnd: lineInfo.end,
-        };
-
-        // Group by file path
-        const existing = fileOperationsMap.get(filePath) ?? [];
-        existing.push(operation);
-        fileOperationsMap.set(filePath, existing);
+        recordFileModifyToolUse(fileOperationsMap, block, result);
       });
     });
 
-    // Convert map to array of summaries
-    const summaries: FileChangeSummary[] = [];
+    // Background subagent Write/Edit tools only exist on sidechain transcripts.
+    collectFileOperationsFromSubagentHistories(subagentHistories, fileOperationsMap);
 
-    fileOperationsMap.forEach((operations, filePath) => {
-      // Calculate totals
-      const totalAdditions = operations.reduce((sum, op) => sum + (op.additions || 0), 0);
-      const totalDeletions = operations.reduce((sum, op) => sum + (op.deletions || 0), 0);
-
-      // Defensive: ensure status is a valid string
-      const rawStatus = determineFileStatus(operations);
-      const status: FileChangeStatus = rawStatus === 'A' ? 'A' : 'M';
-
-      const firstLineOperation = operations.find((op) => typeof op.lineStart === 'number');
-
-      summaries.push({
-        filePath: String(filePath || ''),
-        fileName: String(getFileName(filePath) || filePath || 'unknown'),
-        status,
-        additions: totalAdditions,
-        deletions: totalDeletions,
-        lineStart: firstLineOperation?.lineStart,
-        lineEnd: firstLineOperation?.lineEnd,
-        operations,
-      });
-    });
-
-    // Sort: Added files first, then by file path
-    summaries.sort((a, b) => {
-      if (a.status !== b.status) {
-        return a.status === 'A' ? -1 : 1;
-      }
-      return a.filePath.localeCompare(b.filePath);
-    });
-
-    return summaries;
-  }, [messages, getContentBlocks, findToolResult, startFromIndex]);
+    return summariesFromOperationsMap(fileOperationsMap);
+  }, [messages, getContentBlocks, findToolResult, startFromIndex, subagentHistories]);
 }

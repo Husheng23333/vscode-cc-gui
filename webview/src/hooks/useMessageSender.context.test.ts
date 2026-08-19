@@ -188,6 +188,42 @@ describe('useMessageSender - /context command', () => {
     expect(payload.model).toBe('gpt-5.5');
   });
 
+  it('includes ContextBar file path when auto-open-file is enabled', () => {
+    const opts = createOptions({
+      currentProvider: 'opencode',
+      selectedModel: 'gpt-oss',
+      autoOpenFileEnabled: true,
+      contextBarFile: '/Users/hpstream/Desktop/github/vscode-cc-gui/README.md',
+    });
+
+    const { result } = renderHook(() => useMessageSender(opts));
+
+    act(() => {
+      result.current.handleSubmit('这个文件的路径是什么？');
+    });
+
+    const payload = getBridgePayload('send_message');
+    expect(payload.contextBarFile).toBe(
+      '/Users/hpstream/Desktop/github/vscode-cc-gui/README.md',
+    );
+  });
+
+  it('omits ContextBar file path when auto-open-file is closed', () => {
+    const opts = createOptions({
+      autoOpenFileEnabled: false,
+      contextBarFile: '/repo/README.md',
+    });
+
+    const { result } = renderHook(() => useMessageSender(opts));
+
+    act(() => {
+      result.current.handleSubmit('hello');
+    });
+
+    const payload = getBridgePayload('send_message');
+    expect(payload.contextBarFile).toBeUndefined();
+  });
+
   it('applies [1m] model suffix on send when long context is enabled for Claude only', () => {
     const opts = createOptions({
       currentProvider: 'claude',

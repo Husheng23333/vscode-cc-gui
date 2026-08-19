@@ -452,13 +452,6 @@ export const CODEX_PROVIDER_PRESETS: CodexProviderPreset[] = [
     authJson: DEFAULT_CODEX_AUTH_JSON,
   },
   {
-    id: 'deepseek',
-    name: 'DeepSeek',
-    nameKey: 'settings.provider.presets.deepseek',
-    configToml: buildCodexProviderConfigToml('deepseek', 'https://api.deepseek.com', 'deepseek-v4-flash', 'chat'),
-    authJson: DEFAULT_CODEX_AUTH_JSON,
-  },
-  {
     id: 'minimax',
     name: 'MiniMax',
     nameKey: 'settings.provider.presets.minimax',

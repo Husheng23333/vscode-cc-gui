@@ -4,6 +4,7 @@
  */
 import { sendMessage as openCodeSendMessage } from '../services/opencode/message-service.js';
 import { listModels as openCodeListModels } from '../services/opencode/models-service.js';
+import { applyOpenedFilesToCliMessage } from '../services/cli-opened-files.js';
 
 /**
  * Execute an OpenCode command.
@@ -21,9 +22,10 @@ export async function handleOpenCodeCommand(command, args, stdinData) {
           cwd,
           model,
           reasoningEffort,
+          openedFiles,
         } = stdinData;
         await openCodeSendMessage(
-          message,
+          applyOpenedFilesToCliMessage(message, openedFiles || null),
           sessionId || '',
           cwd || '',
           model || '',

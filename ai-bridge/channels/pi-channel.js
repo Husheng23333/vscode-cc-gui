@@ -4,6 +4,7 @@
  */
 import { sendMessage as piSendMessage } from '../services/pi/message-service.js';
 import { listModels as piListModels } from '../services/pi/models-service.js';
+import { applyOpenedFilesToCliMessage } from '../services/cli-opened-files.js';
 
 /**
  * Execute a PI command.
@@ -21,9 +22,10 @@ export async function handlePiCommand(command, args, stdinData) {
           cwd,
           model,
           reasoningEffort,
+          openedFiles,
         } = stdinData;
         await piSendMessage(
-          message,
+          applyOpenedFilesToCliMessage(message, openedFiles || null),
           sessionId || '',
           cwd || '',
           model || '',

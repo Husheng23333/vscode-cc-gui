@@ -2,7 +2,7 @@
   "name": "vscode-cc-gui",
   "displayName": "CCGUI / CC GUI（Claude Codex OpenCode Kimi）",
   "description": "CCGUI / CC GUI — independent open-source GUI for Claude Code, Codex, OpenCode, Kimi, Grok and more (unofficial)",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "MossX",
   "author": {
     "name": "MossX"
@@ -54,14 +54,14 @@
       "activitybar": [
         {
           "id": "cc-gui-activity",
-          "title": "CC GUI",
+          "title": "%ccGui.viewsContainers.activitybar.title%",
           "icon": "media/icon-activity.svg"
         }
       ],
       "secondarySidebar": [
         {
           "id": "cc-gui-secondary",
-          "title": "CC GUI",
+          "title": "%ccGui.viewsContainers.secondarySidebar.title%",
           "icon": "media/icon-outline.svg"
         }
       ]
@@ -71,22 +71,22 @@
         {
           "type": "webview",
           "id": "ccGui.mainView",
-          "name": "CC GUI"
+          "name": "%ccGui.views.mainView.name%"
         }
       ],
       "cc-gui-secondary": [
         {
           "type": "webview",
           "id": "ccGui.secondaryView",
-          "name": "CC GUI"
+          "name": "%ccGui.views.secondaryView.name%"
         }
       ]
     },
     "commands": [
       {
         "command": "ccGui.openPanel",
-        "title": "Open CC GUI",
-        "category": "CC GUI",
+        "title": "%ccGui.command.openPanel.title%",
+        "category": "%ccGui.command.category%",
         "icon": {
           "light": "media/icon-outline.svg",
           "dark": "media/icon-outline.svg"
@@ -94,67 +94,67 @@
       },
       {
         "command": "ccGui.newSession",
-        "title": "New Chat Tab",
-        "category": "CC GUI",
+        "title": "%ccGui.command.newSession.title%",
+        "category": "%ccGui.command.category%",
         "icon": "$(add)"
       },
       {
         "command": "ccGui.renameActiveChatTab",
-        "title": "Rename Active Chat Tab",
-        "category": "CC GUI",
+        "title": "%ccGui.command.renameActiveChatTab.title%",
+        "category": "%ccGui.command.category%",
         "icon": "$(edit)"
       },
       {
         "command": "ccGui.openDevTools",
-        "title": "Open Webview Developer Tools",
-        "category": "CC GUI",
+        "title": "%ccGui.command.openDevTools.title%",
+        "category": "%ccGui.command.category%",
         "icon": "$(debug-console)"
       },
       {
         "command": "ccGui.hidePanel",
-        "title": "Hide CC GUI Panel",
-        "category": "CC GUI"
+        "title": "%ccGui.command.hidePanel.title%",
+        "category": "%ccGui.command.category%"
       },
       {
         "command": "ccGui.sendSelection",
-        "title": "Send Selection Reference to Claude",
-        "category": "CC GUI"
+        "title": "%ccGui.command.sendSelection.title%",
+        "category": "%ccGui.command.category%"
       },
       {
         "command": "ccGui.copySelectionReference",
-        "title": "Copy AI Reference",
-        "category": "CC GUI"
+        "title": "%ccGui.command.copySelectionReference.title%",
+        "category": "%ccGui.command.category%"
       },
       {
         "command": "ccGui.sendFilePath",
-        "title": "Send File Path to Claude",
-        "category": "CC GUI"
+        "title": "%ccGui.command.sendFilePath.title%",
+        "category": "%ccGui.command.category%"
       },
       {
         "command": "ccGui.generateCommitMessage",
-        "title": "Generate Commit Message with Claude",
-        "category": "CC GUI",
+        "title": "%ccGui.command.generateCommitMessage.title%",
+        "category": "%ccGui.command.category%",
         "icon": "$(git-commit)"
       },
       {
         "command": "ccGui.quickFixWithClaude",
-        "title": "Fix with Claude",
-        "category": "CC GUI"
+        "title": "%ccGui.command.quickFixWithClaude.title%",
+        "category": "%ccGui.command.category%"
       },
       {
         "command": "ccGui.saveSessionTemplate",
-        "title": "Save Session as Template",
-        "category": "CC GUI"
+        "title": "%ccGui.command.saveSessionTemplate.title%",
+        "category": "%ccGui.command.category%"
       },
       {
         "command": "ccGui.createSessionFromTemplate",
-        "title": "Create Session from Template",
-        "category": "CC GUI"
+        "title": "%ccGui.command.createSessionFromTemplate.title%",
+        "category": "%ccGui.command.category%"
       },
       {
         "command": "ccGui.runSetupWizard",
-        "title": "Run Setup Wizard",
-        "category": "CC GUI"
+        "title": "%ccGui.command.runSetupWizard.title%",
+        "category": "%ccGui.command.category%"
       }
     ],
     "menus": {
@@ -195,7 +195,12 @@
       "scm/title": [
         {
           "command": "ccGui.generateCommitMessage",
-          "group": "navigation",
+          "group": "navigation@50",
+          "when": "scmProvider == git"
+        },
+        {
+          "command": "ccGui.generateCommitMessage",
+          "group": "1_ccgui@1",
           "when": "scmProvider == git"
         }
       ],
@@ -227,22 +232,22 @@
       }
     ],
     "configuration": {
-      "title": "CC GUI",
+      "title": "%ccGui.configuration.title%",
       "properties": {
         "ccGui.nodePath": {
           "type": "string",
           "default": "",
-          "description": "Node.js executable used only by CC GUI (requires v20+). Does not change your project terminal Node. Leave empty to use auto-detected node on PATH."
+          "description": "%ccGui.configuration.nodePath.description%"
         },
         "ccGui.autoSyncActiveFile": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically sync active editor file context to Claude"
+          "description": "%ccGui.configuration.autoSyncActiveFile.description%"
         },
         "ccGui.enableDebugLog": {
           "type": "boolean",
           "default": false,
-          "description": "Enable CC GUI debug logging. Logs appear in View → Output → CC GUI. Also available under CC GUI Settings → Basic → Behavior. Off by default."
+          "description": "%ccGui.configuration.enableDebugLog.description%"
         }
       }
     }
