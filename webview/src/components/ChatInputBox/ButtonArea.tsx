@@ -136,8 +136,9 @@ export const ButtonArea = ({
    * Apply model name mapping
    * Maps base model IDs to actual model names (e.g., versions with capacity suffixes)
    */
-  const applyModelMapping = useCallback((model: ModelInfo, mapping: { main?: string; haiku?: string; sonnet?: string; opus?: string }): ModelInfo => {
+  const applyModelMapping = useCallback((model: ModelInfo, mapping: { main?: string; fable?: string; haiku?: string; sonnet?: string; opus?: string }): ModelInfo => {
     const modelKeyMap: Record<string, keyof typeof mapping> = {
+      'claude-fable-5': 'fable',
       'claude-sonnet-4-6': 'sonnet',
       'claude-opus-4-8': 'opus',
       'claude-opus-4-7': 'opus',

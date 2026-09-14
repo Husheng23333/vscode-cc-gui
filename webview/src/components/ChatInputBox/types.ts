@@ -368,11 +368,6 @@ export const CLAUDE_MODELS: ModelInfo[] = [
     description: 'Opus 5 · Latest Opus upgrade',
   },
   {
-    id: 'claude-opus-4-8',
-    label: 'Opus 4.8',
-    description: 'Opus 4.8 · Previous Opus generation',
-  },
-  {
     id: 'claude-sonnet-5',
     label: 'Sonnet 5',
     description: 'Sonnet 5 · Use the default model',
