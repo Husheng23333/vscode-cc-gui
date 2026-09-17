@@ -17,6 +17,9 @@ interface UseStreamingMessagesReturn {
   // Content refs
   streamingContentRef: React.MutableRefObject<string>;
   streamingThinkingRef: React.MutableRefObject<string>;
+  // Offsets in the cumulative thinking buffer where a new block starts
+  // (set by window.onBlockReset when the backend signals [BLOCK_RESET]).
+  thinkingBlockBoundariesRef: React.MutableRefObject<number[]>;
   isStreamingRef: React.MutableRefObject<boolean>;
   useBackendStreamingRenderRef: React.MutableRefObject<boolean>;
   streamingMessageIndexRef: React.MutableRefObject<number>;
@@ -51,6 +54,11 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
   // Content refs
   const streamingContentRef = useRef('');
   const streamingThinkingRef = useRef('');
+  // Cumulative-buffer offsets where a new thinking block starts. The thinking
+  // buffer itself stays cumulative (syncThinkingBlocksWithContent relies on
+  // prefix-stripping); these boundaries only control how the buffer is split
+  // into separate raw blocks when patching the streaming assistant message.
+  const thinkingBlockBoundariesRef = useRef<number[]>([]);
   const isStreamingRef = useRef(false);
   const useBackendStreamingRenderRef = useRef(false);
   const streamingMessageIndexRef = useRef<number>(-1);
@@ -265,6 +273,47 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
   };
 
   /**
+   * Split the rendered thinking blocks at the boundaries recorded by
+   * window.onBlockReset ([BLOCK_RESET] from the backend). The cumulative
+   * buffer is sliced into one block per sealed segment plus the still-growing
+   * remainder, so a new thinking block never merges into the previous one.
+   * Existing thinking blocks between the first and last are replaced: their
+   * content always derives from the same cumulative buffer during streaming.
+   */
+  const splitThinkingBlocksAtBoundaries = (blocks: ContentBlock[], thinking: string): ContentBlock[] => {
+    const boundaries = thinkingBlockBoundariesRef.current;
+    if (boundaries.length === 0 || !thinking) return blocks;
+
+    const segments: string[] = [];
+    let start = 0;
+    for (const boundary of boundaries) {
+      const clamped = Math.min(Math.max(boundary, start), thinking.length);
+      if (clamped > start) {
+        segments.push(thinking.slice(start, clamped));
+        start = clamped;
+      }
+    }
+    if (start < thinking.length) {
+      segments.push(thinking.slice(start));
+    }
+    if (segments.length <= 1) return blocks;
+
+    const thinkingIndices = blocks
+      .map((block, index) => (block?.type === 'thinking' ? index : -1))
+      .filter((index) => index >= 0);
+    if (thinkingIndices.length === 0) return blocks;
+
+    const first = thinkingIndices[0];
+    const last = thinkingIndices[thinkingIndices.length - 1];
+    const segmentBlocks: ContentBlock[] = segments.map((segment) => ({
+      type: 'thinking',
+      thinking: segment,
+      text: segment,
+    }));
+    return [...blocks.slice(0, first), ...segmentBlocks, ...blocks.slice(last + 1)];
+  };
+
+  /**
    * Get or create streaming assistant message index.
    * NOTE: This function MUTATES the passed list array by pushing a new message
    * if no assistant message exists. Call this only with a copied array (e.g., [...prev]).
@@ -317,6 +366,7 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
 
       let blocks = [...rawContent] as ContentBlock[];
       blocks = syncThinkingBlocksWithContent(blocks, deltaThinking);
+      blocks = splitThinkingBlocksAtBoundaries(blocks, deltaThinking);
       blocks = syncTextBlocksWithContent(blocks, bestContent);
 
       patchedRaw = (msg
@@ -325,6 +375,7 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
     } else if (deltaThinking) {
       let blocks: ContentBlock[] = [];
       blocks = syncThinkingBlocksWithContent(blocks, deltaThinking);
+      blocks = splitThinkingBlocksAtBoundaries(blocks, deltaThinking);
       blocks = syncTextBlocksWithContent(blocks, bestContent);
       patchedRaw = { message: { content: blocks } } as ClaudeMessage['raw'];
     }
@@ -341,6 +392,7 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
   const resetStreamingState = () => {
     streamingContentRef.current = '';
     streamingThinkingRef.current = '';
+    thinkingBlockBoundariesRef.current = [];
     streamingMessageIndexRef.current = -1;
     lastContentUpdateRef.current = 0;
     lastThinkingUpdateRef.current = 0;
@@ -362,6 +414,7 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
     // Content refs
     streamingContentRef,
     streamingThinkingRef,
+    thinkingBlockBoundariesRef,
     isStreamingRef,
     useBackendStreamingRenderRef,
     streamingMessageIndexRef,

@@ -69,6 +69,14 @@ function sliceHasToolUse(
   return false;
 }
 
+/**
+ * Derive the todo/plan list for a conversation scope.
+ *
+ * Codex plans belong to their own user turn: a settled later turn must not
+ * revive an earlier turn's plan snapshot, so the scope is always narrowed to
+ * the latest user turn. Claude settled/history views still scan the full
+ * transcript to restore the latest persisted plan snapshot.
+ */
 export function deriveTodosForTurn(
   turnMessages: ClaudeMessage[],
   getContentBlocks: (message: ClaudeMessage) => ClaudeContentBlock[],
@@ -97,6 +105,8 @@ export function deriveTodosForTurn(
         break;
       }
       if (todos && isExplicitEmptySnapshot) {
+        // Codex treats an explicit empty snapshot as clearing the plan; Claude
+        // falls back to accumulated structured tasks below.
         if (currentProvider === 'codex') {
           latestTodos = todos;
           break;

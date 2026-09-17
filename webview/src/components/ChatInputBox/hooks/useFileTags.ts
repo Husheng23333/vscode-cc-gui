@@ -278,15 +278,26 @@ export function useFileTags({
 
       // Validate if path is a valid reference (must exist in pathMappingRef)
       // Only files selected from dropdown list are recorded in pathMappingRef
+      const isRegistered =
+        pathMappingRef.current.has(pureFilePath) ||
+        pathMappingRef.current.has(pureFileName) ||
+        pathMappingRef.current.has(filePath);
+
+      // Preserve the existing single-reference fallback for a manually typed
+      // absolute path or line reference. Boundaries are only ambiguous when
+      // another @ marker also starts an absolute-looking path; ordinary @
+      // text (emails, annotations) must not disable the fallback. Accepting
+      // an absolute-looking fallback alongside another path-like marker can
+      // absorb ordinary text between two references (issue #1726).
+      const absoluteAtMarkers = currentText.match(/@(?=(?:[a-zA-Z]:[/\\]|\\\\|\/))/g);
+      const allowFallback = absoluteAtMarkers === null || absoluteAtMarkers.length <= 1;
+
       // Also allow paths with line numbers (e.g. #L10-20) or absolute paths
       const hasLineNumber = /#L\d+/.test(filePath);
       const isAbsolutePath = /^[a-zA-Z]:[/\\]/.test(filePath) || filePath.startsWith('/');
       const isValidReference =
-        pathMappingRef.current.has(pureFilePath) ||
-        pathMappingRef.current.has(pureFileName) ||
-        pathMappingRef.current.has(filePath) ||
-        hasLineNumber ||
-        isAbsolutePath;
+        isRegistered ||
+        (allowFallback && (hasLineNumber || isAbsolutePath));
 
       // If not a valid reference, keep original text, don't render as tag
       if (!isValidReference) {

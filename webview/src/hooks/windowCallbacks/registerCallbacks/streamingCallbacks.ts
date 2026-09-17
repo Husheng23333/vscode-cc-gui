@@ -183,6 +183,7 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     setExpandedThinking,
     streamingContentRef,
     streamingThinkingRef,
+    thinkingBlockBoundariesRef,
     isStreamingRef,
     useBackendStreamingRenderRef,
     autoExpandedThinkingKeysRef,
@@ -272,6 +273,7 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     window.__turnStartedAt = Date.now();
     streamingContentRef.current = '';
     streamingThinkingRef.current = '';
+    thinkingBlockBoundariesRef.current = [];
     isStreamingRef.current = true;
     startStallWatchdog();
     useBackendStreamingRenderRef.current = false;
@@ -637,6 +639,7 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     // Content buffer refs
     streamingContentRef.current = '';
     streamingThinkingRef.current = '';
+    thinkingBlockBoundariesRef.current = [];
     autoExpandedThinkingKeysRef.current.clear();
 
     // Mark that streaming just ended - used by mergeConsecutiveAssistantMessages to
@@ -871,6 +874,7 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     streamingTurnIdRef.current = -1;
     streamingContentRef.current = '';
     streamingThinkingRef.current = '';
+    thinkingBlockBoundariesRef.current = [];
     autoExpandedThinkingKeysRef.current.clear();
 
     setMessages((prev) => {
@@ -1144,35 +1148,31 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     } catch { /* ignore parse errors */ }
   };
 
-  // Block reset callback — clears streaming content refs when a new assistant
-  // message starts within an ongoing stream (e.g., after tool_use loop iteration).
-  // This prevents cross-turn content merging where new thinking/text deltas
-  // would append to previous turn's buffered content.
+  // Block reset callback — the backend emits [BLOCK_RESET] when a new content
+  // block starts within an ongoing stream (content_block_start boundaries and
+  // per-block normalized assistant snapshots, e.g. consecutive thinking blocks
+  // sharing one response id).
+  //
+  // The thinking buffer must stay CUMULATIVE: syncThinkingBlocksWithContent
+  // reconciles it against raw blocks by prefix-stripping, so clearing it here
+  // would either drop the finished block from the live render (single raw
+  // block gets overwritten) or freeze later deltas (multi-block prefix
+  // mismatch). Instead, record the current buffer length as a block boundary;
+  // patchAssistantForStreaming then splits the buffer into one raw thinking
+  // block per segment, so the new block never merges into the previous one.
+  //
+  // No explicit flush is needed before recording the boundary: deltas land in
+  // the refs synchronously (the rAF throttle only re-renders from the refs),
+  // so nothing sits in a throttle window that a reset could discard.
   window.onBlockReset = () => {
     if (!isStreamingRef.current) {
       // Stream not active, ignore (could be stale signal after stream ended)
       return;
     }
-    // Clear content buffers - new deltas will start fresh
-    streamingContentRef.current = '';
-    streamingThinkingRef.current = '';
-    // Intentionally NOT resetting streamingMessageIndexRef here: the backend will
-    // send a new updateMessages snapshot for this turn, which will eventually set
-    // the correct index via the isStaleSnapshot guard. Resetting the index now
-    // would leave a window where incoming deltas have nowhere to land.
-    // Reset throttle timeouts to ensure clean state for new deltas
-    if (contentUpdateTimeoutRef.current != null) {
-      cancelAnimationFrame(contentUpdateTimeoutRef.current);
-      contentUpdateTimeoutRef.current = null;
+    const length = streamingThinkingRef.current.length;
+    const boundaries = thinkingBlockBoundariesRef.current;
+    if (boundaries[boundaries.length - 1] !== length) {
+      boundaries.push(length);
     }
-    if (thinkingUpdateTimeoutRef.current != null) {
-      cancelAnimationFrame(thinkingUpdateTimeoutRef.current);
-      thinkingUpdateTimeoutRef.current = null;
-    }
-    // Reset last update timestamps to prevent throttle delays
-    lastContentUpdateRef.current = 0;
-    lastThinkingUpdateRef.current = 0;
-    // Clear auto-expanded thinking keys for the new turn
-    autoExpandedThinkingKeysRef.current.clear();
   };
 }

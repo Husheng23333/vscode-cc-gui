@@ -64,6 +64,7 @@ export function registerWindowCallbacks(
     streamingMessageIndexRef: options.streamingMessageIndexRef,
     streamingContentRef: options.streamingContentRef,
     streamingThinkingRef: options.streamingThinkingRef,
+    thinkingBlockBoundariesRef: options.thinkingBlockBoundariesRef,
     autoExpandedThinkingKeysRef: options.autoExpandedThinkingKeysRef,
     contentUpdateTimeoutRef: options.contentUpdateTimeoutRef,
     thinkingUpdateTimeoutRef: options.thinkingUpdateTimeoutRef,
@@ -108,6 +109,7 @@ export function registerWindowCallbacks(
     try {
       if (!options.setSubagentHistories) return;
       const result = JSON.parse(json) as SubagentHistoryResponse;
+      // Drop late responses from a session/provider that is no longer active.
       if (!isCurrentSubagentResponse(
         result,
         options.currentSessionIdRef.current,

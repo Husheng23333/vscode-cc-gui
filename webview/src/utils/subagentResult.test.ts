@@ -229,3 +229,72 @@ describe('parseAgentToolMeta', () => {
     expect(parseAgentToolMeta(getter, 'tu_1')).toEqual({});
   });
 });
+
+describe('parseSpawnAgentMeta', () => {
+  it('derives identity from the final task path segment without conflating it with an agent UUID', () => {
+    expect(parseSpawnAgentMeta({
+      task_name: 'audit_ui',
+      model: 'gpt-5.6-terra',
+      reasoning_effort: 'high',
+    })).toEqual({
+      agentPath: 'audit_ui',
+      identityLabel: 'audit_ui',
+      model: 'gpt-5.6-terra',
+      reasoningEffort: 'high',
+    });
+  });
+
+  it('prefers nickname and otherwise uses the final task path segment for display identity', () => {
+    expect(parseSpawnAgentMeta({ task_name: '/root/reviewer' })).toMatchObject({
+      agentPath: '/root/reviewer',
+      identityLabel: 'reviewer',
+    });
+    expect(parseSpawnAgentMeta({ task_name: '/root/reviewer', nickname: 'Hilbert' })).toMatchObject({
+      identityLabel: 'Hilbert',
+      nickname: 'Hilbert',
+    });
+  });
+
+  it('hides the description when it duplicates the opaque transport message', () => {
+    expect(parseSpawnAgentMeta({
+      task_name: 'reviewer',
+      message: 'opaque',
+      description: 'opaque',
+    }).description).toBeUndefined();
+    expect(parseSpawnAgentMeta({
+      task_name: 'reviewer',
+      message: 'opaque',
+      description: 'Review the bridge',
+    }).description).toBe('Review the bridge');
+  });
+});
+
+describe('isSpawnAgentArgumentFailureNoise', () => {
+  it('identifies empty historical calls with explicit argument parsing failures', () => {
+    expect(isSpawnAgentArgumentFailureNoise({}, {
+      type: 'tool_result',
+      content: 'failed to parse function arguments: EOF while parsing a value',
+    })).toBe(true);
+  });
+
+  it('keeps valid launches and unrelated runtime errors visible', () => {
+    const parseFailure = {
+      type: 'tool_result' as const,
+      content: 'failed to parse function arguments: missing field task_name',
+      is_error: true,
+    };
+    expect(isSpawnAgentArgumentFailureNoise({ task_name: 'reviewer' }, parseFailure)).toBe(false);
+    expect(isSpawnAgentArgumentFailureNoise({}, {
+      type: 'tool_result',
+      content: 'permission denied while starting agent',
+      is_error: true,
+    })).toBe(false);
+  });
+});
+
+describe('hasSubagentTranscript', () => {
+  it('distinguishes lightweight status from a loaded transcript', () => {
+    expect(hasSubagentTranscript({})).toBe(false);
+    expect(hasSubagentTranscript({ messages: [] })).toBe(true);
+  });
+});

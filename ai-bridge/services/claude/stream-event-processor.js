@@ -1,6 +1,11 @@
 import { emitAccumulatedUsage, mergeUsage } from '../../utils/usage-utils.js';
 import { truncateErrorContent, truncateToolResultBlock } from './message-output-filter.js';
-import { normalizeStreamDelta, resolveSnapshotDelta, resetTurnBlockState } from './stream-delta-normalizer.js';
+import {
+  normalizeStreamDelta,
+  resolveSnapshotDelta,
+  resetTurnBlockState,
+  prepareAssistantSnapshotBlock,
+} from './stream-delta-normalizer.js';
 
 export function emitUsageTag(msg) {
   if (msg.type === 'assistant' && msg.message?.usage) {
@@ -62,6 +67,17 @@ export function processStreamEvent(msg, turnState) {
     }
   }
 
+  if (event.type === 'content_block_start' && event.content_block) {
+    const hasPreviousBlock =
+      (turnState.textBlockContentByIndex instanceof Map && turnState.textBlockContentByIndex.size > 0)
+      || (turnState.thinkingBlockContentByIndex instanceof Map
+        && turnState.thinkingBlockContentByIndex.size > 0);
+    if (hasPreviousBlock) {
+      resetTurnBlockState(turnState);
+      process.stdout.write('[BLOCK_RESET]\n');
+    }
+  }
+
   if (event.type === 'message_delta' && event.usage) {
     turnState.accumulatedUsage = mergeUsage(turnState.accumulatedUsage, event.usage);
     emitAccumulatedUsage(turnState.accumulatedUsage);
@@ -92,12 +108,23 @@ export function processMessageContent(msg, turnState) {
     for (let i = 0; i < content.length; i += 1) {
       const block = content[i];
       if (block.type === 'text') {
-        emitSnapshotText(block.text || '', turnState, i);
+        const text = block.text || '';
+        if (prepareAssistantSnapshotBlock(turnState, 'text', i, text, msg)) {
+          process.stdout.write('[BLOCK_RESET]\n');
+        }
+        emitSnapshotText(text, turnState, i);
       } else if (block.type === 'thinking') {
-        emitSnapshotThinking(block.thinking || block.text || '', turnState, i);
+        const thinking = block.thinking || block.text || '';
+        if (prepareAssistantSnapshotBlock(turnState, 'thinking', i, thinking, msg)) {
+          process.stdout.write('[BLOCK_RESET]\n');
+        }
+        emitSnapshotThinking(thinking, turnState, i);
       }
     }
   } else if (typeof content === 'string') {
+    if (prepareAssistantSnapshotBlock(turnState, 'text', 0, content, msg)) {
+      process.stdout.write('[BLOCK_RESET]\n');
+    }
     emitSnapshotText(content, turnState, 0);
   }
 }

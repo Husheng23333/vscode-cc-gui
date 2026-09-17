@@ -28,6 +28,30 @@ test('resolvePromptEnhancerRuntimeConfig prefers Codex when auto mode has both p
   assert.equal(resolved.model, 'gpt-5.5');
 });
 
+test('resolvePromptEnhancerRuntimeConfig migrates a persisted retired Claude model on read', () => {
+  // A config saved while the default was the (now retired) claude-sonnet-4-6 would
+  // pin the enhancer to a dead model forever - every generation then fails with an
+  // empty response (#1693). Reading must self-heal the stored id.
+  const resolved = resolvePromptEnhancerRuntimeConfig({
+    promptEnhancerConfig: {
+      provider: null,
+      effectiveProvider: 'claude',
+      resolutionSource: 'auto',
+      models: {
+        claude: 'claude-sonnet-4-6',
+        codex: 'gpt-5.5',
+      },
+      availability: {
+        claude: true,
+        codex: true,
+      },
+    },
+  });
+
+  assert.equal(resolved.provider, 'claude');
+  assert.equal(resolved.model, 'claude-sonnet-5');
+});
+
 test('resolvePromptEnhancerRuntimeConfig throws a strict error when manual provider is unavailable', () => {
   assert.throws(
     () => resolvePromptEnhancerRuntimeConfig({

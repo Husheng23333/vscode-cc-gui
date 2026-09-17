@@ -18,7 +18,7 @@ import {
   isCodexSdkAvailable,
 } from '../utils/sdk-loader.js';
 import { setupApiKey, buildCliEnv, buildWebviewControlledSettingsOverride } from '../config/api-config.js';
-import { mapModelIdToSdkName } from '../utils/model-utils.js';
+import { mapModelIdToSdkName, normalizeRetiredModelId } from '../utils/model-utils.js';
 import { getRealHomeDir } from '../utils/path-utils.js';
 import { getClaudeCliPathOverride } from '../utils/claude-cli-path.js';
 import { buildCodexCliEnvironment } from './codex/codex-utils.js';
@@ -239,7 +239,10 @@ function normalizePromptEnhancerConfig(config) {
       : null,
     resolutionSource: typeof config.resolutionSource === 'string' ? config.resolutionSource : 'auto',
     models: {
-      claude: config.models?.claude || DEFAULT_PROMPT_ENHANCER_CONFIG.models.claude,
+      // Self-heal persisted retired Claude model ids on read: a config saved while
+      // the default was claude-sonnet-4-6 keeps that dead id forever and every
+      // enhancement then fails with an empty response (#1693, see #1678).
+      claude: normalizeRetiredModelId(config.models?.claude) || DEFAULT_PROMPT_ENHANCER_CONFIG.models.claude,
       codex: config.models?.codex || DEFAULT_PROMPT_ENHANCER_CONFIG.models.codex,
     },
     availability: {

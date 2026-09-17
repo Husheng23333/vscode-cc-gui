@@ -22,6 +22,38 @@ const MIN_STREAM_STALL_TIMEOUT_SECONDS = 1;
 const MAX_STREAM_STALL_TIMEOUT_SECONDS = 86400;
 const LEGACY_STREAM_STALL_TIMEOUT_MINUTES_KEY = 'ccg.stream_stall_timeout_minutes';
 
+/**
+ * Migrate retired Claude model ids to their live replacement.
+ * Persisted Commit AI / Prompt Enhancer configs keep whatever id was saved; a
+ * retired id makes every generation fail with an empty response (#1693).
+ * Same mapping as the upstream chat tab restore path (#1678).
+ * Non-Claude ids pass through unchanged; blank/nullish values return undefined
+ * so callers fall back to the default.
+ */
+function normalizeRetiredModelId(model: unknown): string | undefined {
+  if (typeof model !== 'string') return undefined;
+  const trimmed = model.trim();
+  if (!trimmed) return undefined;
+  let base = trimmed;
+  let oneM = false;
+  if (base.endsWith('[1m]')) {
+    base = base.slice(0, -'[1m]'.length);
+    oneM = true;
+  }
+  switch (base) {
+    case 'claude-sonnet-4-6':
+    case 'claude-sonnet-4-7':
+      base = 'claude-sonnet-5';
+      break;
+    case 'claude-opus-4-6':
+      base = 'claude-opus-4-8';
+      break;
+    default:
+      return trimmed;
+  }
+  return oneM ? `${base}[1m]` : base;
+}
+
 type FontMode = 'followEditor' | 'customFile';
 type FontConfig = {
   mode: FontMode;
@@ -560,10 +592,11 @@ export class SettingsStore {
 
   private resolveAiFeatureConfig(raw: any, defaultProvider: 'claude' | 'codex'): any {
     const models = {
-      // claude-sonnet-4-6/4-7 are retired — defaults must stay on live models,
-      // and persisted retired ids self-heal on read instead of failing every
-      // generation with an empty response.
-      claude: normalizeRetiredClaudeModelId(raw?.models?.claude) || 'claude-sonnet-5',
+      // Self-heal persisted retired Claude model ids on read: a config saved while
+      // the default was claude-sonnet-4-6 keeps that dead id forever and every
+      // generation then fails with an empty response (#1693, see #1678).
+      // claude-sonnet-4-6/4-7 are retired - defaults must stay on live models.
+      claude: normalizeRetiredModelId(raw?.models?.claude) || 'claude-sonnet-5',
       codex: raw?.models?.codex || 'gpt-5.5',
     };
     const availability = {
@@ -580,29 +613,6 @@ export class SettingsStore {
       availability,
     };
   }
-}
-
-/**
- * Retired Claude model ids → their live replacement, mirroring the webview's
- * LEGACY_CLAUDE_MODEL_ID_ALIASES. A config saved while the default was a
- * retired model keeps that dead id forever; migrating on read self-heals
- * persisted values without rewriting stored settings.
- */
-const RETIRED_CLAUDE_MODEL_IDS: Record<string, string> = {
-  'claude-sonnet-4-6': 'claude-sonnet-5',
-  'claude-sonnet-4-7': 'claude-sonnet-5',
-  'claude-opus-4-6': 'claude-opus-4-8',
-};
-
-function normalizeRetiredClaudeModelId(model: unknown): string | undefined {
-  if (typeof model !== 'string') return undefined;
-  const trimmed = model.trim();
-  if (!trimmed) return undefined;
-  const oneM = /\[1m\]$/i.test(trimmed);
-  const base = trimmed.replace(/\[1m\]$/i, '');
-  const migrated = RETIRED_CLAUDE_MODEL_IDS[base];
-  if (!migrated) return trimmed;
-  return oneM ? `${migrated}[1m]` : migrated;
 }
 
 export function dirnameOrWorkspace(filePath: string, workspacePath: string): string {

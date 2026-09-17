@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import {
   computeStatusScopeMessages,
   finalizeTodosForSettledTurn,
@@ -8,6 +9,10 @@ import type { ClaudeMessage, SubagentInfo, TodoItem } from '../types';
 
 const userMsg = (content: string): ClaudeMessage => ({ type: 'user', content });
 const assistantMsg = (): ClaudeMessage => ({ type: 'assistant', content: 'ok' });
+const todo = (status: TodoItem['status']): TodoItem => ({
+  content: 'work',
+  status,
+});
 
 describe('computeStatusScopeMessages', () => {
   it('uses the full conversation when not streaming', () => {
@@ -43,26 +48,69 @@ describe('computeStatusScopeMessages', () => {
   });
 });
 
-const subagent = (overrides: Partial<SubagentInfo>): SubagentInfo => ({
+const subagent = (input: SubagentInfo['status'] | Partial<SubagentInfo>): SubagentInfo => ({
   id: 'tu_1',
   type: 'research',
   description: 'task',
   status: 'running',
   messageIndex: 0,
-  ...overrides,
+  ...(typeof input === 'string' ? { status: input } : input),
 });
 
 describe('finalizeTodosForSettledTurn', () => {
-  const todos: TodoItem[] = [{ content: 'Implement', status: 'in_progress' }];
-
-  it('preserves Codex plan state when the main turn settles', () => {
-    expect(finalizeTodosForSettledTurn(todos, false, 'codex')).toEqual(todos);
+  it('leaves todos unchanged while streaming', () => {
+    const todos = [todo('in_progress'), todo('pending')];
+    expect(finalizeTodosForSettledTurn(todos, true, 'claude')).toEqual(todos);
   });
 
-  it('keeps the existing Claude settled-task behavior', () => {
-    expect(finalizeTodosForSettledTurn(todos, false, 'claude')).toEqual([
-      { content: 'Implement', status: 'completed' },
+  it('promotes in_progress todos to completed once the turn settles', () => {
+    const result = finalizeTodosForSettledTurn(
+      [todo('in_progress'), todo('pending'), todo('completed')],
+      false,
+      'claude',
+    );
+    expect(result.map((item) => item.status)).toEqual([
+      'completed',
+      'pending',
+      'completed',
     ]);
+  });
+
+  it('preserves Codex plan state when the main turn settles', () => {
+    const todos = [todo('in_progress'), todo('pending')];
+    expect(finalizeTodosForSettledTurn(todos, false, 'codex')).toEqual(todos);
+  });
+});
+
+describe('selectLatestSubagentTurn', () => {
+  const user = (content: string): ClaudeMessage => ({ type: 'user', content });
+  const assistant = (): ClaudeMessage => ({ type: 'assistant' });
+
+  it('keeps only the most recent turn containing valid extracted subagents', () => {
+    const messages = [user('first'), assistant(), user('second'), assistant()];
+    const first = subagent('completed');
+    const second = { ...subagent('running'), id: 'second', messageIndex: 3 };
+
+    expect(selectLatestSubagentTurn(messages, [{ ...first, messageIndex: 1 }, second])).toEqual([second]);
+  });
+
+  it('keeps the previous valid turn when a later turn produced no valid subagent', () => {
+    const messages = [user('first'), assistant(), user('noise-only'), assistant()];
+    const first = { ...subagent('running'), id: 'first', messageIndex: 1 };
+
+    expect(selectLatestSubagentTurn(messages, [first])).toEqual([first]);
+  });
+
+  it('keeps all valid subagents from the selected turn', () => {
+    const messages = [user('first'), assistant(), assistant()];
+    const first = { ...subagent('running'), id: 'first', messageIndex: 1 };
+    const second = { ...subagent('running'), id: 'second', messageIndex: 2 };
+
+    expect(selectLatestSubagentTurn(messages, [first, second])).toEqual([first, second]);
+  });
+
+  it('returns an empty list when there are no subagents', () => {
+    expect(selectLatestSubagentTurn([user('only')], [])).toEqual([]);
   });
 });
 

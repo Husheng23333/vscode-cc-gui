@@ -13,6 +13,50 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_DATA: ChangelogEntry[] = [
   {
+    version: '0.1.8',
+    date: '2026-08-27',
+    content: {
+      en: `✨ Features
+- Add a **Claude plan-usage bar** in the input toolbar, colored by spend pace vs. the 5h / 7d window budget, with a worst-window warning dot; **z.ai / GLM** backends fill the same bar from the monitor quota endpoint (plan tier, stale-cache hint) instead of SDK \`rate_limit_event\`
+- Nest **model / effort / speed / 1M context** into a compact model-config dropdown with in-viewport fly-outs and delayed submenu hover, so the input toolbar stays readable in narrow panel widths
+
+🔧 Improvements
+- Switch Claude settings startup sync to **repair-only fill-in-the-blanks**: missing provider-managed fields are added, existing user values (including per-env keys) in \`~/.claude/settings.json\` are never overwritten
+- Signal daemon **ready before SDK preload** so extension startup / heartbeats are no longer blocked on the Claude Agent SDK import
+
+🐛 Fixes
+- Clear **model-routing env vars** (\`ANTHROPIC_MODEL\` / \`ANTHROPIC_DEFAULT_*\`) in the settings override so \`~/.claude/settings.json\` can no longer pin every model family to one model (#1509)
+- Preserve **Claude thinking-block boundaries** during streaming so independent thoughts are no longer concatenated across assistant messages
+- Fix **\`@file\` references with spaces in the filename** on both the input and the rendered message, and preserve ordinary text between consecutive file chips (#1726)
+- Preserve **existing input content** when inserting an editor selection / snippet while a stale webview selection is still non-collapsed (#1700)
+- Stop **MCP stdio container leaks** by closing stdin (EOF) before signalling, and expand \`\${VAR}\` placeholders in \`.mcp.json\` env from Claude settings files (#1721, #1722)
+- Migrate the retired **Commit AI / Prompt Enhancer** default \`claude-sonnet-4-6\` to \`claude-sonnet-5\` on read (#1693)
+- Isolate **model labels and icons by provider** so third-party catalogs whose ids collide with \`claude-*\` slots no longer inherit Claude mappings
+- Restore **Codex subagent lifecycle and plan rendering**: isolate \`update_plan\` to the current turn, hide opaque spawn prompts, ignore late status responses from other sessions, and keep transient status failures retryable
+- Restore **Codex 0.148+ rollout history** by indexing sessions whose user prompt is a \`response_item\`
+- Migrate the retired **\`claude-sonnet-4-7\` default to \`claude-sonnet-5\`**; saved retired model ids now self-heal to live models on restore instead of pinning a dead model (#1678)`,
+      zh: `✨ 新功能
+- 输入栏工具区新增 **Claude 套餐用量条**：按 5h / 7d 窗口的消耗节奏着色，并用最差窗口圆点提示风险；**z.ai / GLM** 后端改为从 monitor 配额接口填充同一条用量条（展示套餐档位、过期缓存提示），而不再依赖 SDK \`rate_limit_event\`
+- 将 **模型 / 推理强度 / 速度 / 1M 上下文** 收进紧凑的模型配置下拉，子菜单限制在视口内弹出并延迟 hover 切换，窄宽度下输入工具栏仍可读
+
+🔧 优化
+- Claude 设置启动同步改为 **只补缺失字段**：仅填充缺失的供应商管理字段，永不覆盖用户在 \`~/.claude/settings.json\` 中的已有值（含 env 里的单个键）
+- Daemon 在 SDK 预加载前先发 **ready**，扩展启动 / 心跳不再被 Claude Agent SDK 导入阻塞
+
+🐛 修复
+- 在 settings override 中清空 **模型路由环境变量**（\`ANTHROPIC_MODEL\` / \`ANTHROPIC_DEFAULT_*\`），避免 \`~/.claude/settings.json\` 把所有模型族钉到同一个模型（#1509）
+- 流式输出中保留 **Claude thinking 块边界**，独立思考内容不再被拼接到一起
+- 修复 **文件名含空格的 \`@file\` 引用** 在输入框与消息展示两侧被截断的问题，并保留连续文件 chip 之间的普通文本（#1726）
+- 在 webview 仍残留未折叠选区时插入编辑器选区 / 片段，**不再删掉输入框已有内容**（#1700）
+- 先关闭 stdin（EOF）再发信号，避免 **MCP stdio 容器泄漏**；并从 Claude settings 文件展开 \`.mcp.json\` env 中的 \`\${VAR}\` 占位符（#1721、#1722）
+- 读取时把已退役的 **Commit AI / Prompt Enhancer** 默认模型 \`claude-sonnet-4-6\` 迁移为 \`claude-sonnet-5\`（#1693）
+- **按 provider 隔离模型标签与图标**，第三方目录里与 \`claude-*\` 槽位撞 id 的条目不再套用 Claude 映射
+- 修复 **Codex 子代理生命周期与计划渲染**：将 \`update_plan\` 隔离到当前轮，隐藏不透明的 spawn prompt，忽略来自其他会话的迟到状态响应，瞬时状态失败保持可重试
+- 恢复 **Codex 0.148+ rollout 历史**：索引 user prompt 为 \`response_item\` 的会话
+- 已退役的 **\`claude-sonnet-4-7\` 默认模型迁移为 \`claude-sonnet-5\`**；恢复的退役模型 id 自动自愈为在役模型，不再钉在失效模型上（#1678）`,
+    },
+  },
+  {
     version: '0.1.7',
     date: '2026-08-23',
     content: {

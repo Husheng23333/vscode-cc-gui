@@ -82,10 +82,13 @@ export const ModeSelect = ({ value, onChange, provider }: ModeSelectProps) => {
   const currentMode = modeOptions.find(m => m.id === value) || modeOptions[0];
 
   // Helper function to get translated mode text
-  const getModeText = (modeId: PermissionMode, field: 'label' | 'tooltip' | 'description') => {
+  const getModeText = (modeId: PermissionMode, field: 'label' | 'shortLabel' | 'tooltip' | 'description') => {
     if (provider === 'codex') {
       const codexKey = `codexModes.${modeId}.${field}`;
       const fallbackKey = `modes.${modeId}.${field}`;
+      if (field === 'shortLabel') {
+        return t(codexKey, { defaultValue: t(fallbackKey, { defaultValue: t(`codexModes.${modeId}.label`) }) });
+      }
       return t(codexKey, { defaultValue: t(fallbackKey) });
     }
 
@@ -97,10 +100,13 @@ export const ModeSelect = ({ value, onChange, provider }: ModeSelectProps) => {
       // Dynamic role with no i18n entry: show the raw ModeInfo strings
       // (capitalized role id / resolved model selector).
       const info = modeOptions.find((mode) => mode.id === modeId);
-      if (field === 'label') return info?.label ?? modeId;
+      if (field === 'label' || field === 'shortLabel') return info?.label ?? modeId;
       return info?.[field] ?? info?.description ?? '';
     }
 
+    if (field === 'shortLabel') {
+      return t(`modes.${modeId}.shortLabel`, { defaultValue: t(`modes.${modeId}.label`) });
+    }
     return t(`modes.${modeId}.${field}`);
   };
 
@@ -158,7 +164,7 @@ export const ModeSelect = ({ value, onChange, provider }: ModeSelectProps) => {
         title={getModeText(currentMode.id, 'tooltip') || `${t('chat.currentMode', { mode: getModeText(currentMode.id, 'label') })}`}
       >
         <span className={`codicon ${currentMode.icon}`} />
-        <span className="selector-button-text">{getModeText(currentMode.id, 'label')}</span>
+        <span className="selector-button-text">{getModeText(currentMode.id, 'shortLabel')}</span>
         <span className={`codicon codicon-chevron-${isOpen ? 'up' : 'down'}`} style={CHEVRON_ICON_STYLE} />
       </button>
 

@@ -72,6 +72,7 @@ ChatInputBox/
 ├── selectors/                # Dropdown selector components
 │   ├── ModeSelect.tsx
 │   ├── ModelSelect.tsx
+│   ├── ModelConfigSelect.tsx  # Compact nested model-settings dropdown
 │   └── ...
 │
 ├── Dropdown/                 # Dropdown components

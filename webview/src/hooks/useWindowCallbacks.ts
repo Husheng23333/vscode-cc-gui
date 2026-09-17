@@ -71,6 +71,7 @@ export interface UseWindowCallbacksOptions {
   // Streaming refs from useStreamingMessages
   streamingContentRef: MutableRefObject<string>;
   streamingThinkingRef: MutableRefObject<string>;
+  thinkingBlockBoundariesRef: MutableRefObject<number[]>;
   isStreamingRef: MutableRefObject<boolean>;
   useBackendStreamingRenderRef: MutableRefObject<boolean>;
   autoExpandedThinkingKeysRef: MutableRefObject<Set<string>>;

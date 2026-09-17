@@ -457,7 +457,7 @@ test('custom_tool_call exec update_plan treats array script failure output as an
   });
 });
 
-test('session replay emits custom_tool_call exec plans found only in JSONL', async () => {
+test('current-turn session replay emits custom_tool_call exec plans found only in JSONL', async () => {
   const tempDirectory = await mkdtemp(join(tmpdir(), 'codex-custom-plan-replay-'));
   const tempSessionPath = join(tempDirectory, 'fixture-session.jsonl');
   await writeFile(tempSessionPath, '', 'utf8');
@@ -465,6 +465,8 @@ test('session replay emits custom_tool_call exec plans found only in JSONL', asy
   const emittedMessages = [];
   const state = createInitialEventState((message) => emittedMessages.push(message));
   state.sessionFilePath = tempSessionPath;
+  state.sessionTurnStartCursor = 0;
+  state.sessionFunctionCursor = 0;
 
   try {
     await writeFile(

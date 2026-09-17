@@ -387,6 +387,72 @@ describe('useStreamingMessages', () => {
     expect(rawContent[0]).toMatchObject({ thinking: 'Original first' });
     expect(rawContent[2]).toMatchObject({ thinking: 'Original second' });
   });
+
+  it('splits the cumulative thinking buffer into separate blocks at onBlockReset boundaries', () => {
+    const { result } = renderHook(() => useStreamingMessages());
+
+    // First thinking block streamed, then [BLOCK_RESET] arrived (recorded as a
+    // boundary), then the second block's deltas accumulated. The buffer stays
+    // cumulative; only the raw block layout splits.
+    result.current.streamingThinkingRef.current = 'First blockSecond block';
+    result.current.thinkingBlockBoundariesRef.current = ['First block'.length];
+
+    const assistant: ClaudeMessage = {
+      type: 'assistant',
+      content: '',
+      isStreaming: true,
+      raw: {
+        message: {
+          content: [{ type: 'thinking', thinking: 'First block', text: 'First block' }],
+        },
+      },
+    };
+
+    const patched = result.current.patchAssistantForStreaming(assistant);
+    const rawContent = (patched.raw as any).message.content as ContentBlockTest[];
+
+    expect(rawContent).toHaveLength(2);
+    expect(rawContent[0]).toMatchObject({ type: 'thinking', thinking: 'First block' });
+    expect(rawContent[1]).toMatchObject({ type: 'thinking', thinking: 'Second block' });
+  });
+
+  it('keeps a single thinking block when the boundary covers the whole buffer', () => {
+    const { result } = renderHook(() => useStreamingMessages());
+
+    // Boundary recorded at the current end of the buffer (e.g. a trailing
+    // message_start reset with no further thinking deltas) must not produce
+    // an empty extra block.
+    result.current.streamingThinkingRef.current = 'Only block';
+    result.current.thinkingBlockBoundariesRef.current = ['Only block'.length];
+
+    const assistant: ClaudeMessage = {
+      type: 'assistant',
+      content: '',
+      isStreaming: true,
+      raw: {
+        message: {
+          content: [{ type: 'thinking', thinking: 'Only block', text: 'Only block' }],
+        },
+      },
+    };
+
+    const patched = result.current.patchAssistantForStreaming(assistant);
+    const rawContent = (patched.raw as any).message.content as ContentBlockTest[];
+
+    expect(rawContent).toHaveLength(1);
+    expect(rawContent[0]).toMatchObject({ type: 'thinking', thinking: 'Only block' });
+  });
+
+  it('resetStreamingState clears recorded thinking block boundaries', () => {
+    const { result } = renderHook(() => useStreamingMessages());
+
+    result.current.streamingThinkingRef.current = 'AB';
+    result.current.thinkingBlockBoundariesRef.current = [1];
+
+    result.current.resetStreamingState();
+
+    expect(result.current.thinkingBlockBoundariesRef.current).toEqual([]);
+  });
 });
 
 interface ContentBlockTest {

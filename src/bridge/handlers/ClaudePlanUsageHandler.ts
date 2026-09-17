@@ -1,31 +1,34 @@
 import { BridgeContext, BridgeHandler, BridgeMessage } from '../types';
-import { resolveClaudePlanUsagePayload } from '../services/claudePlanUsageService';
+import { postRaw } from './helpers';
+import { ClaudePlanUsageService } from '../services/ClaudePlanUsageService';
 
 /**
- * Bridges the webview's `get_claude_plan_usage` poll to the cached SDK
- * rate_limit_event snapshot and pushes the result back via
- * `window.updateClaudePlanUsage`. Mirrors the JetBrains ClaudePlanUsageHandler;
- * the reply goes only to the polling webview (request-scoped routing).
+ * Bridges the webview's {@code get_claude_plan_usage} poll to
+ * {@link ClaudePlanUsageService} and pushes the snapshot back via
+ * {@code window.updateClaudePlanUsage} (TYPE_TO_FN: update_claude_plan_usage).
  */
 export class ClaudePlanUsageHandler implements BridgeHandler {
   readonly supportedEvents = ['get_claude_plan_usage'] as const;
 
-  constructor(private readonly context: BridgeContext) {}
+  constructor(
+    private readonly context: BridgeContext,
+    private readonly planUsage: ClaudePlanUsageService,
+  ) {}
 
-  handle({ event, webview }: BridgeMessage): boolean {
-    if (event !== 'get_claude_plan_usage') {
-      return false;
-    }
-    let payload: Record<string, unknown>;
+  async handle({ event, webview }: BridgeMessage): Promise<boolean> {
+    if (event !== 'get_claude_plan_usage') return false;
     try {
-      payload = resolveClaudePlanUsagePayload();
-    } catch (err) {
-      payload = { error: true, message: err instanceof Error ? err.message : String(err) };
+      const usage = await this.planUsage.resolvePlanUsagePayload();
+      postRaw(webview, 'update_claude_plan_usage', JSON.stringify(usage));
+    } catch (error) {
+      this.context.log.appendLine(
+        `[ClaudePlanUsage] Poll failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      postRaw(webview, 'update_claude_plan_usage', JSON.stringify({
+        error: true,
+        message: error instanceof Error ? error.message : String(error),
+      }));
     }
-    webview.postMessage({
-      type: 'js_eval',
-      content: `window.updateClaudePlanUsage && window.updateClaudePlanUsage(${JSON.stringify(JSON.stringify(payload))})`,
-    });
     return true;
   }
 }

@@ -146,6 +146,11 @@ interface Window {
   onUsageUpdate?: (json: string) => void;
 
   /**
+   * Claude plan-usage snapshot callback (host answers get_claude_plan_usage polls)
+   */
+  updateClaudePlanUsage?: (json: string) => void;
+
+  /**
    * Mode changed callback
    */
   onModeChanged?: (mode: string) => void;

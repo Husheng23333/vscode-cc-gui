@@ -73,6 +73,9 @@ export const PlanUsageIndicator: React.FC<PlanUsageIndicatorProps> = memo(({
     const pct = Math.round(tp);
     const period = display?.periodType || display?.windowId || 'limit';
     const lines: string[] = [];
+    if (snapshot?.level) {
+      lines.push(snapshot.level.toUpperCase());
+    }
     if (fullReset) {
       lines.push(
         t('chat.planUsage.tooltipWindowWithReset', {
@@ -110,8 +113,15 @@ export const PlanUsageIndicator: React.FC<PlanUsageIndicatorProps> = memo(({
         }),
       );
     }
+    if (snapshot?.stale) {
+      lines.push(
+        t('chat.planUsage.stale', {
+          defaultValue: 'Data may be outdated (refresh failed)',
+        }),
+      );
+    }
     return lines.join('\n');
-  }, [present, snapshot?.message, tp, fullReset, display, windows, worstColor, color, t]);
+  }, [present, snapshot?.message, snapshot?.level, snapshot?.stale, tp, fullReset, display, windows, worstColor, color, t]);
 
   if (status === 'idle') return null;
 

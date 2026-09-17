@@ -335,7 +335,7 @@ export const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-5';
  * the [1m] suffix is stripped, so keys must be base IDs. Without an entry here a
  * saved retired model fails validation and silently resets to the fallback.
  * Retired ids must always map to a LIVE model — mapping one retired id to another
- * (sonnet-4-6 → sonnet-4-7) kept restoring tabs pinned to a dead model.
+ * (sonnet-4-6 → sonnet-4-7) kept restoring tabs pinned to a dead model (#1678).
  */
 const LEGACY_CLAUDE_MODEL_ID_ALIASES: Record<string, string> = {
   'claude-sonnet-4-6': 'claude-sonnet-5',

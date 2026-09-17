@@ -1552,26 +1552,38 @@
     "hiddenModelCount": "+ 還有 {{count}} 個模型。輸入以搜尋。",
     "cliLoadFailed": "Failed to load models. Click to retry."
   },
+  "modelConfig": {
+    "title": "模型設定",
+    "context": "1M 上下文",
+    "contextDefault": "預設",
+    "effort": "思考強度",
+    "speed": "速度",
+    "model": "模型"
+  },
   "modes": {
     "default": {
-      "label": "Default Mode",
-      "tooltip": "Standard permission behavior",
-      "description": "Requires manual confirmation for each operation, suitable for cautious use"
+      "label": "預設模式",
+      "shortLabel": "預設",
+      "tooltip": "標準權限行為",
+      "description": "需要手動確認每個操作，適合謹慎使用"
     },
     "plan": {
-      "label": "Plan Mode",
-      "tooltip": "Plan mode - read-only analysis",
-      "description": "Uses only read-only tools, generates plan for user approval"
+      "label": "規劃模式",
+      "shortLabel": "規劃",
+      "tooltip": "規劃模式——唯讀分析",
+      "description": "僅使用唯讀工具，產生計劃供使用者審批後執行"
     },
     "acceptEdits": {
-      "label": "Agent Mode",
-      "tooltip": "Automatically accept file edits",
-      "description": "Automatically accept file creation/editing, reducing confirmation steps"
+      "label": "代理模式",
+      "shortLabel": "代理",
+      "tooltip": "自動接受檔案編輯",
+      "description": "自動接受檔案建立/編輯，減少確認步驟"
     },
     "bypassPermissions": {
-      "label": "Auto Mode",
-      "tooltip": "Bypass all permission checks",
-      "description": "Fully automated, bypassing all permission checks [Use with caution]"
+      "label": "自動模式",
+      "shortLabel": "自動",
+      "tooltip": "略過所有權限檢查",
+      "description": "完全自動化，略過所有權限檢查【請謹慎使用】"
     }
   },
   "ompModes": {

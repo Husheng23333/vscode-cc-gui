@@ -5,12 +5,18 @@ import SubagentList from './SubagentList';
 
 const sendBridgeEventMock = vi.hoisted(() => vi.fn());
 
-vi.mock('../../utils/bridge', () => ({ sendBridgeEvent: sendBridgeEventMock }));
+vi.mock('../../utils/bridge', () => ({
+  sendBridgeEvent: (...args: unknown[]) => sendBridgeEventMock(...args),
+}));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
 describe('SubagentList', () => {
+  beforeEach(() => {
+    sendBridgeEventMock.mockClear();
+  });
+
   it('loads Codex history with provider and agent path', async () => {
     const subagent: SubagentInfo = {
       id: 'call-spawn',

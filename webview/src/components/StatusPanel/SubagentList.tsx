@@ -103,6 +103,7 @@ const SubagentList = memo(({ subagents, histories = {}, currentSessionId, curren
     if (!subagent || !currentSessionId) return;
     const history = historiesRef.current[expandedId]
       ?? (subagent.agentId ? historiesRef.current[subagent.agentId] : undefined);
+    // A lightweight status entry without a transcript still needs the full load.
     if (!hasSubagentTranscript(history)) {
       requestHistory(subagent);
     }

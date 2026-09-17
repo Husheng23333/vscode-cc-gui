@@ -21,8 +21,8 @@ import {
   extractPatchFromResponseItemPayload,
   parseApplyPatchToOperations,
 } from './codex-patch-parser.js';
-import { emitFileChangeItemAsTools } from './codex-file-change-emit.js';
 import { extractUpdatePlanFromResponseItemPayload } from './codex-plan-parser.js';
+import { emitFileChangeItemAsTools } from './codex-file-change-emit.js';
 import {
   truncateForDisplay, getStableItemId, extractCommand,
   smartToolName, smartDescription, mapCommandToolNameToPermissionToolName,
@@ -309,6 +309,7 @@ export function createInitialEventState(emitMessage) {
     processedSessionFunctionOutputIds: new Set(),
     processedSessionCustomToolCallIds: new Set(),
     processedSessionCustomToolOutputIds: new Set(),
+
     emittedFileChangeToolIds: new Set(),
     reasoningTextCache: new Map(),
     assistantTextCache: new Map(),
@@ -987,6 +988,7 @@ export async function processCodexEventStream(events, state, config) {
         state.processedSessionFunctionOutputIds.clear();
         state.processedSessionCustomToolCallIds.clear();
         state.processedSessionCustomToolOutputIds.clear();
+
         console.log('[THREAD_ID]', state.currentThreadId);
         break;
       }
@@ -1074,6 +1076,7 @@ export async function processCodexEventStream(events, state, config) {
         if (replayed.toolUses > 0 || replayed.toolResults > 0) {
           console.log('[DEBUG] Replayed session function calls:', JSON.stringify(replayed));
         }
+        flushPendingCustomPlanCalls(state);
         // Final pass: synthesize any apply_patch ops still only in the session log
         // (covers non-streaming exec turns where file_change never fired).
         try {

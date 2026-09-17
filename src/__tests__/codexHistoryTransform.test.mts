@@ -371,3 +371,115 @@ describe('transformCodexHistoryRows', () => {
     assert.equal(messages.length, 0);
   });
 });
+
+describe('transformCodexHistoryRows response_item user prompts (Codex 0.148+)', () => {
+  it('restores a user prompt that exists only as a response_item row', () => {
+    const messages = transformCodexHistoryRows([
+      {
+        type: 'response_item',
+        timestamp: '2026-08-20T10:00:00.000Z',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'fix the flaky test' }],
+        },
+      },
+      {
+        type: 'response_item',
+        timestamp: '2026-08-20T10:00:05.000Z',
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'done' }],
+        },
+      },
+    ], imageLoader);
+
+    assert.equal(messages.length, 2);
+    assert.equal(messages[0].type, 'user');
+    assert.equal(messages[0].content, 'fix the flaky test');
+    assert.deepEqual(messages[0].raw.message.content, [
+      { type: 'text', text: 'fix the flaky test' },
+    ]);
+    assert.equal(messages[1].type, 'assistant');
+  });
+
+  it('does not duplicate the prompt when a matching event_msg user_message follows', () => {
+    const messages = transformCodexHistoryRows([
+      {
+        type: 'response_item',
+        timestamp: '2026-08-20T10:00:00.000Z',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'what is this?' }],
+        },
+      },
+      {
+        type: 'event_msg',
+        timestamp: '2026-08-20T10:00:01.000Z',
+        payload: {
+          type: 'user_message',
+          message: 'what is this?',
+        },
+      },
+    ], imageLoader);
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].content, 'what is this?');
+  });
+
+  it('keeps response_item-only prompts from separate turns in order', () => {
+    const messages = transformCodexHistoryRows([
+      {
+        type: 'response_item',
+        timestamp: '2026-08-20T10:00:00.000Z',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'first request' }],
+        },
+      },
+      {
+        type: 'response_item',
+        timestamp: '2026-08-20T10:01:00.000Z',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'second request' }],
+        },
+      },
+    ], imageLoader);
+
+    assert.deepEqual(messages.map((message) => message.content), ['first request', 'second request']);
+  });
+
+  it('drops response_item-only instruction dumps via normalizeUserDisplayText', () => {
+    const messages = transformCodexHistoryRows([
+      {
+        type: 'response_item',
+        timestamp: '2026-08-20T10:00:00.000Z',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nbe nice\n</INSTRUCTIONS>' }],
+        },
+      },
+      {
+        type: 'response_item',
+        timestamp: '2026-08-20T10:01:00.000Z',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'real question' }],
+        },
+      },
+    ], imageLoader, {
+      normalizeUserDisplayText: (text) =>
+        /^#\s*AGENTS\.md instructions for\b/i.test(text.trim()) ? '' : text,
+    });
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].content, 'real question');
+  });
+});

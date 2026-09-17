@@ -8,6 +8,7 @@ export interface StatusPanelProps {
   subagents: SubagentInfo[];
   subagentHistories?: Record<string, SubagentHistoryResponse>;
   currentSessionId?: string | null;
+  /** Active provider; Codex labels the plan tab differently from Claude tasks */
   currentProvider: string;
   /** Whether the panel is expanded */
   expanded?: boolean;

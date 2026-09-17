@@ -2,12 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { PlanUsageIndicator } from './PlanUsageIndicator';
 
-// Target repo tests do not boot the i18n runtime; return defaultValue like the
-// production fallback would (see ContextUsageDialog.test.tsx for the pattern).
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: Record<string, unknown>) =>
-      (options?.defaultValue as string) ?? key,
+    t: (_key: string, options?: Record<string, unknown>) =>
+      (options?.defaultValue as string | undefined) ?? _key,
     i18n: { language: 'en' },
   }),
 }));

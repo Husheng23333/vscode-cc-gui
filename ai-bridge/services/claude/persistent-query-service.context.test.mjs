@@ -103,6 +103,15 @@ test('buildRequestContext preserves resolved model mapping for context usage run
       env: {
         CLAUDE_CODE_EFFORT_LEVEL: '',
         MAX_THINKING_TOKENS: '',
+        // Model routing vars are cleared so stale settings.json values cannot
+        // override the per-request model selection (#1509).
+        ANTHROPIC_MODEL: '',
+        ANTHROPIC_DEFAULT_FABLE_MODEL: '',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: '',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: '',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: '',
+        ANTHROPIC_SMALL_FAST_MODEL: '',
+        CLAUDE_CODE_SUBAGENT_MODEL: '',
         CLAUDE_CODE_DISABLE_1M_CONTEXT: '1',
       },
     });

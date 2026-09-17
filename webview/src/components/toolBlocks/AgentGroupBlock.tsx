@@ -94,6 +94,7 @@ const AgentGroupBlock = memo(function AgentGroupBlock({
   const taskEvent = useTaskEvent(toolId);
   const taskFailed = taskEvent?.status === 'failed' || taskEvent?.status === 'stopped';
 
+
   const agentToolMeta = parseAgentToolMeta(getToolResultRaw, toolId);
   const spawnMeta = toolName === 'spawn_agent'
     ? parseSpawnAgentMeta(input ?? {}, result)

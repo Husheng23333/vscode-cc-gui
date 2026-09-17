@@ -624,18 +624,28 @@ async function processRequest(request) {
     platform: process.platform,
   });
 
-  // Pre-load SDK
-  await preloadSdks();
+  // Signal ready BEFORE pre-loading the SDK so the host can start sending
+  // heartbeats and status queries immediately. The SDK load is moved to
+  // background: acquireRuntime() already lazy-loads via ensureQueryFn() with
+  // its own caching, so the first send will simply wait for the in-flight load
+  // instead of blocking daemon startup. (#performance)
+  sendDaemonEvent('ready', {
+    pid: process.pid,
+    sdkPreloaded: false, // SDK is loading in the background
+  });
+
+  // Pre-load SDK in the background (non-blocking). Errors are logged but do
+  // not affect daemon readiness — a failed preload is retried lazily on the
+  // first send via ensureQueryFn().
+  preloadSdks().then(() => {
+    sendDaemonEvent('sdk_ready', { pid: process.pid });
+  }).catch((e) => {
+    _originalStderrWrite(`[daemon] Background SDK preload failed: ${e?.message || e}\n`, 'utf8');
+  });
 
   // Best-effort cleanup of stale temp image files (>24h). Fire-and-forget so
   // it doesn't block daemon readiness.
   cleanupStaleTempImages().catch(() => {});
-
-  // Signal ready
-  sendDaemonEvent('ready', {
-    pid: process.pid,
-    sdkPreloaded,
-  });
 
   // --- Listen for requests on stdin ---
   const rl = createInterface({

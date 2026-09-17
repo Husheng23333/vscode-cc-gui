@@ -300,6 +300,7 @@ export class CcGuiPanel implements vscode.WebviewViewProvider {
           'stream_end':      'onStreamEnd',
           'content_delta':   'onContentDelta',
           'thinking_delta':  'onThinkingDelta',
+          'block_reset':     'onBlockReset',
           'session_id':      'setSessionId',
           'message_data':    'onMessage',
           'turn_messages':   'onTurnMessages',
@@ -320,6 +321,8 @@ export class CcGuiPanel implements vscode.WebviewViewProvider {
           'update_codex_mcp_server_tools': 'updateCodexMcpServerTools',
           // Usage statistics
           'update_usage_statistics':    'updateUsageStatistics',
+          // Claude plan usage (rate_limit_event / z.ai quota snapshot)
+          'update_claude_plan_usage':   'updateClaudePlanUsage',
           // Prompts
           'update_prompts':             'updatePrompts',
           'update_agents':              'updateAgents',
@@ -381,7 +384,7 @@ export class CcGuiPanel implements vscode.WebviewViewProvider {
             }
             // Handler not registered yet — buffer streaming lifecycle events so they
             // are not lost during the React app mount race on first query.
-            var PRE_MOUNT_BUFFERABLE = {stream_start:1,content_delta:1,thinking_delta:1,stream_end:1,send_error:1,session_id:1,message_data:1,usage_update:1,usage_data:1,turn_messages:1};
+            var PRE_MOUNT_BUFFERABLE = {stream_start:1,content_delta:1,thinking_delta:1,block_reset:1,stream_end:1,send_error:1,session_id:1,message_data:1,usage_update:1,usage_data:1,turn_messages:1};
             if (PRE_MOUNT_BUFFERABLE[msg.type]) {
               if (!window.__preMountStreamBuffer) window.__preMountStreamBuffer = [];
               window.__preMountStreamBuffer.push({fn: fnName, data: msg.content});

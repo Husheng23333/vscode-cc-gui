@@ -9,6 +9,10 @@ const LABELS: Record<string, string> = {
   'ompModes.smol.label': 'Smol',
   'ompModes.slow.label': 'Slow',
   'ompModes.plan.label': 'Plan',
+  'modes.default.shortLabel': 'Default',
+  'modes.acceptEdits.label': 'Agent Mode',
+  'modes.acceptEdits.shortLabel': 'Agent',
+  'codexModes.acceptEdits.label': 'Auto Edit',
 };
 
 vi.mock('react-i18next', () => ({
@@ -99,5 +103,24 @@ describe('ModeSelect', () => {
       expect(openAndGetOptionIds(provider)).toEqual(['default', 'acceptEdits', 'bypassPermissions']);
       cleanup();
     }
+  });
+
+  it('shows a compact short label on the trigger and the full label in the menu', () => {
+    render(<ModeSelect value="default" onChange={vi.fn()} provider="claude" />);
+
+    expect(screen.getByRole('button').textContent).toContain('Default');
+    expect(screen.getByRole('button').textContent).not.toContain('Default Mode');
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByText('Default Mode')).toBeTruthy();
+  });
+
+  it('falls back to the generic short label for Codex modes without a codex-specific one', () => {
+    render(<ModeSelect value="acceptEdits" onChange={vi.fn()} provider="codex" />);
+
+    expect(screen.getByRole('button').textContent).toContain('Agent');
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByText('Auto Edit')).toBeTruthy();
   });
 });

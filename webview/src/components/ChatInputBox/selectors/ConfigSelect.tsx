@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import Switch from 'antd/es/switch';
@@ -12,6 +12,7 @@ import {
   type NodeProcessSnapshot,
 } from '../../../utils/nodeProcessCapabilities';
 import { openBrowser } from '../../../utils/bridge';
+import { useDropdownPosition } from '../../../hooks/useDropdownPosition';
 
 const DOCS_URLS: Record<string, string> = {
   zh: 'https://docs.mossx.ai/vscode',
@@ -50,13 +51,8 @@ const TOGGLE_BUTTON_STYLE: React.CSSProperties = {
   marginRight: '-2px',
 };
 
-const SUBMENU_STYLE: React.CSSProperties = {
-  position: 'absolute',
-  left: '100%',
-  bottom: 0,
-  marginLeft: '-30px',
-  zIndex: 10001,
-  minWidth: '320px',
+const SUBMENU_BASE_STYLE: React.CSSProperties = {
+  minWidth: 0,
   maxWidth: '360px',
   maxHeight: '300px',
   overflowY: 'auto',
@@ -169,8 +165,21 @@ export const ConfigSelect = ({
 
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const agentSubmenuRef = useRef<HTMLDivElement>(null);
+  const agentTriggerRef = useRef<HTMLDivElement>(null);
+  const runtimeProviderTriggerRef = useRef<HTMLDivElement>(null);
   const agentAbortControllerRef = useRef<AbortController | null>(null);
   const toastTimerRef = useRef<number | undefined>(undefined);
+
+  const { positionedStyle: agentSubmenuPositionedStyle, maxHeight: agentSubmenuMaxHeight, maxWidth: agentSubmenuMaxWidth, recalculate: agentSubmenuRecalculate } = useDropdownPosition({
+    buttonRef: agentTriggerRef,
+    dropdownRef: agentSubmenuRef,
+    submenu: true,
+    minWidth: 260,
+    maxWidth: 360,
+    submenuMaxHeight: 300,
+    submenuBottomClearance: 96,
+  });
 
   const handleToggle = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -281,6 +290,11 @@ export const ConfigSelect = ({
     loadAgents();
   }, [activeSubmenu, loadAgents]);
 
+  useLayoutEffect(() => {
+    if (activeSubmenu !== 'agent') return;
+    agentSubmenuRecalculate();
+  }, [activeSubmenu, agentItems.length, agentsLoading, agentSubmenuRecalculate]);
+
   useEffect(() => {
     return () => {
       if (agentAbortControllerRef.current) {
@@ -292,10 +306,18 @@ export const ConfigSelect = ({
     };
   }, []);
 
-  const renderAgentSubmenu = () => (
+  const renderAgentSubmenu = () => {
+    const submenuMaxHeightPx = agentSubmenuMaxHeight ? `${Math.min(300, agentSubmenuMaxHeight)}px` : '300px';
+    return (
     <div
+      ref={agentSubmenuRef}
       className="selector-dropdown"
-      style={SUBMENU_STYLE}
+      style={{
+        ...SUBMENU_BASE_STYLE,
+        maxWidth: agentSubmenuMaxWidth ?? 360,
+        ...agentSubmenuPositionedStyle,
+        maxHeight: submenuMaxHeightPx,
+      }}
       onMouseEnter={(e) => {
         e.stopPropagation();
         setActiveSubmenu('agent');
@@ -350,7 +372,8 @@ export const ConfigSelect = ({
         })
       )}
     </div>
-  );
+    );
+  };
 
   return (
     <div style={WRAPPER_STYLE}>
@@ -372,6 +395,7 @@ export const ConfigSelect = ({
         >
           {/* Agent Item */}
           <div
+            ref={agentTriggerRef}
             className="selector-option"
             onMouseEnter={() => setActiveSubmenu('agent')}
             onMouseLeave={() => setActiveSubmenu('none')}
@@ -397,6 +421,7 @@ export const ConfigSelect = ({
 
           {/* Runtime Provider Item */}
           <div
+            ref={runtimeProviderTriggerRef}
             className="selector-option"
             onMouseEnter={() => setActiveSubmenu('runtimeProvider')}
             onMouseLeave={() => setActiveSubmenu('none')}
@@ -414,6 +439,7 @@ export const ConfigSelect = ({
               <RuntimeProviderSelect
                 currentProvider={currentProvider}
                 embedded
+                triggerRef={runtimeProviderTriggerRef}
                 onProviderSwitched={showProviderToast}
                 onClose={() => {
                   setIsOpen(false);

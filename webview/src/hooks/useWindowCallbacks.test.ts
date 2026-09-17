@@ -66,6 +66,7 @@ describe('useWindowCallbacks integration', () => {
     suppressNextStatusToastRef: { current: false },
     streamingContentRef: { current: '' },
     streamingThinkingRef: { current: '' },
+    thinkingBlockBoundariesRef: { current: [] as number[] },
     isStreamingRef: { current: false },
     useBackendStreamingRenderRef: { current: false },
     autoExpandedThinkingKeysRef: { current: new Set<string>() },
@@ -1493,7 +1494,7 @@ describe('useWindowCallbacks integration', () => {
       });
     });
 
-    it('onBlockReset clears streaming refs to prevent cross-turn content merging', () => {
+    it('onBlockReset records a thinking block boundary so blocks stay separate', () => {
       stubSynchronousTimers();
 
       const opts = createOptions();
@@ -1503,33 +1504,32 @@ describe('useWindowCallbacks integration', () => {
       act(() => { window.onStreamStart!(); });
       expect(opts.isStreamingRef.current).toBe(true);
 
-      // Simulate first turn's thinking delta
+      // Simulate first block's thinking delta
       act(() => { window.onThinkingDelta!('Turn1Thinking'); });
       expect(opts.streamingThinkingRef.current).toBe('Turn1Thinking');
 
-      // Simulate first turn's content delta
-      act(() => { window.onContentDelta!('Turn1Content'); });
-      expect(opts.streamingContentRef.current).toBe('Turn1Content');
-
-      // Block reset signal arrives (new assistant message in stream)
+      // Block reset signal arrives (new content block in stream)
       act(() => { window.onBlockReset!(); });
 
-      // Streaming refs should be cleared
-      expect(opts.streamingThinkingRef.current).toBe('');
-      expect(opts.streamingContentRef.current).toBe('');
+      // The thinking buffer stays cumulative (prefix-strip reconciliation
+      // depends on it); the boundary marks where the next block starts.
+      expect(opts.streamingThinkingRef.current).toBe('Turn1Thinking');
+      expect(opts.thinkingBlockBoundariesRef.current).toEqual(['Turn1Thinking'.length]);
 
-      // But streaming should still be active
+      // Streaming should still be active
       expect(opts.isStreamingRef.current).toBe(true);
 
-      // Second turn's deltas arrive - should NOT merge with first turn
+      // Second block's deltas accumulate after the boundary
       act(() => { window.onThinkingDelta!('Turn2Thinking'); });
-      expect(opts.streamingThinkingRef.current).toBe('Turn2Thinking');
+      expect(opts.streamingThinkingRef.current).toBe('Turn1ThinkingTurn2Thinking');
+      expect(opts.thinkingBlockBoundariesRef.current).toEqual(['Turn1Thinking'.length]);
 
-      act(() => { window.onContentDelta!('Turn2Content'); });
-      expect(opts.streamingContentRef.current).toBe('Turn2Content');
-
-      // If onBlockReset was NOT called, we would have "Turn1ThinkingTurn2Thinking"
-      // and "Turn1ContentTurn2Content" (merged content)
+      // A repeated boundary at the same offset is not recorded twice
+      act(() => { window.onBlockReset!(); });
+      expect(opts.thinkingBlockBoundariesRef.current).toEqual([
+        'Turn1Thinking'.length,
+        'Turn1ThinkingTurn2Thinking'.length,
+      ]);
     });
 
     it('onBlockReset is ignored when stream is not active', () => {
@@ -1552,7 +1552,8 @@ describe('useWindowCallbacks integration', () => {
       // Block reset arrives when stream is not active
       act(() => { window.onBlockReset!(); });
 
-      // Refs should NOT be cleared (stale signal ignored)
+      // No boundary recorded (stale signal ignored)
+      expect(opts.thinkingBlockBoundariesRef.current).toEqual([]);
       expect(opts.streamingThinkingRef.current).toBe('StaleThinking');
       expect(opts.streamingContentRef.current).toBe('StaleContent');
     });

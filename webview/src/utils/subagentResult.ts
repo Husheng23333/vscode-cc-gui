@@ -133,6 +133,8 @@ export function parseSpawnAgentMeta(
     }
     return undefined;
   };
+  // Reuse a single regex match for both model and reasoningEffort instead of
+  // running the same pattern twice over the text.
   const modelMatch = text?.match(/\(([A-Za-z0-9._:-]+)(?:\s+(low|medium|high|xhigh))?\)/i);
   const agentId = getString(parsed?.agent_id, parsed?.agentId, input.agent_id, input.agentId)
     ?? text?.match(/\b([0-9a-f]{8}-[0-9a-f-]{27})\b/i)?.[1];

@@ -6,6 +6,12 @@ import { readClaudeModelMapping } from '../../../utils/claudeModelMapping';
 import { ProviderModelIcon } from '../../shared/ProviderModelIcon';
 import { useDropdownPosition } from '../../../hooks/useDropdownPosition';
 import Switch from 'antd/es/switch';
+import {
+  MODEL_ID_TO_MAPPING_KEY,
+  resolveModelDescription,
+  resolveModelDisplayLabel,
+  resolveModelIdForIcon,
+} from '../modelLabelUtils';
 
 const RELATIVE_INLINE_BLOCK_STYLE: React.CSSProperties = { position: 'relative', display: 'inline-block' };
 const CHEVRON_ICON_STYLE: React.CSSProperties = { fontSize: '10px', marginLeft: '2px' };
@@ -37,6 +43,12 @@ interface ModelSelectProps {
   onAddModel?: () => void;
   longContextEnabled?: boolean;
   onLongContextChange?: (enabled: boolean) => void;
+  /** Render only the dropdown, positioned as a fly-out from triggerRef. */
+  embedded?: boolean;
+  triggerRef?: React.RefObject<HTMLElement | null>;
+  onClose?: () => void;
+  /** Hide the 1M toggle when the parent menu already exposes it. */
+  hideLongContextToggle?: boolean;
 }
 
 const LOADING_OPTION_STYLE: React.CSSProperties = {
@@ -46,124 +58,43 @@ const LOADING_OPTION_STYLE: React.CSSProperties = {
   cursor: 'default',
 };
 
-const DEFAULT_MODEL_MAP: Record<string, ModelInfo> = AVAILABLE_MODELS.reduce(
-  (acc, model) => {
-    acc[model.id] = model;
-    return acc;
-  },
-  {} as Record<string, ModelInfo>
-);
-
-const MODEL_LABEL_KEYS: Record<string, string> = {
-  'claude-opus-5': 'models.claude.opus5.label',
-  'claude-sonnet-5': 'models.claude.sonnet5.label',
-  'claude-sonnet-4-6': 'models.claude.sonnet46.label',
-  'claude-fable-5': 'models.claude.fable5.label',
-  'claude-opus-4-8': 'models.claude.opus48.label',
-  'grok-4.6': 'models.grok.grok46.label',
-  'grok-4.5': 'models.grok.grok46.label',
-  grok: 'models.grok.grok46.label',
-  'claude-opus-4-6': 'models.claude.opus46_1m.label',
-  'claude-opus-4-6[1m]': 'models.claude.opus46_1m.label',
-  'claude-haiku-4-5': 'models.claude.haiku45.label',
-  'gpt-5.6-sol': 'models.codex.gpt56sol.label',
-  'gpt-5.6-terra': 'models.codex.gpt56terra.label',
-  'gpt-5.6-luna': 'models.codex.gpt56luna.label',
-  'gpt-5.5': 'models.codex.gpt55.label',
-  'gpt-5.4': 'models.codex.gpt54.label',
-};
-
-const MODEL_DESCRIPTION_KEYS: Record<string, string> = {
-  'claude-opus-5': 'models.claude.opus5.description',
-  'claude-sonnet-5': 'models.claude.sonnet5.description',
-  'claude-sonnet-4-6': 'models.claude.sonnet46.description',
-  'claude-fable-5': 'models.claude.fable5.description',
-  'claude-opus-4-8': 'models.claude.opus48.description',
-  'claude-opus-4-6': 'models.claude.opus46_1m.description',
-  'claude-opus-4-6[1m]': 'models.claude.opus46_1m.description',
-  'claude-haiku-4-5': 'models.claude.haiku45.description',
-  'gpt-5.6-sol': 'models.codex.gpt56sol.description',
-  'gpt-5.6-terra': 'models.codex.gpt56terra.description',
-  'gpt-5.6-luna': 'models.codex.gpt56luna.description',
-  'gpt-5.5': 'models.codex.gpt55.description',
-  'gpt-5.4': 'models.codex.gpt54.description',
-  'grok-4.6': 'models.grok.grok46.description',
-  'grok-4.5': 'models.grok.grok46.description',
-  grok: 'models.grok.grok46.description',
-};
-
-/**
- * Maps model IDs to mapping keys for looking up actual model names
- * from the 'claude-model-mapping' localStorage entry.
- * Legacy Opus 4.6 IDs share the same opus mapping bucket.
- */
-const MODEL_ID_TO_MAPPING_KEY: Record<string, string> = {
-  'claude-fable-5': 'fable',
-  'claude-opus-5': 'opus',
-  'claude-sonnet-5': 'sonnet',
-  'claude-sonnet-4-7': 'sonnet',
-  'claude-sonnet-4-6': 'sonnet',
-  'claude-opus-4-8': 'opus',
-  'claude-opus-4-6': 'opus',
-  'claude-opus-4-6[1m]': 'opus',
-  'claude-haiku-4-5': 'haiku',
-};
-
-const resolveMappedModelName = (
-  mappingKey: string | undefined,
-  modelMapping: Record<string, string | undefined>
-): string | undefined => {
-  if (!mappingKey) {
-    return modelMapping.main?.trim() || undefined;
-  }
-
-  const mapped = modelMapping[mappingKey]
-    || (mappingKey === 'opus_1m' ? modelMapping.opus : undefined)
-    || modelMapping.main;
-
-  return mapped?.trim() || undefined;
-};
-
 /** Cap dropdown height so long model catalogs (e.g. OpenCode) stay usable. */
 const MODEL_DROPDOWN_MAX_HEIGHT = 300;
-
-/**
- * Resolve the model name used for icon matching.
- * For mapped Claude slots (sonnet/opus/haiku), returns the mapped vendor model id
- * (e.g. deepseek-v4-pro) so both the closed trigger and dropdown rows show the
- * actual model vendor icon instead of always defaulting to Claude.
- */
-const resolveModelIdForIcon = (
-  modelId: string,
-  modelMapping: Record<string, string | undefined>,
-  mappingKeyMap: Record<string, string>
-): string => {
-  const mappingKey = mappingKeyMap[modelId];
-  if (!mappingKey) {
-    return modelId;
-  }
-  const mapped = resolveMappedModelName(mappingKey, modelMapping);
-  if (mapped) {
-    return mapped;
-  }
-  return modelId;
-};
 
 /**
  * ModelSelect - Model selector component
  * Supports switching between Sonnet 4.5, Opus 4.5, and other models, including Codex models
  */
-export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, currentProvider = 'claude', loading = false, error = null, onRetry, onAddModel, longContextEnabled = true, onLongContextChange }: ModelSelectProps) => {
+export const ModelSelect = ({
+  value,
+  onChange,
+  models = AVAILABLE_MODELS,
+  currentProvider = 'claude',
+  loading = false,
+  error = null,
+  onRetry,
+  onAddModel,
+  longContextEnabled = true,
+  onLongContextChange,
+  embedded = false,
+  triggerRef,
+  onClose,
+  hideLongContextToggle = false,
+}: ModelSelectProps) => {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const { positionedStyle, maxHeight, recalculate } = useDropdownPosition({
-    buttonRef,
+  const { positionedStyle, maxHeight, maxWidth, recalculate } = useDropdownPosition({
+    buttonRef: (embedded ? triggerRef : buttonRef) as React.RefObject<HTMLElement | null>,
     dropdownRef,
     preferredAlignment: 'right',
+    submenu: embedded,
+    minWidth: embedded ? 220 : 200,
+    maxWidth: 360,
+    submenuMaxHeight: MODEL_DROPDOWN_MAX_HEIGHT,
   });
   const dropdownMaxHeight = maxHeight != null
     ? Math.min(maxHeight, MODEL_DROPDOWN_MAX_HEIGHT)
@@ -183,52 +114,17 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
   };
 
   const getModelLabel = (model: ModelInfo, show1MContext = false): string => {
-    // The Anthropic slot maps below (MODEL_ID_TO_MAPPING_KEY, DEFAULT_MODEL_MAP,
-    // MODEL_LABEL_KEYS) are keyed by claude-* ids. Third-party catalogs (CLI
-    // providers) expose models whose ids collide with those slots (e.g.
-    // claude-sonnet-4-6). For any non-claude provider, render the catalog label
-    // verbatim — never let the Claude model mapping override catalog labels.
-    if (currentProvider !== 'claude') {
-      return append1MContextSuffix(model.label ?? '', model.id, show1MContext);
-    }
-
-    const mappingKey = MODEL_ID_TO_MAPPING_KEY[model.id];
-    if (mappingKey) {
-      const mappedName = resolveMappedModelName(mappingKey, modelMapping);
-      if (mappedName) {
-        return append1MContextSuffix(mappedName, model.id, show1MContext);
-      }
-    }
-
-    const defaultModel = DEFAULT_MODEL_MAP[model.id];
-    const labelKey = MODEL_LABEL_KEYS[model.id];
-    const hasCustomLabel = defaultModel && model.label && model.label !== defaultModel.label;
-
-    if (hasCustomLabel) {
-      return append1MContextSuffix(model.label ?? '', model.id, show1MContext);
-    }
-
-    if (labelKey) {
-      return append1MContextSuffix(t(labelKey), model.id, show1MContext);
-    }
-
-    return append1MContextSuffix(model.label ?? '', model.id, show1MContext);
-  };
-
-  const append1MContextSuffix = (label: string, modelId: string, show1MContext: boolean): string => {
-    // Only show 1M context suffix for Claude provider
-    if (currentProvider === 'claude' && show1MContext && modelSupports1MContext(modelId) && longContextEnabled) {
-      return `${label} (${t('models.longContext.shortLabel')})`;
-    }
-    return label;
+    return resolveModelDisplayLabel(model, {
+      t,
+      currentProvider,
+      modelMapping: currentProvider === 'claude' ? modelMapping : {},
+      show1MContext,
+      longContextEnabled,
+    });
   };
 
   const getModelDescription = (model: ModelInfo): string | undefined => {
-    const descriptionKey = MODEL_DESCRIPTION_KEYS[model.id];
-    if (descriptionKey) {
-      return t(descriptionKey);
-    }
-    return model.description;
+    return resolveModelDescription(model, t);
   };
 
   const normalizedSearchQuery = deferredSearchQuery.trim().toLowerCase();
@@ -265,13 +161,14 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
     onChange(modelId);
     setIsOpen(false);
     setSearchQuery('');
-  }, [onChange]);
+    onClose?.();
+  }, [onChange, onClose]);
 
   /**
    * Close on outside click
    */
   useEffect(() => {
-    if (!isOpen) return;
+    if (embedded || !isOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -294,41 +191,37 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
       clearTimeout(timer);
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isOpen]);
+  }, [embedded, isOpen]);
 
   useLayoutEffect(() => {
-    if (isOpen) {
+    if (embedded || isOpen) {
       recalculate();
     }
-  }, [isOpen, filteredModels.length, loading, recalculate]);
+  }, [embedded, isOpen, filteredModels.length, loading, recalculate]);
 
-  return (
-    <div style={RELATIVE_INLINE_BLOCK_STYLE}>
-      <button
-        ref={buttonRef}
-        className="selector-button"
-        onClick={handleToggle}
-        title={t('chat.currentModel', { model: getModelLabel(currentModel, true) })}
-      >
-        <ProviderModelIcon
-          providerId={currentProvider}
-          modelId={
-            currentModel
-              ? resolveModelIdForIcon(currentModel.id, currentProvider === 'claude' ? modelMapping : {}, MODEL_ID_TO_MAPPING_KEY)
-              : undefined
-          }
-          size={12}
-          colored
-        />
-        <span className="selector-button-text">{getModelLabel(currentModel, true)}</span>
-        <span className={`codicon codicon-chevron-${isOpen ? 'up' : 'down'}`} style={CHEVRON_ICON_STYLE} />
-      </button>
+  const dropdownStyle: React.CSSProperties = embedded
+    ? {
+        minWidth: 0,
+        maxWidth: maxWidth ?? 360,
+        maxHeight: dropdownMaxHeight,
+        overflowX: 'hidden',
+        overflowY: 'auto',
+        ...positionedStyle,
+      }
+    : {
+        ...DROPDOWN_STYLE,
+        ...positionedStyle,
+        maxHeight: dropdownMaxHeight,
+        overflowY: 'auto',
+      };
 
-      {isOpen && (
+  const renderDropdown = () => (
         <div
           ref={dropdownRef}
-          className="selector-dropdown"
-          style={{ ...DROPDOWN_STYLE, ...positionedStyle, maxHeight: dropdownMaxHeight, overflowY: 'auto' }}
+          className="selector-dropdown model-selector-dropdown"
+          data-testid="model-selector-dropdown"
+          style={dropdownStyle}
+          onMouseEnter={(e) => e.stopPropagation()}
         >
           {showSearch && (
             <div className="selector-search-row">
@@ -373,6 +266,7 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
               key={model.id}
               className={`selector-option ${isSelectedModel(model.id) ? 'selected' : ''}`}
               onClick={() => handleSelect(model.id)}
+              data-testid={`model-option-${model.id}`}
             >
               <ProviderModelIcon
                 providerId={currentProvider}
@@ -404,7 +298,7 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
               })}
             </div>
           )}
-          {currentProvider === 'claude' && onLongContextChange && (
+          {!hideLongContextToggle && currentProvider === 'claude' && onLongContextChange && (
             <>
               <div className="selector-divider" />
               <div
@@ -427,7 +321,12 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
               <div className="selector-divider" />
               <div
                 className="selector-option selector-option-add"
-                onClick={() => { onAddModel(); setIsOpen(false); setSearchQuery(''); }}
+                onClick={() => {
+                  onAddModel();
+                  setIsOpen(false);
+                  setSearchQuery('');
+                  onClose?.();
+                }}
               >
                 <span className="codicon codicon-add selector-add-icon" />
                 <span>{t('models.addModel')}</span>
@@ -435,7 +334,35 @@ export const ModelSelect = ({ value, onChange, models = AVAILABLE_MODELS, curren
             </>
           )}
         </div>
-      )}
+  );
+
+  if (embedded) {
+    return renderDropdown();
+  }
+
+  return (
+    <div style={RELATIVE_INLINE_BLOCK_STYLE}>
+      <button
+        ref={buttonRef}
+        className="selector-button"
+        onClick={handleToggle}
+        title={t('chat.currentModel', { model: getModelLabel(currentModel, true) })}
+      >
+        <ProviderModelIcon
+          providerId={currentProvider}
+          modelId={
+            currentModel
+              ? resolveModelIdForIcon(currentModel.id, currentProvider === 'claude' ? modelMapping : {}, MODEL_ID_TO_MAPPING_KEY)
+              : undefined
+          }
+          size={12}
+          colored
+        />
+        <span className="selector-button-text">{getModelLabel(currentModel, true)}</span>
+        <span className={`codicon codicon-chevron-${isOpen ? 'up' : 'down'}`} style={CHEVRON_ICON_STYLE} />
+      </button>
+
+      {isOpen && renderDropdown()}
     </div>
   );
 };
