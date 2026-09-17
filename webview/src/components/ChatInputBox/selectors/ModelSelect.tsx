@@ -12,6 +12,11 @@ import {
   resolveModelDisplayLabel,
   resolveModelIdForIcon,
 } from '../modelLabelUtils';
+import {
+  buildModelDropdownSections,
+  MAX_VISIBLE_MODEL_OPTIONS,
+  shouldShowModelSearch,
+} from '../modelSelectUtils';
 
 const RELATIVE_INLINE_BLOCK_STYLE: React.CSSProperties = { position: 'relative', display: 'inline-block' };
 const CHEVRON_ICON_STYLE: React.CSSProperties = { fontSize: '10px', marginLeft: '2px' };
@@ -27,8 +32,6 @@ const MODEL_OPTION_INFO_STYLE: React.CSSProperties = { display: 'flex', flexDire
 const MODEL_TEXT_STYLE: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const LONG_CONTEXT_OPTION_STYLE: React.CSSProperties = { justifyContent: 'space-between', cursor: 'default' };
 const LONG_CONTEXT_LABEL_STYLE: React.CSSProperties = { fontSize: '12px' };
-const MAX_VISIBLE_MODEL_OPTIONS = 100;
-
 interface ModelSelectProps {
   value: string;
   onChange: (modelId: string) => void;
@@ -106,7 +109,14 @@ export const ModelSelect = ({
   // Strip [1m] suffix for finding the model in the list
   const strippedValue = strip1MContextSuffix(value);
   const normalizedValue = currentProvider === 'claude' ? normalizeClaudeModelId(strippedValue) : strippedValue;
-  const currentModel = models.find(m => m.id === normalizedValue) || models.find(m => m.id === strippedValue) || models[0];
+  // Prefer the user's selection even when it is absent from the dropdown list
+  // (e.g. an OMP role id set via the mode selector, or a catalog still loading).
+  // Falling back to models[0] would visually snap the trigger to the first entry.
+  const currentModel = models.find(m => m.id === normalizedValue)
+    || models.find(m => m.id === strippedValue)
+    || (strippedValue
+      ? { id: strippedValue, label: strippedValue } as ModelInfo
+      : models[0]);
   const modelMapping = readClaudeModelMapping();
 
   const isSelectedModel = (modelId: string): boolean => {
@@ -138,9 +148,11 @@ export const ModelSelect = ({
         return [model.id, label, description].some((value) => value.toLowerCase().includes(normalizedSearchQuery));
       })
     : models;
-  const visibleModels = filteredModels.slice(0, MAX_VISIBLE_MODEL_OPTIONS);
-  const hiddenModelCount = Math.max(0, filteredModels.length - visibleModels.length);
-  const showSearch = models.length > MAX_VISIBLE_MODEL_OPTIONS || searchQuery.length > 0;
+  const { sections, hiddenCount: hiddenModelCount } = buildModelDropdownSections(filteredModels, {
+    visibleLimit: MAX_VISIBLE_MODEL_OPTIONS,
+  });
+  const visibleModelCount = sections.reduce((n, s) => n + s.models.length, 0);
+  const showSearch = shouldShowModelSearch(models.length, searchQuery);
 
   /**
    * Toggle dropdown
@@ -265,31 +277,40 @@ export const ModelSelect = ({
               </span>
             </div>
           )}
-          {visibleModels.map((model) => (
-            <div
-              key={model.id}
-              className={`selector-option ${isSelectedModel(model.id) ? 'selected' : ''}`}
-              onClick={() => handleSelect(model.id)}
-              data-testid={`model-option-${model.id}`}
-            >
-              <ProviderModelIcon
-                providerId={currentProvider}
-                modelId={resolveModelIdForIcon(model.id, currentProvider === 'claude' ? modelMapping : {}, MODEL_ID_TO_MAPPING_KEY)}
-                size={16}
-                colored
-              />
-              <div style={MODEL_OPTION_INFO_STYLE}>
-                <span style={MODEL_TEXT_STYLE}>{getModelLabel(model, false)}</span>
-                {getModelDescription(model) && (
-                  <span className="model-description" style={MODEL_TEXT_STYLE}>{getModelDescription(model)}</span>
-                )}
-              </div>
-              {isSelectedModel(model.id) && (
-                <span className="codicon codicon-check check-mark" />
+          {sections.map((section) => (
+            <div key={section.id} className="model-selector-section" data-testid={`model-section-${section.id}`}>
+              {section.label !== '' && (
+                <div className="model-selector-group-header" data-testid={`model-group-${section.id}`}>
+                  <span>{section.label}</span>
+                </div>
               )}
+              {section.models.map((model) => (
+                <div
+                  key={model.id}
+                  className={`selector-option ${isSelectedModel(model.id) ? 'selected' : ''}`}
+                  onClick={() => handleSelect(model.id)}
+                  data-testid={`model-option-${model.id}`}
+                >
+                  <ProviderModelIcon
+                    providerId={currentProvider}
+                    modelId={resolveModelIdForIcon(model.id, currentProvider === 'claude' ? modelMapping : {}, MODEL_ID_TO_MAPPING_KEY)}
+                    size={16}
+                    colored
+                  />
+                  <div style={MODEL_OPTION_INFO_STYLE}>
+                    <span style={MODEL_TEXT_STYLE}>{getModelLabel(model, false)}</span>
+                    {getModelDescription(model) && (
+                      <span className="model-description" style={MODEL_TEXT_STYLE}>{getModelDescription(model)}</span>
+                    )}
+                  </div>
+                  {isSelectedModel(model.id) && (
+                    <span className="codicon codicon-check check-mark" />
+                  )}
+                </div>
+              ))}
             </div>
           ))}
-          {visibleModels.length === 0 && (
+          {visibleModelCount === 0 && (
             <div className="selector-option selector-option-status">
               {t('models.noModelsFound', { defaultValue: 'No models found' })}
             </div>

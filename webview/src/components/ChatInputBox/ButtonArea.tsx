@@ -184,12 +184,11 @@ export const ButtonArea = ({
       return cliModels;
     }
     if (currentProvider === 'omp') {
-      // Built-ins first: 'auto' plus the role entries (dynamic from listModels,
-      // static smol/slow/plan until loaded), then the dynamic catalog appended.
-      // Dedupe by id — the role selector entries win on collision, and the
-      // static-fallback 'auto' must not duplicate the OMP_MODELS one.
-      const roles = ompRoles.length > 0 ? ompRoles : OMP_ROLE_MODELS;
-      const merged = [...OMP_MODELS, ...roles, ...cliModels];
+      // 'auto' plus the dynamic catalog. Role entries (smol/slow/plan) live in
+      // the mode selector, NOT the model dropdown.
+      // Dedupe by id — the static-fallback 'auto' must not duplicate the
+      // OMP_MODELS one.
+      const merged = [...OMP_MODELS, ...cliModels];
       const seenIds = new Set<string>();
       return merged.filter((m) => {
         if (seenIds.has(m.id)) return false;
@@ -231,10 +230,12 @@ export const ButtonArea = ({
     // so a persisted dynamic selection would be wrongly reset to the default.
     if (cliModelsLoading) return;
     if (currentProvider === 'omp') {
-      // Roles are valid selections but never appear in the runtime catalog —
-      // validate against the merged list (auto + roles + catalog).
+      // Roles are valid selections but never appear in the model dropdown —
+      // validate against auto + catalog + roles.
       if (!onModelSelect) return;
-      const exists = availableModels.some((model) => model.id === selectedModel);
+      const roles = ompRoles.length > 0 ? ompRoles : OMP_ROLE_MODELS;
+      const exists = availableModels.some((model) => model.id === selectedModel)
+        || roles.some((role) => role.id === selectedModel);
       if (!exists) {
         onModelSelect(OMP_DEFAULT_MODEL_ID);
       }

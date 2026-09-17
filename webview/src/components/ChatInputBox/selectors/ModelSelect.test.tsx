@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ModelSelect } from './ModelSelect';
 import { CLAUDE_MODELS, CODEX_MODELS } from '../types';
@@ -189,5 +189,66 @@ describe('ModelSelect', () => {
     );
     expect(screen.getByRole('button').textContent).toContain('Sonnet 4.6');
     expect(screen.getByRole('button').textContent).not.toContain('glm-4');
+  });
+
+  it('多提供商目录应按前缀分组并渲染分组标题', () => {
+    const catalog: ModelInfo[] = [
+      { id: 'auto', label: 'OMP Auto' },
+      { id: 'fufei/kimi-k3', label: 'fufei/kimi-k3' },
+      { id: 'kimi-code/k3', label: 'kimi-code/k3' },
+      { id: 'kimi-code/k3-256k', label: 'kimi-code/k3-256k' },
+    ];
+
+    render(
+      <ModelSelect
+        value="auto"
+        onChange={vi.fn()}
+        models={catalog}
+        currentProvider="omp"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button'));
+
+    expect(screen.getByTestId('model-group-other')).toBeTruthy();
+    expect(screen.getByTestId('model-group-fufei')).toBeTruthy();
+    expect(screen.getByTestId('model-group-kimi-code')).toBeTruthy();
+    expect(screen.getByTestId('model-option-auto')).toBeTruthy();
+    expect(screen.getByTestId('model-option-kimi-code/k3-256k')).toBeTruthy();
+  });
+
+  it('单一前缀目录不渲染分组标题', () => {
+    const catalog: ModelInfo[] = [
+      { id: 'auto', label: 'OMP Auto' },
+      { id: 'deepseek/deepseek-flash', label: 'deepseek/deepseek-flash' },
+      { id: 'deepseek/deepseek-v4-flash', label: 'deepseek/deepseek-v4-flash' },
+    ];
+
+    render(
+      <ModelSelect
+        value="auto"
+        onChange={vi.fn()}
+        models={catalog}
+        currentProvider="omp"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button'));
+
+    expect(screen.queryByTestId('model-group-other')).toBeNull();
+    expect(screen.queryByTestId('model-group-deepseek')).toBeNull();
+    expect(screen.getByTestId('model-option-deepseek/deepseek-flash')).toBeTruthy();
+  });
+
+  it('选中值不在列表中（如 OMP 角色）时触发器应显示原值而非回退到第一项', () => {
+    render(
+      <ModelSelect
+        value="smol"
+        onChange={vi.fn()}
+        models={[{ id: 'auto', label: 'OMP Auto' }]}
+        currentProvider="omp"
+      />,
+    );
+
+    expect(screen.getByRole('button').textContent).toContain('smol');
+    expect(screen.getByRole('button').textContent).not.toContain('OMP Auto');
   });
 });
