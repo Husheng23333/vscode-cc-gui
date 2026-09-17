@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
 import { ConfigSelect, DshPresetSelect, ModeSelect, ModelConfigSelect, ProviderSelect } from './selectors';
@@ -7,6 +7,7 @@ import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
 import { useCliModels, useOmpRoles } from '../../hooks/providers/useCliModels';
+import { useToolbarCompact } from './hooks/useToolbarCompact';
 
 /**
  * Get custom Codex model list from localStorage
@@ -101,6 +102,8 @@ export const ButtonArea = ({
   onLongContextChange,
 }: ButtonAreaProps) => {
   const { t } = useTranslation();
+  const areaRef = useRef<HTMLDivElement>(null);
+  const compact = useToolbarCompact(areaRef);
   // const fileInputRef = useRef<HTMLInputElement>(null);
   const { cliModels, cliModelsLoading, cliModelsError, cliDefaultModel, refreshCliModels } = useCliModels(currentProvider);
   // Dynamic omp roles (static smol/slow/plan fallback until loaded).
@@ -312,7 +315,7 @@ export const ButtonArea = ({
   }, [onEnhancePrompt]);
 
   return (
-    <div className="button-area" data-provider={currentProvider}>
+    <div ref={areaRef} className={`button-area${compact ? ' toolbar-compact' : ''}`} data-provider={currentProvider}>
       {/* Left side: selectors */}
       <div className="button-area-left">
         <ConfigSelect

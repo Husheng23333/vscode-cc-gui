@@ -104,28 +104,41 @@
   transition: max-width 0.2s ease, opacity 0.2s ease, margin 0.2s ease;
 }
 
-/* Compact selector chrome when the toolbar is tight (all providers).
- * Codex especially has mode + model + reasoning + fast-mode, so the
+/* Compact selector chrome, toggled dynamically by ButtonArea (toolbar-compact
+ * class) when the selectors would actually overflow the toolbar, keeping a 20px
+ * reserve. Codex especially has mode + model + reasoning + fast-mode, so the
  * send button was being pushed past the rounded right edge. */
-@container button-area (max-width: 450px) {
-  .button-area .selector-button-text {
-    max-width: 0;
-    opacity: 0;
-    overflow: hidden;
-    margin: 0;
-  }
+.button-area.toolbar-compact .selector-button-text {
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  margin: 0;
+}
 
-  .button-area .selector-button {
-    gap: 2px;
-    padding: 4px 6px;
-    min-width: 28px;
-    flex-shrink: 0;
-  }
+.button-area.toolbar-compact .selector-button {
+  gap: 2px;
+  padding: 4px 6px;
+  min-width: 28px;
+  flex-shrink: 0;
+}
 
-  .button-area .selector-button > .codicon-chevron-up,
-  .button-area .selector-button > .codicon-chevron-down {
-    display: none;
-  }
+.button-area.toolbar-compact .selector-button > .codicon-chevron-up,
+.button-area.toolbar-compact .selector-button > .codicon-chevron-down {
+  display: none;
+}
+
+/* During compact measurement the hook toggles the chrome synchronously:
+ * - flex:none on the left pane, otherwise its scrollWidth reads the
+ *   flex-stretched width instead of the natural content width;
+ * - no max-width/margin transition, otherwise labels still animate from zero
+ *   and the measurement reads the compact width. */
+.button-area.toolbar-measuring .button-area-left {
+  flex: none !important;
+}
+
+.button-area.toolbar-measuring .selector-button-text,
+.button-area.toolbar-measuring .selector-button {
+  transition: none !important;
 }
 
 /* Even tighter: slightly smaller hit targets */
@@ -133,30 +146,6 @@
   .button-area .selector-button {
     padding: 4px 5px;
     min-width: 26px;
-  }
-}
-
-/* Fallback for browsers without container query support */
-@supports not (container-type: inline-size) {
-  @media (max-width: 560px) {
-    .button-area .selector-button-text {
-      max-width: 0;
-      opacity: 0;
-      overflow: hidden;
-      margin: 0;
-    }
-
-    .button-area .selector-button {
-      gap: 2px;
-      padding: 4px 6px;
-      min-width: 28px;
-      flex-shrink: 0;
-    }
-
-    .button-area .selector-button > .codicon-chevron-up,
-    .button-area .selector-button > .codicon-chevron-down {
-      display: none;
-    }
   }
 }
 

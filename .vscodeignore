@@ -8,6 +8,8 @@
 .vscode-dev/**
 .npm-cache/**
 .mossx/**
+.workflow/**
+.claude/**
 .git/**
 .gitignore
 .vscodeignore
