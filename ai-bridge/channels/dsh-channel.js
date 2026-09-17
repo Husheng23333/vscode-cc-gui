@@ -41,6 +41,10 @@ export function dshSettingsFromParams(stdinData) {
     autoStart:
       typeof stdinData.dshAutoStart === 'boolean' ? stdinData.dshAutoStart : base.autoStart,
     dshPreset: base.dshPreset,
+    // Wire dialect pin (DSH_WIRE) and the DSH home holding the host's
+    // browser-session secret (DSH_HOME) are env-level choices; keep them.
+    wire: base.wire,
+    dshHome: base.dshHome,
   };
 }
 

@@ -71,7 +71,8 @@ export interface UseWindowCallbacksOptions {
   // Streaming refs from useStreamingMessages
   streamingContentRef: MutableRefObject<string>;
   streamingThinkingRef: MutableRefObject<string>;
-  thinkingBlockBoundariesRef: MutableRefObject<number[]>;
+  recordStreamingBlockReset?: () => void;
+  clearStreamingBlockResets?: () => void;
   isStreamingRef: MutableRefObject<boolean>;
   useBackendStreamingRenderRef: MutableRefObject<boolean>;
   autoExpandedThinkingKeysRef: MutableRefObject<Set<string>>;
@@ -96,9 +97,9 @@ export interface UseWindowCallbacksOptions {
   openPermissionDialog: (request: PermissionRequest) => void;
   openAskUserQuestionDialog: (request: AskUserQuestionRequest) => void;
   openPlanApprovalDialog: (request: PlanApprovalRequest) => void;
-  forceClosePermissionDialog: (channelId?: string | null) => void;
-  forceCloseAskUserQuestionDialog: (requestId?: string | null) => void;
-  forceClosePlanApprovalDialog: (requestId?: string | null) => void;
+  forceClosePermissionDialog: (channelId?: string | null, dialogToken?: string) => void;
+  forceCloseAskUserQuestionDialog: (requestId?: string | null, dialogToken?: string) => void;
+  forceClosePlanApprovalDialog: (requestId?: string | null, dialogToken?: string) => void;
   openContextUsageDialog: (requestId?: string | null, loading?: boolean) => void;
   updateContextUsageData: (
     requestId: string | null | undefined,
@@ -111,6 +112,15 @@ export interface UseWindowCallbacksOptions {
   currentSessionIdRef: MutableRefObject<string | null>;
   updateHistoryTitle: (sessionId: string, newTitle: string) => void;
   applyHistoryTitleLocal: (sessionId: string, newTitle: string) => void;
+
+  /**
+   * Discards messages waiting in the send queue; wired into
+   * resetTransientUiState so every session-reset path (beginSessionTransition
+   * and the host-driven clearMessages callback) drops them. Resolved through a
+   * ref by the caller because registration happens once on mount, before the
+   * message queue hook has been created.
+   */
+  clearQueuedMessages?: () => void;
 
   // AI title generation: update the displayed session title when backend generates one
   setCustomSessionTitle: React.Dispatch<React.SetStateAction<string | null>>;

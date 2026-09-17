@@ -7,6 +7,7 @@ import {
   createInitialEventState,
   isWindowsTaskkillParseNoise,
   processCodexEventStream,
+  shouldBridgeCodexApproval,
 } from './codex-event-handler.js';
 
 async function* eventsFrom(items) {
@@ -46,6 +47,30 @@ function makeConfig(overrides = {}) {
     ...overrides,
   };
 }
+
+test('native auto review does not invoke the late Java approval bridge', () => {
+  assert.equal(
+    shouldBridgeCodexApproval({
+      normalizedPermissionMode: 'auto',
+      threadOptions: { approvalPolicy: 'on-request' },
+    }),
+    false,
+  );
+  assert.equal(
+    shouldBridgeCodexApproval({
+      normalizedPermissionMode: 'default',
+      threadOptions: { approvalPolicy: 'on-request' },
+    }),
+    true,
+  );
+  assert.equal(
+    shouldBridgeCodexApproval({
+      normalizedPermissionMode: 'bypassPermissions',
+      threadOptions: { approvalPolicy: 'never' },
+    }),
+    false,
+  );
+});
 
 test('Codex item.updated agent_message emits incremental content deltas before completion', async () => {
   const emittedMessages = [];

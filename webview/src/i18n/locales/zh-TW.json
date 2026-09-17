@@ -121,8 +121,7 @@
       "collapse": "摺疊摘要"
     },
     "openSourceBannerStar": "點個 Star",
-    "openSourceBannerStarToast": "已複製倉庫地址到剪貼簿，複製到瀏覽器即可訪問 ⭐",
-    "openSourceBannerStarAria": "複製倉庫地址並前往 GitHub 點 Star",
+    "openSourceBannerStarAria": "前往 GitHub 點 Star",
     "cacheHitsWithRatio": "（快取命中 {{tokens}}，{{ratio}}）",
     "planModeEnabled": "已啟用 Plan 模式",
     "commandProviderOnly": "{{command}} 僅支援 {{provider}} 供應商",
@@ -233,7 +232,8 @@
         "provider": {
           "claude": "Claude Code",
           "codex": "Codex",
-          "grok": "Grok CLI"
+          "grok": "Grok CLI",
+          "zcode": "ZCode"
         },
         "currentProviderAuto": "目前使用自動選擇：{{provider}}",
         "currentProviderManual": "目前使用手動選擇的 provider：{{provider}}",
@@ -369,6 +369,18 @@
     },
     "usage": "使用統計",
     "usageDesc": "檢視您的 Token 消耗、費用統計和使用趨勢分析",
+    "socialDocs": "官方文檔",
+    "socialTitle": "關注我們",
+    "socialGithub": "GitHub 開源倉庫，歡迎 Star",
+    "socialX": "X（Twitter）@ZPeng31310",
+    "socialZhihu": "知乎 @vscodeai",
+    "socialXiaohongshu": "小紅書",
+    "socialDouyin": "抖音，滑鼠懸停掃碼關注",
+    "socialYoutube": "YouTube 頻道 @昆鹏马上优化",
+    "douyinQrAlt": "抖音二維碼",
+    "douyinId": "抖音號：nengyongai",
+    "douyinCopied": "抖音號已複製到剪貼簿",
+    "douyinCopyFailed": "複製失敗，請手動複製",
     "mcp": "MCP 伺服器",
     "mcpDesc": "配置和管理 Model Context Protocol 伺服器",
     "permissions": "權限配置",
@@ -472,11 +484,6 @@
     "communityDesc": "掃描下方二維碼加入官方微信交流群，獲取最新資訊和技術支援",
     "communityQrTip": "使用微信掃一掃加入交流群",
     "communityQrAlt": "官方微信交流群二維碼",
-    "githubTitle": "GitHub 開源地址",
-    "githubDesc": "本專案已在 GitHub 開源，歡迎 Star 支持",
-    "githubCopyBtn": "複製開源地址",
-    "githubCopied": "開源地址已複製到剪貼簿，請在瀏覽器中訪問",
-    "githubCopyFailed": "複製失敗，請手動複製",
     "sponsor": "贊助支持",
     "sponsorDesc": "如果這個項目對你有幫助，歡迎贊助支持，你的支持是我持續維護的動力！",
     "alipay": "支付寶",
@@ -826,6 +833,14 @@
         "dsh": {
           "name": "DeepSeek Harness",
           "description": "DeepSeek 終端智慧體宿主（常駐 dsh web）"
+        },
+        "minimax": {
+          "name": "MiniMax Code",
+          "description": "MiniMax 終端編碼智能體。需 Node.js 22.19+ / 24+（不支援 23）；命令：minimax / mcode"
+        },
+        "zcode": {
+          "name": "ZCode",
+          "description": "智譜 ZCode 桌面編碼應用（GLM 模型）"
         }
       },
       "installDialog": {
@@ -860,6 +875,10 @@
         "stopHost": "關閉（僅限外掛啟動的宿主）",
         "stopHostShort": "關閉宿主",
         "autoStart": "需要時自動啟動"
+      },
+      "visibility": {
+        "hide": "在切換選單中隱藏",
+        "show": "在切換選單中顯示"
       }
     }
   },
@@ -1276,7 +1295,32 @@
     "bashGroupBatchExecution": "Batch Execution",
     "bashGroupCompleted": "completed",
     "bashGroupAllCompleted": "All Completed",
-    "bashGroupFailed": "failed"
+    "bashGroupFailed": "failed",
+    "reportFindings": {
+      "title": "審查發現",
+      "findingsCount_one": "{{count}} 項發現",
+      "findingsCount_other": "{{count}} 項發現",
+      "confirmedCount_one": "{{count}} 項已確認",
+      "confirmedCount_other": "{{count}} 項已確認",
+      "plausibleCount_one": "{{count}} 項待複核",
+      "plausibleCount_other": "{{count}} 項待複核",
+      "confirmed": "已確認",
+      "plausible": "待複核",
+      "fixed": "已修復",
+      "skipped": "已略過",
+      "noChangeNeeded": "無需修改",
+      "empty": "未發現問題",
+      "summaryLabel": "審查摘要",
+      "summary": "問題摘要",
+      "failureScenario": "觸發情境",
+      "reviewLevel": "審查層級：{{level}}",
+      "openFile": "開啟 {{filePath}}",
+      "expandFinding": "展開問題詳情",
+      "collapseFinding": "收合問題詳情",
+      "expandReport": "展開審查發現",
+      "collapseReport": "收合審查發現",
+      "untitled": "未命名問題"
+    }
   },
   "todo": {
     "inProgress": "進行中 {{completed}}/{{total}} 個任務",
@@ -1474,13 +1518,13 @@
         "label": "Haiku 4.5",
         "description": "Haiku 4.5 · 速度最快，適合快速回覆"
       },
-      "opus48": {
-        "label": "Opus 4.8",
-        "description": "Opus 4.8 · 保留的前代 Opus 模型"
+      "fable51": {
+        "label": "Fable 5.1",
+        "description": "Fable 5.1 · 最強大 · Mythos 級"
       },
       "fable5": {
         "label": "Fable 5",
-        "description": "Fable 5 · 最強大 · Mythos 級"
+        "description": "Fable 5 · 保留的前代 Fable 模型"
       },
       "sonnet5": {
         "label": "Sonnet 5",
@@ -1545,6 +1589,10 @@
       "gpt56luna": {
         "label": "GPT-5.6 Luna",
         "description": "針對成本敏感場景優化的 GPT-5.6 模型"
+      },
+      "gpt6astra": {
+        "label": "GPT-6 Astra",
+        "description": "新一代旗艦模型，擅長自主電腦操作與長鏈路智慧體任務"
       }
     },
     "searchPlaceholder": "搜尋模型",
@@ -1579,9 +1627,14 @@
       "tooltip": "自動接受檔案編輯",
       "description": "自動接受檔案建立/編輯，減少確認步驟"
     },
+    "auto": {
+      "label": "自動審批",
+      "tooltip": "由模型審查器自動批准或阻止操作",
+      "description": "使用供應商原生審查器處理審批，同時保留安全邊界"
+    },
     "bypassPermissions": {
-      "label": "自動模式",
-      "shortLabel": "自動",
+      "label": "全自動",
+      "shortLabel": "全自動",
       "tooltip": "略過所有權限檢查",
       "description": "完全自動化，略過所有權限檢查【請謹慎使用】"
     }
@@ -1624,6 +1677,12 @@
       "tooltip": "Codex approval_policy=on-request – asks for approval when needed",
       "description": "Balanced option. Allows normal editing flow while still requiring approvals when needed."
     },
+    "auto": {
+      "label": "替我審批",
+      "shortLabel": "自動",
+      "tooltip": "Codex approvals_reviewer=auto_review：由自動審查器處理可審批請求。",
+      "description": "維持 workspace-write 沙箱；審查器無法批准的請求仍會升級處理。"
+    },
     "bypassPermissions": {
       "label": "Full Auto",
       "tooltip": "Codex approval_policy=never – runs commands and writes files without prompting (workspace sandbox still enforced).",
@@ -1662,6 +1721,13 @@
     },
     "dsh": {
       "label": "DeepSeek Harness"
+    },
+    "manageCli": "CLI 設定管理",
+    "minimax": {
+      "label": "MiniMax Code"
+    },
+    "zcode": {
+      "label": "ZCode"
     }
   },
   "promptEnhancer": {

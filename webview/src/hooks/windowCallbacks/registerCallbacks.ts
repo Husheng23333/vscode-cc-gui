@@ -64,11 +64,12 @@ export function registerWindowCallbacks(
     streamingMessageIndexRef: options.streamingMessageIndexRef,
     streamingContentRef: options.streamingContentRef,
     streamingThinkingRef: options.streamingThinkingRef,
-    thinkingBlockBoundariesRef: options.thinkingBlockBoundariesRef,
+    clearStreamingBlockResets: options.clearStreamingBlockResets,
     autoExpandedThinkingKeysRef: options.autoExpandedThinkingKeysRef,
     contentUpdateTimeoutRef: options.contentUpdateTimeoutRef,
     thinkingUpdateTimeoutRef: options.thinkingUpdateTimeoutRef,
     streamingTurnIdRef: options.streamingTurnIdRef,
+    clearQueuedMessages: options.clearQueuedMessages,
     messagesContainerRef: options.messagesContainerRef,
   });
 

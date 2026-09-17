@@ -6,6 +6,7 @@ export class PermissionHandler implements BridgeHandler {
     'permission_decision',
     'ask_user_question_response',
     'plan_approval_response',
+    'dialog_delivery_ack',
   ] as const;
 
   constructor(private readonly permissionIpc: PermissionIpcService) {}
@@ -20,6 +21,9 @@ export class PermissionHandler implements BridgeHandler {
         return true;
       case 'plan_approval_response':
         this.permissionIpc.handlePlanApprovalResponse(content);
+        return true;
+      case 'dialog_delivery_ack':
+        this.permissionIpc.handleDialogDeliveryAck(content);
         return true;
       default:
         return false;

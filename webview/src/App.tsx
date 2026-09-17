@@ -27,7 +27,7 @@ import {
 } from './hooks/useMessageSender';
 import { applyDiffTheme, getStoredDiffTheme } from './utils/diffTheme';
 import { detectIdeThemeFromDom } from './utils/detectIdeTheme';
-import type { Attachment, ChatInputBoxHandle } from './components/ChatInputBox/types';
+import type { Attachment, ChatInputBoxHandle, PermissionMode } from './components/ChatInputBox/types';
 import { ToastContainer } from './components/Toast';
 import { ChatHeader } from './components/ChatHeader';
 import { ChatScreen } from './components/ChatScreen';
@@ -90,6 +90,7 @@ const App = () => {
   const {
     currentView, setCurrentView,
     settingsInitialTab, setSettingsInitialTab,
+    settingsProviderSubTab, setSettingsProviderSubTab,
     toasts, addToast, dismissToast, clearToasts,
     contextInfo, setContextInfo,
     searchOpen, setSearchOpen,
@@ -141,7 +142,8 @@ const App = () => {
     streamingContentRef, streamingThinkingRef, isStreamingRef, useBackendStreamingRenderRef,
     streamingMessageIndexRef, contentUpdateTimeoutRef, thinkingUpdateTimeoutRef,
     lastContentUpdateRef, lastThinkingUpdateRef, autoExpandedThinkingKeysRef,
-    streamingTurnIdRef, turnIdCounterRef, thinkingBlockBoundariesRef,
+    streamingTurnIdRef, turnIdCounterRef, recordStreamingBlockReset,
+    clearStreamingBlockResets,
     findLastAssistantIndex, extractRawBlocks,
     getOrCreateStreamingAssistantIndex, patchAssistantForStreaming,
   } = useStreamingMessages();
@@ -152,6 +154,7 @@ const App = () => {
   const {
     currentProvider, selectedModel, permissionMode,
     selectedAgent, sdkStatusLoaded, currentSdkInstalled,
+    codexNativeAutoReviewAvailable,
     currentProviderRef,
     activeProviderConfig, claudeSettingsAlwaysThinkingEnabled,
     reasoningEffort, codexFastMode, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
@@ -269,6 +272,16 @@ const App = () => {
     if (currentView === 'chat') { forceRefreshPrompts(); }
   }, [currentView]);
 
+  // Ref indirection breaks a hook-ordering cycle: useSessionManagement wants the
+  // message queue's clearQueue, but that hook sits further down the chain
+  // (useMessageQueue needs executeMessage, which needs forceCreateNewSession
+  // from useSessionManagement). The stable wrapper keeps beginSessionTransition's
+  // useCallback from re-creating on every render.
+  const clearMessageQueueRef = useRef<() => void>(() => {});
+  const clearQueuedMessages = useCallback(() => {
+    clearMessageQueueRef.current();
+  }, []);
+
   // ── Session management ──
   const {
     showNewSessionConfirm, showInterruptConfirm,
@@ -287,6 +300,7 @@ const App = () => {
     setCustomSessionTitle, setUsagePercentage, setUsageUsedTokens, setUsageMaxTokens,
     setStatus, setLoading, setIsThinking, setStreamingActive,
     clearToasts, addToast, t,
+    clearQueuedMessages,
   });
 
   useHistoryLoader({ currentView, currentProvider });
@@ -313,7 +327,8 @@ const App = () => {
     streamingContentRef, streamingThinkingRef, isStreamingRef, useBackendStreamingRenderRef,
     autoExpandedThinkingKeysRef,
     streamingMessageIndexRef,
-    streamingTurnIdRef, turnIdCounterRef, thinkingBlockBoundariesRef,
+    streamingTurnIdRef, turnIdCounterRef, recordStreamingBlockReset,
+    clearStreamingBlockResets,
     lastContentUpdateRef, contentUpdateTimeoutRef,
     lastThinkingUpdateRef, thinkingUpdateTimeoutRef,
     findLastAssistantIndex, extractRawBlocks,
@@ -326,6 +341,7 @@ const App = () => {
     setCustomSessionTitle,
     setPermissionDialogTimeoutSeconds,
     setStreamStallTimeoutSeconds,
+    clearQueuedMessages,
   });
 
   // ── Message processing ──
@@ -349,6 +365,7 @@ const App = () => {
   } = useMessageSender({
     t, addToast,
     currentProvider, selectedModel, permissionMode, reasoningEffort, selectedAgent, currentSessionId, codexFastMode, streamingEnabledSetting,
+    codexNativeAutoReviewAvailable,
     dshPreset,
     sdkStatusLoaded, currentSdkInstalled,
     sentAttachmentsRef, chatInputRef, messagesContainerRef,
@@ -369,7 +386,13 @@ const App = () => {
     queue: messageQueue,
     enqueue: enqueueMessage,
     dequeue: dequeueMessage,
+    clearQueue,
   } = useMessageQueue({ isLoading: loading, onExecute: executeMessage });
+
+  // Point the session-transition indirection at the real clearQueue.
+  useEffect(() => {
+    clearMessageQueueRef.current = clearQueue;
+  }, [clearQueue]);
 
   // handleSubmit with queue support (new session and local commands bypass loading check)
   const handleSubmit = useCallback((content: string, attachments?: Attachment[]) => {
@@ -460,6 +483,7 @@ const App = () => {
         onHistory={() => setCurrentView('history')}
         onSettings={() => {
           setSettingsInitialTab(undefined);
+          setSettingsProviderSubTab(undefined);
           setCurrentView('settings');
         }}
         onOpenSearch={() => setSearchOpen(true)}
@@ -478,6 +502,7 @@ const App = () => {
         <SettingsView
           onClose={() => setCurrentView('chat')}
           initialTab={settingsInitialTab}
+          initialProviderSubTab={settingsProviderSubTab}
           currentProvider={currentProvider}
           streamingEnabled={streamingEnabledSetting}
           onStreamingEnabledChange={handleStreamingEnabledChange}
@@ -526,6 +551,7 @@ const App = () => {
           currentProvider={currentProvider}
           selectedModel={selectedModel}
           permissionMode={permissionMode}
+          codexNativeAutoReviewAvailable={codexNativeAutoReviewAvailable}
           selectedAgent={selectedAgent}
           sdkStatusLoaded={sdkStatusLoaded}
           currentSdkInstalled={currentSdkInstalled}
@@ -585,6 +611,7 @@ const App = () => {
         onRewindCancel={handleRewindCancel}
         currentProvider={currentProvider}
         permissionDialogTimeoutSeconds={permissionDialogTimeoutSeconds}
+        onPlanApprovalModeChange={(mode) => handleModeSelect(mode as PermissionMode)}
       />
     </>
   );

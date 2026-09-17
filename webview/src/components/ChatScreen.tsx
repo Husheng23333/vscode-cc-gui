@@ -82,6 +82,7 @@ export interface ChatScreenProps {
   currentProvider: ProviderState['currentProvider'];
   selectedModel: ProviderState['selectedModel'];
   permissionMode: ProviderState['permissionMode'];
+  codexNativeAutoReviewAvailable?: ProviderState['codexNativeAutoReviewAvailable'];
   selectedAgent: ProviderState['selectedAgent'];
   sdkStatusLoaded: ProviderState['sdkStatusLoaded'];
   currentSdkInstalled: ProviderState['currentSdkInstalled'];
@@ -135,6 +136,7 @@ export const ChatScreen = ({
   onSubmit, onInterrupt, onRewind,
   onNavigateToProviderSettings, onProviderSelect,
   currentProvider, selectedModel, permissionMode, selectedAgent,
+  codexNativeAutoReviewAvailable = true,
   sdkStatusLoaded, currentSdkInstalled,
   activeProviderConfig, claudeSettingsAlwaysThinkingEnabled,
   reasoningEffort, codexFastMode, streamingEnabledSetting, sendShortcut, autoOpenFileEnabled,
@@ -150,7 +152,7 @@ export const ChatScreen = ({
   const { messages, loading, isThinking, streamingActive, loadingStartTime, subagentHistories } = useMessages();
   const { currentSessionId } = useSession();
   const {
-    setSettingsInitialTab, setCurrentView,
+    setSettingsInitialTab, setSettingsProviderSubTab, setCurrentView,
     contextInfo, setContextInfo,
     setAddModelDialogOpen,
     addToast,
@@ -293,6 +295,7 @@ export const ChatScreen = ({
           isLoading={loading}
           selectedModel={selectedModel}
           permissionMode={permissionMode}
+          codexNativeAutoReviewAvailable={codexNativeAutoReviewAvailable}
           currentProvider={currentProvider}
           usagePercentage={usagePercentage}
           usageUsedTokens={usageUsedTokens}
@@ -338,6 +341,11 @@ export const ChatScreen = ({
           }}
           onOpenPromptSettings={() => {
             setSettingsInitialTab('prompts');
+            setCurrentView('settings');
+          }}
+          onOpenCliSettings={() => {
+            setSettingsInitialTab('providers');
+            setSettingsProviderSubTab('cli');
             setCurrentView('settings');
           }}
           onOpenModelSettings={() => {

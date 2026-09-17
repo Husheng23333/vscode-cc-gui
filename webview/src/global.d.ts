@@ -234,9 +234,12 @@ interface Window {
   onTokenTrackerResponse?: (json: string) => void;
   updateAskUserQuestionNotificationEnabled?: (json: string) => void;
   updateTaskCompletionNotificationEnabled?: (json: string) => void;
-  forceClosePermissionDialog?: (channelId?: string | null) => void;
-  forceCloseAskUserQuestionDialog?: (requestId?: string | null) => void;
-  forceClosePlanApprovalDialog?: (requestId?: string | null) => void;
+  /** Closes permission dialogs matching the ID and token; an empty ID closes all. */
+  forceClosePermissionDialog?: (channelId?: string | null, dialogToken?: string) => void;
+  /** Closes question dialogs matching the ID and token; an empty ID closes all. */
+  forceCloseAskUserQuestionDialog?: (requestId?: string | null, dialogToken?: string) => void;
+  /** Closes plan dialogs matching the ID and token; an empty ID closes all. */
+  forceClosePlanApprovalDialog?: (requestId?: string | null, dialogToken?: string) => void;
   onTaskEvent?: (json: string) => void;
   updateCodexSubscriptionQuota?: (json: string) => void;
   updateMcpServerTools?: (json: string) => void;
@@ -764,9 +767,10 @@ interface Window {
   onThinkingDelta?: (delta: string) => void;
 
   /**
-   * Block reset callback - called when a new assistant message starts within
-   * an ongoing stream (e.g., after a tool_use loop iteration). Frontend should
-   * clear streaming content refs to prevent cross-turn content merging.
+   * Block reset callback - fired when a new assistant content block starts
+   * within an ongoing stream (e.g., after a tool_use loop iteration). Only
+   * render bookkeeping resets here; content buffers stay cumulative so the
+   * backend snapshot's per-block routing remains consistent.
    */
   onBlockReset?: () => void;
 
@@ -859,14 +863,19 @@ interface Window {
   __stallWatchdogInterval?: ReturnType<typeof setInterval> | null;
 
   /**
-   * Pending rAF handle and JSON for deferred updateMessages processing.
-   * Stored on window so re-registration of message callbacks cancels stale rAFs.
+   * Pending timer handle and JSON for deferred updateMessages processing during
+   * streaming (historical "rAF" naming). Stored on window so re-registration of
+   * message callbacks cancels stale timers.
    */
   __pendingUpdateRaf?: number | null;
   __pendingUpdateJson?: string | null;
   __pendingUpdateSequence?: number | null;
+  /** Deltas arrived while a structural snapshot was pending; rendering resumes after it applies. */
+  __streamingDeltaRenderDeferred?: boolean;
+  /** Re-schedule deferred delta rendering once the pending snapshot has been applied. */
+  __flushDeferredStreamingRenders?: () => void;
   __minAcceptedUpdateSequence?: number;
-  /** Cancel pending rAF-deferred updateMessages (set by messageCallbacks, called by onStreamEnd). */
+  /** Cancel the pending deferred updateMessages (set by messageCallbacks, called by stream lifecycle guards). */
   __cancelPendingUpdateMessages?: () => void;
 
   /**
@@ -988,11 +997,11 @@ interface Window {
    */
   __streamHardStopped?: boolean;
 
-  __pendingPermissionDialogRequests?: string[];
-
-  __pendingAskUserQuestionDialogRequests?: string[];
-
-  __pendingPlanApprovalDialogRequests?: string[];
+  /** Preserves arrival order for dialog events received before React mounts. */
+  __pendingDialogEvents?: Array<
+    { kind: 'permission' | 'askUserQuestion' | 'planApproval'; type: 'show'; payload: string }
+    | { kind: 'permission' | 'askUserQuestion' | 'planApproval'; type: 'close'; targetId: string | null; dialogToken?: string }
+  >;
 
   /**
    * Pending updateMessages payload before React initialization

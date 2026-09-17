@@ -45,6 +45,8 @@ interface ModelSelectProps {
   onLongContextChange?: (enabled: boolean) => void;
   /** Render only the dropdown, positioned as a fly-out from triggerRef. */
   embedded?: boolean;
+  /** Render the list flat inside a parent popover: no positioning, no close-on-select. */
+  inline?: boolean;
   triggerRef?: React.RefObject<HTMLElement | null>;
   onClose?: () => void;
   /** Hide the 1M toggle when the parent menu already exposes it. */
@@ -77,6 +79,7 @@ export const ModelSelect = ({
   longContextEnabled = true,
   onLongContextChange,
   embedded = false,
+  inline = false,
   triggerRef,
   onClose,
   hideLongContextToggle = false,
@@ -159,10 +162,11 @@ export const ModelSelect = ({
    */
   const handleSelect = useCallback((modelId: string) => {
     onChange(modelId);
+    if (inline) return;
     setIsOpen(false);
     setSearchQuery('');
     onClose?.();
-  }, [onChange, onClose]);
+  }, [inline, onChange, onClose]);
 
   /**
    * Close on outside click
@@ -194,10 +198,10 @@ export const ModelSelect = ({
   }, [embedded, isOpen]);
 
   useLayoutEffect(() => {
-    if (embedded || isOpen) {
+    if (!inline && (embedded || isOpen)) {
       recalculate();
     }
-  }, [embedded, isOpen, filteredModels.length, loading, recalculate]);
+  }, [embedded, inline, isOpen, filteredModels.length, loading, recalculate]);
 
   const dropdownStyle: React.CSSProperties = embedded
     ? {
@@ -218,9 +222,9 @@ export const ModelSelect = ({
   const renderDropdown = () => (
         <div
           ref={dropdownRef}
-          className="selector-dropdown model-selector-dropdown"
+          className={inline ? 'model-selector-inline' : 'selector-dropdown model-selector-dropdown'}
           data-testid="model-selector-dropdown"
-          style={dropdownStyle}
+          style={inline ? undefined : dropdownStyle}
           onMouseEnter={(e) => e.stopPropagation()}
         >
           {showSearch && (
@@ -336,7 +340,7 @@ export const ModelSelect = ({
         </div>
   );
 
-  if (embedded) {
+  if (embedded || inline) {
     return renderDropdown();
   }
 

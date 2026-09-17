@@ -29,11 +29,13 @@ import { createInterface } from 'readline';
 import { handleClaudeCommand } from './channels/claude-channel.js';
 import { handleCodexCommand } from './channels/codex-channel.js';
 import { handleGrokCommand } from './channels/grok-channel.js';
+import { handleZcodeCommand } from './channels/zcode-channel.js';
 import { handleKimiCommand } from './channels/kimi-channel.js';
 import { handleOpenCodeCommand } from './channels/opencode-channel.js';
 import { handlePiCommand } from './channels/pi-channel.js';
 import { handleOmpCommand } from './channels/omp-channel.js';
 import { handleDshCommand } from './channels/dsh-channel.js';
+import { handleMiniMaxCommand } from './channels/minimax-channel.js';
 import { abortDshTurns } from './services/dsh/message-service.js';
 import { loadClaudeSdk, isClaudeSdkAvailable } from './utils/sdk-loader.js';
 import {
@@ -55,13 +57,29 @@ import {
   shutdownPersistentRuntimes as grokShutdownPersistentRuntimes,
   setPermissionModePersistent as grokSetPermissionModePersistent,
   getContextUsagePersistent as grokGetContextUsagePersistent,
-  getUsagePersistent as grokGetUsagePersistent
+  getUsagePersistent as grokGetUsagePersistent,
+  getRuntimeSnapshot as grokGetRuntimeSnapshot
 } from './services/grok/persistent-acp-service.js';
+import {
+  sendMessagePersistent as zcodeSendPersistent,
+  preconnectPersistent as zcodePreconnectPersistent,
+  resetRuntimePersistent as zcodeResetRuntimePersistent,
+  abortCurrentTurn as zcodeAbortCurrentTurn,
+  shutdownPersistentRuntimes as zcodeShutdownPersistentRuntimes,
+  setPermissionModePersistent as zcodeSetPermissionModePersistent,
+  getContextUsagePersistent as zcodeGetContextUsagePersistent,
+  getUsagePersistent as zcodeGetUsagePersistent
+} from './services/zcode/persistent-zcode-service.js';
 import { isWebviewControlledEnvVar, isDangerousEnvVar } from './config/api-config.js';
 import { cleanupStaleTempImages } from './services/claude/attachment-service.js';
 import { requestContext, getRequestId } from './utils/request-context.js';
 import { abortCliProcesses } from './utils/cli-process-registry.js';
 import { isDaemonEventJsonLine } from './utils/daemon-line.js';
+
+// Namespace handles for runtime snapshots (daemon idle reaper). Read through
+// the module namespace so the daemon still loads if a provider has not yet
+// exported its snapshot function; a missing snapshot reads as "no runtimes".
+import * as claudePersistentQueryService from './services/claude/persistent-query-service.js';
 
 // =============================================================================
 // Network Environment Setup (must run before any HTTPS connection)
@@ -77,6 +95,8 @@ import { isDaemonEventJsonLine } from './utils/daemon-line.js';
 
 // NOTE: Keep in sync with package.json version when updating.
 const DAEMON_VERSION = '1.0.0';
+const DAEMON_IDLE_TIMEOUT_MS = 3 * 60 * 1000;
+const DAEMON_IDLE_CHECK_INTERVAL_MS = 15 * 1000;
 
 // =============================================================================
 // State
@@ -106,6 +126,21 @@ function withProcessEnvLock(fn) {
 
 let isDaemonMode = true;
 let sdkPreloaded = false;
+let lastCommandActivityAt = Date.now();
+let pendingCommandCount = 0;
+let idleShutdownInFlight = false;
+let idleShutdownGeneration = 0;
+
+/** Lightweight lifecycle snapshot used by the idle reaper (Claude runtimes). */
+function getClaudeRuntimeSnapshot() {
+  const snapshot = claudePersistentQueryService.getSnapshot;
+  return typeof snapshot === 'function' ? snapshot() : {};
+}
+
+/** Lightweight lifecycle snapshot used by the idle reaper (Grok ACP runtimes). */
+function getGrokRuntimeSnapshot() {
+  return grokGetRuntimeSnapshot();
+}
 
 // =============================================================================
 // Output Interception
@@ -405,6 +440,10 @@ async function processRequest(request) {
       ts: Date.now(),
       sdkPreloaded,
       memoryUsage: process.memoryUsage().heapUsed,
+      runtimes: {
+        claude: getClaudeRuntimeSnapshot(),
+        grok: getGrokRuntimeSnapshot(),
+      },
     });
     return;
   }
@@ -419,6 +458,10 @@ async function processRequest(request) {
       uptime: process.uptime(),
       sdkPreloaded,
       memoryUsage: process.memoryUsage(),
+      runtimes: {
+        claude: getClaudeRuntimeSnapshot(),
+        grok: getGrokRuntimeSnapshot(),
+      },
     });
     return;
   }
@@ -429,6 +472,7 @@ async function processRequest(request) {
     await grokShutdownPersistentRuntimes().catch((e) => {
       _originalStderrWrite(`[daemon] Failed to shutdown Grok persistent runtimes: ${e.message}\n`, 'utf8');
     });
+    await zcodeShutdownPersistentRuntimes().catch(() => {});
     sendDaemonEvent('shutdown', { reason: 'requested' });
     writeRawLine({ id: id || '0', done: true, success: true });
     isDaemonMode = false;
@@ -507,6 +551,16 @@ async function processRequest(request) {
           await grokPreconnectPersistent(stdinData);
         } else if (provider === 'grok' && command === 'resetRuntime') {
           await grokResetRuntimePersistent(stdinData);
+        } else if (provider === 'zcode' && command === 'send') {
+          await zcodeSendPersistent(stdinData);
+        } else if (provider === 'zcode' && command === 'preconnect') {
+          await zcodePreconnectPersistent(stdinData);
+        } else if (provider === 'zcode' && command === 'resetRuntime') {
+          await zcodeResetRuntimePersistent(stdinData);
+        } else if (provider === 'zcode' && command === 'getContextUsage') {
+          await zcodeGetContextUsagePersistent(stdinData);
+        } else if (provider === 'zcode' && command === 'getUsage') {
+          await zcodeGetUsagePersistent(stdinData);
         } else {
           // Dispatch to the existing handlers for non-send commands + CLI providers.
           switch (provider) {
@@ -518,6 +572,9 @@ async function processRequest(request) {
               break;
             case 'grok':
               await handleGrokCommand(command, [], stdinData);
+              break;
+            case 'zcode':
+              await handleZcodeCommand(command, [], stdinData);
               break;
             case 'kimi':
               await handleKimiCommand(command, [], stdinData);
@@ -533,6 +590,9 @@ async function processRequest(request) {
               break;
             case 'dsh':
               await handleDshCommand(command, [], stdinData);
+              break;
+            case 'minimax':
+              await handleMiniMaxCommand(command, [], stdinData);
               break;
             default:
               throw new Error(`Unknown provider: ${provider}`);
@@ -653,6 +713,45 @@ async function processRequest(request) {
     crlfDelay: Infinity,
   });
 
+  // A daemon is deliberately lazy: after all provider runtimes have been
+  // released, keep the lightweight bridge around briefly for quick reuse and
+  // then terminate it. Heartbeats/status probes do not refresh this timer.
+  const idleReaper = setInterval(async () => {
+    if (idleShutdownInFlight || pendingCommandCount > 0 || activeRequestIds.size > 0) return;
+    const idleFor = Date.now() - lastCommandActivityAt;
+    if (idleFor < DAEMON_IDLE_TIMEOUT_MS) return;
+
+    const claude = getClaudeRuntimeSnapshot();
+    const grok = getGrokRuntimeSnapshot();
+    const claudeBusy = (claude.anonymousRuntimeCount || 0) > 0
+      || (claude.sessionRuntimeCount || 0) > 0
+      || !!claude.activeTurnEpoch;
+    const grokBusy = (grok.runtimeCount || 0) > 0 || (grok.activeTurnCount || 0) > 0;
+    if (claudeBusy || grokBusy) return;
+
+    idleShutdownInFlight = true;
+    const shutdownGeneration = ++idleShutdownGeneration;
+    try {
+      await shutdownPersistentRuntimes();
+      await grokShutdownPersistentRuntimes().catch(() => {});
+      // A command may have arrived while provider shutdown was awaiting an
+      // SDK/client close. In that case the command wins: its runtime will be
+      // recreated lazily and the daemon must stay alive to service it.
+      if (shutdownGeneration !== idleShutdownGeneration) {
+        idleShutdownInFlight = false;
+        return;
+      }
+      sendDaemonEvent('shutdown', { reason: 'idle_timeout' });
+      isDaemonMode = false;
+      rl.close();
+      setTimeout(() => _originalExit(0), 100).unref();
+    } catch (error) {
+      idleShutdownInFlight = false;
+      _originalStderrWrite(`[daemon] Idle shutdown failed: ${error?.message || error}\n`, 'utf8');
+    }
+  }, DAEMON_IDLE_CHECK_INTERVAL_MS);
+  idleReaper.unref();
+
   // Command requests run concurrently (multi-window / multi-tab). Request id
   // tagging uses AsyncLocalStorage so stdout lines demux correctly.
   rl.on('line', (line) => {
@@ -668,6 +767,19 @@ async function processRequest(request) {
         'utf8'
       );
       return;
+    }
+
+    // Any real command refreshes the idle timer and counts as pending work;
+    // heartbeat/status probes do not (they must not keep the daemon alive).
+    if (request.method !== 'heartbeat' && request.method !== 'status') {
+      lastCommandActivityAt = Date.now();
+      pendingCommandCount++;
+      // Cancel an idle shutdown that has not yet closed stdin. The request is
+      // still accepted and dispatched normally below.
+      if (idleShutdownInFlight) {
+        idleShutdownGeneration++;
+        idleShutdownInFlight = false;
+      }
     }
 
     // Heartbeats and status queries — safe to run immediately
@@ -752,7 +864,15 @@ async function processRequest(request) {
           'utf8'
         );
       });
+      // ZCode persistent app-server runtime: same request-id scoped abort as Grok.
+      zcodeAbortCurrentTurn(hasScopedTargets ? targetRequestIds : undefined).catch((e) => {
+        _originalStderrWrite(
+          `[daemon] ZCode abort error: ${e.message}\n`,
+          'utf8'
+        );
+      });
       writeRawLine({ id: request.id || '0', done: true, success: true });
+      pendingCommandCount = Math.max(0, pendingCommandCount - 1);
       return;
     }
 
@@ -770,7 +890,8 @@ async function processRequest(request) {
         .catch((e) => {
           _originalStderrWrite(`[daemon] setPermissionMode error: ${e.message}\n`, 'utf8');
           writeRawLine({ id: switchId, done: true, success: false, error: e.message || String(e) });
-        });
+        })
+        .finally(() => { pendingCommandCount = Math.max(0, pendingCommandCount - 1); });
       return;
     }
 
@@ -789,20 +910,48 @@ async function processRequest(request) {
         .catch((e) => {
           _originalStderrWrite(`[daemon] grok.setPermissionMode error: ${e.message}\n`, 'utf8');
           writeRawLine({ id: switchId, done: true, success: false, error: e.message || String(e) });
-        });
+        })
+        .finally(() => { pendingCommandCount = Math.max(0, pendingCommandCount - 1); });
+      return;
+    }
+
+    // ZCode live permission-mode switch: same bypass semantics as Claude/Grok —
+    // session/setMode must reach the app-server before its next tool call.
+    if (request.method === 'zcode.setPermissionMode') {
+      const switchId = request.id || '0';
+      if (!request.id) {
+        _originalStderrWrite(
+          '[daemon] zcode.setPermissionMode arrived without request.id; done signal may be orphaned\n',
+          'utf8'
+        );
+      }
+      zcodeSetPermissionModePersistent(request.params || {})
+        .then(() => writeRawLine({ id: switchId, done: true, success: true }))
+        .catch((e) => {
+          _originalStderrWrite(`[daemon] zcode.setPermissionMode error: ${e.message}\n`, 'utf8');
+          writeRawLine({ id: switchId, done: true, success: false, error: e.message || String(e) });
+        })
+        .finally(() => { pendingCommandCount = Math.max(0, pendingCommandCount - 1); });
       return;
     }
 
     // Parallel command execution (multi-window)
-    processRequest(request).catch((e) => {
-      _originalStderrWrite(
-        `[daemon] Request error: ${e.message}\n`,
-        'utf8'
-      );
-    });
+    processRequest(request)
+      .catch((e) => {
+        _originalStderrWrite(
+          `[daemon] Request error: ${e.message}\n`,
+          'utf8'
+        );
+      })
+      .finally(() => { pendingCommandCount = Math.max(0, pendingCommandCount - 1); });
   });
 
   rl.on('close', async () => {
+    // Idle reaper already performed graceful provider shutdown and scheduled
+    // process exit; do not run the stdin-disconnect cleanup a second time.
+    if (!isDaemonMode) {
+      return;
+    }
     // stdin closed — Java process disconnected, exit gracefully
     // Force-exit after 5s to prevent zombie processes when SDK network connections hang
     const forceExitTimer = setTimeout(() => {
@@ -815,6 +964,7 @@ async function processRequest(request) {
     try {
       await shutdownPersistentRuntimes();
       await grokShutdownPersistentRuntimes();
+      await zcodeShutdownPersistentRuntimes();
     } catch (e) {
       _originalStderrWrite(`[daemon] Failed to shutdown persistent runtimes: ${e.message}\n`, 'utf8');
     }

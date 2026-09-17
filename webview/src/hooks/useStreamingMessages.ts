@@ -13,13 +13,15 @@ interface ContentBlock {
 // each backend flush batch without extra accumulation lag.
 export const THROTTLE_INTERVAL = 33;
 
+interface StreamingBlockBoundary {
+  contentLength: number;
+  thinkingLength: number;
+}
+
 interface UseStreamingMessagesReturn {
   // Content refs
   streamingContentRef: React.MutableRefObject<string>;
   streamingThinkingRef: React.MutableRefObject<string>;
-  // Offsets in the cumulative thinking buffer where a new block starts
-  // (set by window.onBlockReset when the backend signals [BLOCK_RESET]).
-  thinkingBlockBoundariesRef: React.MutableRefObject<number[]>;
   isStreamingRef: React.MutableRefObject<boolean>;
   useBackendStreamingRenderRef: React.MutableRefObject<boolean>;
   streamingMessageIndexRef: React.MutableRefObject<number>;
@@ -36,6 +38,8 @@ interface UseStreamingMessagesReturn {
   // Turn tracking
   streamingTurnIdRef: React.MutableRefObject<number>;
   turnIdCounterRef: React.MutableRefObject<number>;
+  recordStreamingBlockReset: () => void;
+  clearStreamingBlockResets: () => void;
 
   // Helper functions
   findLastAssistantIndex: (list: ClaudeMessage[]) => number;
@@ -54,11 +58,6 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
   // Content refs
   const streamingContentRef = useRef('');
   const streamingThinkingRef = useRef('');
-  // Cumulative-buffer offsets where a new thinking block starts. The thinking
-  // buffer itself stays cumulative (syncThinkingBlocksWithContent relies on
-  // prefix-stripping); these boundaries only control how the buffer is split
-  // into separate raw blocks when patching the streaming assistant message.
-  const thinkingBlockBoundariesRef = useRef<number[]>([]);
   const isStreamingRef = useRef(false);
   const useBackendStreamingRenderRef = useRef(false);
   const streamingMessageIndexRef = useRef<number>(-1);
@@ -79,6 +78,111 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
   // Turn tracking
   const streamingTurnIdRef = useRef(-1);
   const turnIdCounterRef = useRef(0);
+  const streamingBlockBoundariesRef = useRef<StreamingBlockBoundary[]>([]);
+
+  const recordStreamingBlockReset = (): void => {
+    streamingBlockBoundariesRef.current.push({
+      contentLength: streamingContentRef.current.length,
+      thinkingLength: streamingThinkingRef.current.length,
+    });
+  };
+
+  const clearStreamingBlockResets = (): void => {
+    streamingBlockBoundariesRef.current = [];
+  };
+
+  const getBlockText = (block: ContentBlock, kind: 'text' | 'thinking'): string => {
+    if (kind === 'thinking') {
+      if (typeof block.thinking === 'string') return block.thinking;
+      return typeof block.text === 'string' ? block.text : '';
+    }
+    return typeof block.text === 'string' ? block.text : '';
+  };
+
+  // Backend snapshots can lag behind the boundary marker. Treat the recorded
+  // offsets as the partition for this stream and align the available same-kind
+  // blocks to those segments. This both splits a merged snapshot block and fills
+  // a short block without inventing an extra fragment for its missing suffix.
+  const materializePendingStreamingBlocks = (
+    blocks: ContentBlock[],
+    kind: 'text' | 'thinking',
+    cumulative: string,
+  ): ContentBlock[] => {
+    if (!cumulative || streamingBlockBoundariesRef.current.length === 0) {
+      return blocks;
+    }
+
+    const blockIndexes: number[] = [];
+    const blockTexts: string[] = [];
+    blocks.forEach((block, index) => {
+      if (block?.type !== kind) {
+        return;
+      }
+      blockIndexes.push(index);
+      blockTexts.push(getBlockText(block, kind));
+    });
+
+    // Do not rewrite an unrelated snapshot. The prefix check also makes the
+    // ordinal alignment below safe when a snapshot contains only part of the
+    // cumulative stream.
+    if (!cumulative.startsWith(blockTexts.join(''))) {
+      return blocks;
+    }
+
+    const boundaries: number[] = [0];
+    for (const boundary of streamingBlockBoundariesRef.current.map((item) =>
+      kind === 'thinking' ? item.thinkingLength : item.contentLength)) {
+      if (boundary >= cumulative.length || boundaries[boundaries.length - 1] === boundary) {
+        continue;
+      }
+      boundaries.push(boundary);
+    }
+
+    const segments = boundaries.map((start, index) => ({
+      start,
+      end: boundaries[index + 1] ?? cumulative.length,
+    }));
+    // A snapshot with more same-kind blocks than the observed boundaries already
+    // carries richer structure; leave it to the backend and normal sync guards.
+    if (blockIndexes.length > segments.length) {
+      return blocks;
+    }
+
+    let nextBlocks = blocks;
+    const setBlockText = (block: ContentBlock, text: string): ContentBlock => {
+      if (kind === 'thinking') {
+        return { ...block, thinking: text, text };
+      }
+      return { ...block, text };
+    };
+
+    // Fill the blocks the backend has already exposed by ordinal. Assigning the
+    // complete segment, rather than only an empty placeholder, repairs snapshots
+    // that are shorter than the block boundary without creating a false split.
+    for (let i = 0; i < blockIndexes.length; i += 1) {
+      const segment = segments[i];
+      const expectedText = cumulative.slice(segment.start, segment.end);
+      const blockIndex = blockIndexes[i];
+      if (getBlockText(nextBlocks[blockIndex], kind) === expectedText) {
+        continue;
+      }
+      nextBlocks = [...nextBlocks];
+      nextBlocks[blockIndex] = setBlockText(nextBlocks[blockIndex], expectedText);
+    }
+
+    // The remaining segments have no backend block yet. Append them after the
+    // snapshot so existing structural-block order stays intact.
+    for (let i = blockIndexes.length; i < segments.length; i += 1) {
+      const { start, end } = segments[i];
+      const segment = cumulative.slice(start, end);
+      const newBlock: ContentBlock = kind === 'thinking'
+        ? { type: 'thinking', thinking: segment, text: segment }
+        : { type: 'text', text: segment };
+      nextBlocks = [...nextBlocks, newBlock];
+    }
+
+    return nextBlocks;
+  };
 
   // Helper: Find last assistant message index
   const findLastAssistantIndex = (list: ClaudeMessage[]): number => {
@@ -273,47 +377,6 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
   };
 
   /**
-   * Split the rendered thinking blocks at the boundaries recorded by
-   * window.onBlockReset ([BLOCK_RESET] from the backend). The cumulative
-   * buffer is sliced into one block per sealed segment plus the still-growing
-   * remainder, so a new thinking block never merges into the previous one.
-   * Existing thinking blocks between the first and last are replaced: their
-   * content always derives from the same cumulative buffer during streaming.
-   */
-  const splitThinkingBlocksAtBoundaries = (blocks: ContentBlock[], thinking: string): ContentBlock[] => {
-    const boundaries = thinkingBlockBoundariesRef.current;
-    if (boundaries.length === 0 || !thinking) return blocks;
-
-    const segments: string[] = [];
-    let start = 0;
-    for (const boundary of boundaries) {
-      const clamped = Math.min(Math.max(boundary, start), thinking.length);
-      if (clamped > start) {
-        segments.push(thinking.slice(start, clamped));
-        start = clamped;
-      }
-    }
-    if (start < thinking.length) {
-      segments.push(thinking.slice(start));
-    }
-    if (segments.length <= 1) return blocks;
-
-    const thinkingIndices = blocks
-      .map((block, index) => (block?.type === 'thinking' ? index : -1))
-      .filter((index) => index >= 0);
-    if (thinkingIndices.length === 0) return blocks;
-
-    const first = thinkingIndices[0];
-    const last = thinkingIndices[thinkingIndices.length - 1];
-    const segmentBlocks: ContentBlock[] = segments.map((segment) => ({
-      type: 'thinking',
-      thinking: segment,
-      text: segment,
-    }));
-    return [...blocks.slice(0, first), ...segmentBlocks, ...blocks.slice(last + 1)];
-  };
-
-  /**
    * Get or create streaming assistant message index.
    * NOTE: This function MUTATES the passed list array by pushing a new message
    * if no assistant message exists. Call this only with a copied array (e.g., [...prev]).
@@ -365,8 +428,9 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
         : Array.isArray(msg?.content) ? msg.content : [];
 
       let blocks = [...rawContent] as ContentBlock[];
+      blocks = materializePendingStreamingBlocks(blocks, 'thinking', deltaThinking);
+      blocks = materializePendingStreamingBlocks(blocks, 'text', bestContent);
       blocks = syncThinkingBlocksWithContent(blocks, deltaThinking);
-      blocks = splitThinkingBlocksAtBoundaries(blocks, deltaThinking);
       blocks = syncTextBlocksWithContent(blocks, bestContent);
 
       patchedRaw = (msg
@@ -374,8 +438,9 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
         : { ...rawObj, content: blocks }) as ClaudeMessage['raw'];
     } else if (deltaThinking) {
       let blocks: ContentBlock[] = [];
+      blocks = materializePendingStreamingBlocks(blocks, 'thinking', deltaThinking);
+      blocks = materializePendingStreamingBlocks(blocks, 'text', bestContent);
       blocks = syncThinkingBlocksWithContent(blocks, deltaThinking);
-      blocks = splitThinkingBlocksAtBoundaries(blocks, deltaThinking);
       blocks = syncTextBlocksWithContent(blocks, bestContent);
       patchedRaw = { message: { content: blocks } } as ClaudeMessage['raw'];
     }
@@ -392,13 +457,13 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
   const resetStreamingState = () => {
     streamingContentRef.current = '';
     streamingThinkingRef.current = '';
-    thinkingBlockBoundariesRef.current = [];
     streamingMessageIndexRef.current = -1;
     lastContentUpdateRef.current = 0;
     lastThinkingUpdateRef.current = 0;
     autoExpandedThinkingKeysRef.current.clear();
     trailingStructuralTextBoundaryRef.current = null;
     streamingTurnIdRef.current = -1;
+    clearStreamingBlockResets();
 
     if (contentUpdateTimeoutRef.current != null) {
       cancelAnimationFrame(contentUpdateTimeoutRef.current);
@@ -414,7 +479,6 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
     // Content refs
     streamingContentRef,
     streamingThinkingRef,
-    thinkingBlockBoundariesRef,
     isStreamingRef,
     useBackendStreamingRenderRef,
     streamingMessageIndexRef,
@@ -431,6 +495,8 @@ export function useStreamingMessages(): UseStreamingMessagesReturn {
     // Turn tracking
     streamingTurnIdRef,
     turnIdCounterRef,
+    recordStreamingBlockReset,
+    clearStreamingBlockResets,
 
     // Helper functions
     findLastAssistantIndex,

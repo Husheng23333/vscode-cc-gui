@@ -121,8 +121,7 @@
       "collapse": "Recolher resumo"
     },
     "openSourceBannerStar": "Star",
-    "openSourceBannerStarToast": "Link copiado para a área de transferência — cole no navegador para acessar ⭐",
-    "openSourceBannerStarAria": "Copiar link e dar uma estrela no GitHub",
+    "openSourceBannerStarAria": "Abrir o repositório no GitHub e dar uma estrela",
     "cacheHitsWithRatio": "(acertos de cache {{tokens}}, {{ratio}})",
     "planModeEnabled": "Modo Plan ativado",
     "commandProviderOnly": "{{command}} está disponível apenas para o provedor {{provider}}",
@@ -233,7 +232,8 @@
         "provider": {
           "claude": "Claude Code",
           "codex": "Codex",
-          "grok": "Grok CLI"
+          "grok": "Grok CLI",
+          "zcode": "ZCode"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
@@ -429,6 +429,18 @@
     },
     "usage": "Estatísticas de Uso",
     "usageDesc": "Visualize o consumo de Tokens, estatísticas de custo e análise de tendência de uso",
+    "socialDocs": "Documentação oficial",
+    "socialTitle": "Siga-nos",
+    "socialGithub": "Repositório GitHub — dê uma estrela!",
+    "socialX": "X (Twitter) @ZPeng31310",
+    "socialZhihu": "Zhihu @vscodeai",
+    "socialXiaohongshu": "Xiaohongshu (RED)",
+    "socialDouyin": "Douyin — passe o mouse para escanear e seguir",
+    "socialYoutube": "Canal do YouTube",
+    "douyinQrAlt": "QR code do Douyin",
+    "douyinId": "ID do Douyin: nengyongai",
+    "douyinCopied": "ID do Douyin copiado para a área de transferência",
+    "douyinCopyFailed": "Falha ao copiar. Por favor, copie manualmente.",
     "mcp": "Servidores MCP",
     "mcpDesc": "Configurar e gerenciar servidores do Model Context Protocol",
     "permissions": "Permissões",
@@ -531,11 +543,6 @@
     "versionHistoryDesc": "Visualizar todos os registros de atualização de versão",
     "communityQrTip": "Escaneie com o WeChat para entrar na comunidade",
     "communityQrAlt": "QR code da comunidade oficial do WeChat",
-    "githubTitle": "Repositório GitHub",
-    "githubDesc": "Este projeto é open source no GitHub. Dê uma estrela para mostrar seu apoio!",
-    "githubCopyBtn": "Copiar URL do Repositório",
-    "githubCopied": "URL do repositório copiada. Por favor, acesse em seu navegador.",
-    "githubCopyFailed": "Falha ao copiar. Por favor, copie manualmente.",
     "sponsor": "Patrocinar",
     "sponsorDesc": "Se este projeto te ajudou, considere patrocinar para apoiar a manutenção contínua!",
     "alipay": "Alipay",
@@ -986,6 +993,14 @@
         "omp": {
           "name": "OMP CLI",
           "description": "Agente de codificação de terminal Oh My Pi com suporte a múltiplos provedores"
+        },
+        "minimax": {
+          "name": "MiniMax Code",
+          "description": "Agente de código em terminal da MiniMax. Requer Node.js 22.19+ / 24+ (não 23); comandos: minimax / mcode"
+        },
+        "zcode": {
+          "name": "ZCode",
+          "description": "Aplicativo de desktop de codificação ZCode da Zhipu com modelos GLM"
         }
       },
       "installDialog": {
@@ -1003,7 +1018,11 @@
       "listTitle": "Local CLI tools",
       "summary": "{{installed}} / {{total}} installed",
       "moreComingSoon": "More coming soon",
-      "copyPath": "Copy path"
+      "copyPath": "Copy path",
+      "visibility": {
+        "hide": "Ocultar no seletor de provedor",
+        "show": "Mostrar no seletor de provedor"
+      }
     }
   },
   "history": {
@@ -1421,7 +1440,32 @@
     "bashGroupAllCompleted": "Todos Concluídos",
     "bashGroupFailed": "falhou",
     "updatePlan": "Atualizar Plano",
-    "applyPatch": "Aplicar Patch"
+    "applyPatch": "Aplicar Patch",
+    "reportFindings": {
+      "title": "Constatações da revisão",
+      "findingsCount_one": "{{count}} constatação",
+      "findingsCount_other": "{{count}} constatações",
+      "confirmedCount_one": "{{count}} confirmada",
+      "confirmedCount_other": "{{count}} confirmadas",
+      "plausibleCount_one": "{{count}} a revisar",
+      "plausibleCount_other": "{{count}} a revisar",
+      "confirmed": "Confirmada",
+      "plausible": "A revisar",
+      "fixed": "Corrigida",
+      "skipped": "Ignorada",
+      "noChangeNeeded": "Nenhuma alteração necessária",
+      "empty": "Nenhuma constatação",
+      "summaryLabel": "Resumo da revisão",
+      "summary": "Resumo",
+      "failureScenario": "Cenário de falha",
+      "reviewLevel": "Nível de revisão: {{level}}",
+      "openFile": "Abrir {{filePath}}",
+      "expandFinding": "Expandir constatação",
+      "collapseFinding": "Recolher constatação",
+      "expandReport": "Expandir constatações",
+      "collapseReport": "Recolher constatações",
+      "untitled": "Constatação sem título"
+    }
   },
   "todo": {
     "inProgress": "Em Andamento {{completed}}/{{total}} tarefas",
@@ -1618,13 +1662,13 @@
         "label": "Haiku 4.5",
         "description": "Haiku 4.5 · Mais rápido para respostas rápidas"
       },
-      "opus48": {
-        "label": "Opus 4.8",
-        "description": "Opus 4.8 · Geração anterior do Opus"
+      "fable51": {
+        "label": "Fable 5.1",
+        "description": "Fable 5.1 · O mais poderoso · classe Mythos"
       },
       "fable5": {
         "label": "Fable 5",
-        "description": "Fable 5 · O mais poderoso · classe Mythos"
+        "description": "Fable 5 · Geração anterior do Fable"
       },
       "sonnet5": {
         "label": "Sonnet 5",
@@ -1689,6 +1733,10 @@
       "gpt56luna": {
         "label": "GPT-5.6 Luna",
         "description": "Modelo GPT-5.6 otimizado para cargas de trabalho sensíveis a custo."
+      },
+      "gpt6astra": {
+        "label": "GPT-6 Astra",
+        "description": "Flagship de nova geração para uso autônomo do computador e tarefas agênticas longas."
       }
     },
     "searchPlaceholder": "Pesquisar modelos",
@@ -1712,10 +1760,17 @@
       "tooltip": "Aceitar edições de arquivo automaticamente",
       "description": "Aceitar automaticamente criação/edição de arquivos, reduzindo etapas de confirmação"
     },
+    "auto": {
+      "label": "Aprovação automática",
+      "shortLabel": "Auto",
+      "tooltip": "Permitir que o revisor nativo gerencie automaticamente as solicitações de aprovação",
+      "description": "Usa o revisor nativo do provedor mantendo os limites de segurança"
+    },
     "bypassPermissions": {
-      "label": "Modo Auto",
+      "label": "Auto Total",
       "tooltip": "Ignorar todas as verificações de permissão",
-      "description": "Totalmente automatizado, ignorando todas as verificações de permissão [Use com cautela]"
+      "description": "Totalmente automatizado, ignorando todas as verificações de permissão [Use com cautela]",
+      "shortLabel": "Total"
     }
   },
   "ompModes": {
@@ -1756,6 +1811,12 @@
       "tooltip": "Codex approval_policy=on-request – solicita aprovação quando necessário",
       "description": "Opção equilibrada. Permite fluxo normal de edição enquanto ainda requer aprovações quando necessário."
     },
+    "auto": {
+      "label": "Aprovar por mim",
+      "shortLabel": "Auto",
+      "tooltip": "Codex approvals_reviewer=auto_review – um revisor automático trata as solicitações elegíveis.",
+      "description": "Mantém o sandbox workspace-write e encaminha solicitações que o revisor não pode aprovar."
+    },
     "bypassPermissions": {
       "label": "Auto Total",
       "tooltip": "Codex approval_policy=never – executa comandos e escreve arquivos sem solicitar (sandbox do workspace ainda aplicado).",
@@ -1791,6 +1852,13 @@
       "badge": "Beta",
       "title": "Beta Feature",
       "message": "This feature is still in Beta. If you encounter any bugs, please report them to the author promptly."
+    },
+    "manageCli": "Configurações de CLI",
+    "minimax": {
+      "label": "MiniMax Code"
+    },
+    "zcode": {
+      "label": "ZCode"
     }
   },
   "promptEnhancer": {

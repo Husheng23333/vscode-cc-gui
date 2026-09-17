@@ -48,6 +48,7 @@ import { sanitizeUserMessagePayload } from './bridge/services/userMessageSanitiz
 import type { SessionTemplate } from './sessionTemplate';
 import type { RuntimeProviderId } from './bridge/types';
 import { isRuntimeProvider } from './cli/cliTools';
+import { commonCliBinDirs } from './cli/cliBinDirs';
 import { CliStatusHandler } from './bridge/handlers/CliStatusHandler';
 import { CliModelsHandler } from './bridge/handlers/CliModelsHandler';
 import { DshHostHandler } from './bridge/handlers/DshHostHandler';
@@ -174,6 +175,8 @@ export class BridgeServer {
       (bridgeRequestId) => this._pendingWebviews.get(bridgeRequestId),
       // Used to refuse "active webview" fallback when multiple tabs are open.
       () => this._knownWebviews.size,
+      // Dialog deadlines must match the webview's countdown setting.
+      () => this._settingsStore.getPermissionDialogTimeoutSeconds(),
     );
     this._settingsStore = new SettingsStore(context);
     this._providerStore = new ProviderStore(context, {
@@ -322,6 +325,7 @@ export class BridgeServer {
           this._activeProvider = provider;
           this._updateStatusBarItem();
         },
+        getActiveProvider: () => this.getActiveProvider(),
         setSelectedModel: (model) => {
           this._selectedModel = model;
           this._log.appendLine(`[BRIDGE] Model set to: ${this._selectedModel}`);
@@ -662,6 +666,9 @@ export class BridgeServer {
   private _handleFrontendReady(webview: vscode.Webview): void {
     this._webview = webview;
     this._permissionIpc.start();
+    // A page (re)load can silently drop the one-shot dialog-show injection;
+    // replay pending dialogs (and unacknowledged closes) now that the page is ready.
+    this._permissionIpc.replayPendingDialogs(webview);
     this._refreshSlashCommands(webview);
     webview.postMessage({ type: 'mode_received', content: this._state('permission_mode', 'default') });
     setTimeout(() => this._pushActiveFile(vscode.window.activeTextEditor), 100);
@@ -720,6 +727,8 @@ export class BridgeServer {
       pi: 'PI',
       omp: 'OMP',
       dsh: 'DSH',
+      zcode: 'ZCode',
+      minimax: 'MiniMax',
     };
     const provider = providerLabels[this._activeProvider] ?? this._activeProvider;
     const model = this._selectedModel ? ` ${this._selectedModel}` : '';
@@ -1065,10 +1074,10 @@ export class BridgeServer {
     // Keep the Grok ACP daemon's long-lived cwd inside the workspace: a deleted
     // or out-of-project directory would otherwise root the persistent runtime
     // outside the project (mirrors jetbrains PathUtils.guardWorkingDirectory).
-    if (activeProvider === 'grok') {
+    if (activeProvider === 'grok' || activeProvider === 'zcode') {
       const guardedCwd = guardWorkingDirectory(params.cwd, this._workspacePath);
       if (guardedCwd !== null && guardedCwd !== params.cwd) {
-        this._log.appendLine(`[BRIDGE] grok cwd guard: ${params.cwd} -> ${guardedCwd}`);
+        this._log.appendLine(`[BRIDGE] ${activeProvider} cwd guard: ${params.cwd} -> ${guardedCwd}`);
         params.cwd = guardedCwd;
       }
     }
@@ -1085,10 +1094,10 @@ export class BridgeServer {
           : `${activeProvider}.send`,
       // Grok has a persistent ACP runtime with the same lifecycle commands as
       // Claude's persistent query runtime; route them to the grok namespace.
-      'preconnect':                    activeProvider === 'grok' ? 'grok.preconnect' : 'claude.preconnect',
+      'preconnect':                    activeProvider === 'grok' ? 'grok.preconnect' : activeProvider === 'zcode' ? 'zcode.preconnect' : 'claude.preconnect',
       'abort':                         'abort',
-      'reset_runtime':                 activeProvider === 'grok' ? 'grok.resetRuntime' : 'claude.resetRuntime',
-      'get_context_usage':             activeProvider === 'grok' ? 'grok.getContextUsage' : 'claude.getContextUsage',
+      'reset_runtime':                 activeProvider === 'grok' ? 'grok.resetRuntime' : activeProvider === 'zcode' ? 'zcode.resetRuntime' : 'claude.resetRuntime',
+      'get_context_usage':             activeProvider === 'grok' ? 'grok.getContextUsage' : activeProvider === 'zcode' ? 'zcode.getContextUsage' : 'claude.getContextUsage',
       'rewind_files':                  'claude.rewindFiles',
       'get_dependency_status':         'status',
       'heartbeat':                     'heartbeat',
@@ -1221,11 +1230,11 @@ export class BridgeServer {
   /**
    * Push permission mode to the live runtime so mid-turn tool calls honor it.
    * Codex rebuilds thread options per turn, so only Claude and Grok (persistent
-   * ACP runtime) are hot-swapped.
+   * ACP runtime) and ZCode (persistent app-server) are hot-swapped.
    */
   private _pushPermissionModeLive(mode: string): void {
     const provider = this.getActiveProvider();
-    if (provider !== 'claude' && provider !== 'grok') {
+    if (provider !== 'claude' && provider !== 'grok' && provider !== 'zcode') {
       return;
     }
     const sessionId = this._activeSessionId || undefined;
@@ -1298,6 +1307,26 @@ export class BridgeServer {
     // Remove proxy environment variables to prevent 502 Bad Gateway errors
     // Node.js HTTP client auto-reads these vars, but the proxy may not handle all requests correctly
     const bridgeEnv = { ...process.env };
+    // Sparse-PATH hardening (upstream 94c3292b EnvironmentConfigurator, mirrors
+    // ai-bridge/utils/cli-path.js commonCliBinDirs): the daemon's children —
+    // MCP servers, `#!/usr/bin/env node` CLI shims — inherit this env, so give
+    // it the detected node install dir plus the user's common CLI bin dirs.
+    const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+    const pathSep = process.platform === 'win32' ? ';' : ':';
+    const existingPath = String(bridgeEnv[pathKey] || bridgeEnv.PATH || '')
+      .split(pathSep)
+      .filter(Boolean);
+    const seenPathDirs = new Set<string>();
+    const mergedPathParts: string[] = [];
+    for (const dir of [path.dirname(nodePath), ...existingPath, ...commonCliBinDirs()]) {
+      if (!dir || seenPathDirs.has(dir)) continue;
+      seenPathDirs.add(dir);
+      mergedPathParts.push(dir);
+    }
+    bridgeEnv[pathKey] = mergedPathParts.join(pathSep);
+    if (pathKey !== 'PATH') {
+      bridgeEnv.PATH = bridgeEnv[pathKey];
+    }
     const proxyVars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'];
     const removedProxyVars: string[] = [];
     for (const key of proxyVars) {

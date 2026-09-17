@@ -121,8 +121,7 @@
       "collapse": "Свернуть сводку"
     },
     "openSourceBannerStar": "Star",
-    "openSourceBannerStarToast": "Ссылка скопирована в буфер обмена — вставьте её в браузере, чтобы открыть ⭐",
-    "openSourceBannerStarAria": "Скопировать ссылку и поставить звезду на GitHub",
+    "openSourceBannerStarAria": "Открыть репозиторий на GitHub и поставить звезду",
     "cacheHitsWithRatio": "(попадания в кэш {{tokens}}, {{ratio}})",
     "planModeEnabled": "Режим Plan включён",
     "commandProviderOnly": "{{command}} доступна только для провайдера {{provider}}",
@@ -233,7 +232,8 @@
         "provider": {
           "claude": "Claude Code",
           "codex": "Codex",
-          "grok": "Grok CLI"
+          "grok": "Grok CLI",
+          "zcode": "ZCode"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
@@ -369,6 +369,18 @@
     },
     "usage": "Статистика использования",
     "usageDesc": "Просмотр потребления токенов, статистики затрат и анализа тенденций",
+    "socialDocs": "Официальная документация",
+    "socialTitle": "Подписывайтесь",
+    "socialGithub": "Репозиторий GitHub — поставьте звезду!",
+    "socialX": "X (Twitter) @ZPeng31310",
+    "socialZhihu": "Zhihu @vscodeai",
+    "socialXiaohongshu": "Xiaohongshu (RED)",
+    "socialDouyin": "Douyin — наведите, чтобы сканировать и подписаться",
+    "socialYoutube": "YouTube-канал",
+    "douyinQrAlt": "QR-код Douyin",
+    "douyinId": "Douyin ID: nengyongai",
+    "douyinCopied": "Douyin ID скопирован в буфер обмена",
+    "douyinCopyFailed": "Не удалось скопировать. Пожалуйста, скопируйте вручную.",
     "mcp": "MCP-серверы",
     "mcpDesc": "Настройка и управление серверами Model Context Protocol",
     "permissions": "Разрешения",
@@ -479,11 +491,6 @@
     "versionHistoryDesc": "Просмотр всех записей об обновлениях версий",
     "communityQrTip": "Отсканируйте WeChat для вступления в сообщество",
     "communityQrAlt": "QR-код официального сообщества WeChat",
-    "githubTitle": "Репозиторий GitHub",
-    "githubDesc": "Этот проект с открытым исходным кодом на GitHub. Поставьте звезду в поддержку!",
-    "githubCopyBtn": "Скопировать URL репозитория",
-    "githubCopied": "URL репозитория скопирован в буфер обмена. Откройте его в браузере.",
-    "githubCopyFailed": "Не удалось скопировать. Пожалуйста, скопируйте вручную.",
     "sponsor": "Поддержать проект",
     "sponsorDesc": "Если этот проект вам полезен, поддержите его развитие!",
     "alipay": "Alipay",
@@ -829,6 +836,14 @@
         "omp": {
           "name": "OMP CLI",
           "description": "Терминальный агент для кодирования Oh My Pi с поддержкой нескольких провайдеров"
+        },
+        "minimax": {
+          "name": "MiniMax Code",
+          "description": "Терминальный кодинг-агент MiniMax. Требуется Node.js 22.19+ / 24+ (не 23); команды: minimax / mcode"
+        },
+        "zcode": {
+          "name": "ZCode",
+          "description": "Десктопное кодинг-приложение Zhipu ZCode с моделями GLM"
         }
       },
       "installDialog": {
@@ -846,7 +861,11 @@
       "listTitle": "Local CLI tools",
       "summary": "{{installed}} / {{total}} installed",
       "moreComingSoon": "More coming soon",
-      "copyPath": "Copy path"
+      "copyPath": "Copy path",
+      "visibility": {
+        "hide": "Скрыть в меню выбора провайдера",
+        "show": "Показать в меню выбора провайдера"
+      }
     }
   },
   "history": {
@@ -1275,7 +1294,32 @@
     "bashGroupCompleted": "завершено",
     "bashGroupAllCompleted": "Все завершены",
     "bashGroupFailed": "ошибка",
-    "promptLabel": "Промпт"
+    "promptLabel": "Промпт",
+    "reportFindings": {
+      "title": "Результаты ревью",
+      "findingsCount_one": "{{count}} замечание",
+      "findingsCount_other": "{{count}} замечаний",
+      "confirmedCount_one": "{{count}} подтверждено",
+      "confirmedCount_other": "{{count}} подтверждено",
+      "plausibleCount_one": "{{count}} требует проверки",
+      "plausibleCount_other": "{{count}} требует проверки",
+      "confirmed": "Подтверждено",
+      "plausible": "Требует проверки",
+      "fixed": "Исправлено",
+      "skipped": "Пропущено",
+      "noChangeNeeded": "Изменения не требуются",
+      "empty": "Замечаний нет",
+      "summaryLabel": "Сводка ревью",
+      "summary": "Описание",
+      "failureScenario": "Сценарий сбоя",
+      "reviewLevel": "Уровень ревью: {{level}}",
+      "openFile": "Открыть {{filePath}}",
+      "expandFinding": "Развернуть замечание",
+      "collapseFinding": "Свернуть замечание",
+      "expandReport": "Развернуть результаты ревью",
+      "collapseReport": "Свернуть результаты ревью",
+      "untitled": "Замечание без названия"
+    }
   },
   "todo": {
     "inProgress": "В процессе {{completed}}/{{total}} задач",
@@ -1472,13 +1516,13 @@
         "label": "Haiku 4.5",
         "description": "Haiku 4.5 · Самая быстрая для быстрых ответов"
       },
-      "opus48": {
-        "label": "Opus 4.8",
-        "description": "Opus 4.8 · Предыдущее поколение Opus"
+      "fable51": {
+        "label": "Fable 5.1",
+        "description": "Fable 5.1 · Самая мощная · класс Mythos"
       },
       "fable5": {
         "label": "Fable 5",
-        "description": "Fable 5 · Самая мощная · класс Mythos"
+        "description": "Fable 5 · Предыдущее поколение Fable"
       },
       "sonnet5": {
         "label": "Sonnet 5",
@@ -1543,6 +1587,10 @@
       "gpt56luna": {
         "label": "GPT-5.6 Luna",
         "description": "Модель GPT-5.6, оптимизированная для экономичных рабочих нагрузок."
+      },
+      "gpt6astra": {
+        "label": "GPT-6 Astra",
+        "description": "Флагман нового поколения для автономной работы с компьютером и длительных агентных задач."
       }
     },
     "searchPlaceholder": "Поиск моделей",
@@ -1566,10 +1614,17 @@
       "tooltip": "Автоматическое принятие правок файлов",
       "description": "Автоматически принимает создание/редактирование файлов, уменьшая количество подтверждений"
     },
+    "auto": {
+      "label": "Автоодобрение",
+      "shortLabel": "Авто",
+      "tooltip": "Передавать запросы на одобрение встроенному проверяющему провайдера",
+      "description": "Использует встроенную автоматическую проверку, сохраняя границы безопасности"
+    },
     "bypassPermissions": {
-      "label": "Авто-режим",
+      "label": "Полный автомат",
       "tooltip": "Пропуск всех проверок разрешений",
-      "description": "Полностью автоматический, пропускает все проверки разрешений [Используйте с осторожностью]"
+      "description": "Полностью автоматический, пропускает все проверки разрешений [Используйте с осторожностью]",
+      "shortLabel": "Полный"
     }
   },
   "ompModes": {
@@ -1610,6 +1665,12 @@
       "tooltip": "Codex approval_policy=on-request – asks for approval when needed",
       "description": "Автоматическое создание и редактирование файлов через apply_patch с сохранением одобрения команд."
     },
+    "auto": {
+      "label": "Одобрять за меня",
+      "shortLabel": "Авто",
+      "tooltip": "Codex approvals_reviewer=auto_review — автоматический проверяющий обрабатывает подходящие запросы.",
+      "description": "Сохраняет песочницу workspace-write и передаёт пользователю запросы, которые нельзя одобрить автоматически."
+    },
     "bypassPermissions": {
       "label": "Полный автомат",
       "tooltip": "Codex approval_policy=never — выполняет команды и записывает файлы без запросов (песочница рабочей области применяется).",
@@ -1645,6 +1706,13 @@
       "badge": "Beta",
       "title": "Beta Feature",
       "message": "This feature is still in Beta. If you encounter any bugs, please report them to the author promptly."
+    },
+    "manageCli": "Настройки CLI",
+    "minimax": {
+      "label": "MiniMax Code"
+    },
+    "zcode": {
+      "label": "ZCode"
     }
   },
   "promptEnhancer": {

@@ -74,6 +74,7 @@ export const ButtonArea = ({
   isEnhancing = false,
   selectedModel = DEFAULT_CLAUDE_MODEL_ID,
   permissionMode = 'bypassPermissions',
+  codexNativeAutoReviewAvailable = true,
   currentProvider = 'claude',
   reasoningEffort = 'high',
   codexFastMode = 'normal',
@@ -95,6 +96,7 @@ export const ButtonArea = ({
   onAgentSelect,
   onOpenAgentSettings,
   onAddModel,
+  onOpenCliSettings,
   longContextEnabled = true,
   onLongContextChange,
 }: ButtonAreaProps) => {
@@ -175,7 +177,7 @@ export const ButtonArea = ({
     if (currentProvider === 'grok') {
       return GROK_MODELS;
     }
-    if (currentProvider === 'kimi' || currentProvider === 'opencode' || currentProvider === 'pi' || currentProvider === 'dsh') {
+    if (currentProvider === 'kimi' || currentProvider === 'minimax' || currentProvider === 'opencode' || currentProvider === 'pi' || currentProvider === 'dsh' || currentProvider === 'zcode') {
       return cliModels;
     }
     if (currentProvider === 'omp') {
@@ -235,7 +237,7 @@ export const ButtonArea = ({
       }
       return;
     }
-    if (currentProvider !== 'kimi' && currentProvider !== 'opencode' && currentProvider !== 'pi' && currentProvider !== 'dsh') return;
+    if (currentProvider !== 'kimi' && currentProvider !== 'minimax' && currentProvider !== 'opencode' && currentProvider !== 'pi' && currentProvider !== 'dsh' && currentProvider !== 'zcode') return;
     if (!cliModels.length || !onModelSelect) return;
     const exists = cliModels.some((model) => model.id === selectedModel);
     if (!exists) {
@@ -326,9 +328,15 @@ export const ButtonArea = ({
         <ProviderSelect
           value={currentProvider}
           onChange={handleProviderSelect}
+          onOpenCliSettings={onOpenCliSettings}
           compact
         />
-        <ModeSelect value={permissionMode} onChange={handleModeSelect} provider={currentProvider} />
+        <ModeSelect
+          value={permissionMode}
+          onChange={handleModeSelect}
+          provider={currentProvider}
+          codexNativeAutoReviewAvailable={codexNativeAutoReviewAvailable}
+        />
         <ModelConfigSelect
           selectedModel={selectedModel}
           onModelSelect={handleModelSelect}

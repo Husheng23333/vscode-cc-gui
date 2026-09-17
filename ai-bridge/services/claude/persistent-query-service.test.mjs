@@ -1,3 +1,5 @@
+// Isolate credentials before the runtime caches the user's home directory.
+import './testing/cli-login-home.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -254,6 +256,49 @@ test('restore-history continuation keeps runtime bound to restored session after
 
   assert.equal(restoredRuntime, restoredRuntimeAgain);
   assert.equal(__testing.getRuntimeForSession('hist-restore'), restoredRuntime);
+});
+
+test('concurrent acquisitions share one runtime for anonymous and named sessions', async () => {
+  for (const requestedSessionId of [null, 'session-concurrent']) {
+    const factory = createQueryFactory();
+    __testing.setQueryFn(factory.queryFn);
+    const context = {
+      requestedSessionId,
+      runtimeSessionEpoch: 'epoch-concurrent',
+      runtimeSignature: 'sig-concurrent',
+      permissionMode: 'default',
+      options: { cwd: process.cwd() },
+    };
+    const [first, second] = await Promise.all([
+      __testing.acquireRuntime(context),
+      __testing.acquireRuntime(context),
+    ]);
+    assert.equal(first, second);
+    assert.equal(first.closed, false);
+    assert.equal(factory.runtimes.length, 1);
+    await __testing.resetState();
+  }
+});
+
+test('a failed acquisition does not block the next request for that session', async () => {
+  const factory = createQueryFactory();
+  let attempts = 0;
+  __testing.setQueryFn((args) => {
+    if (attempts++ === 0) throw new Error('startup failed');
+    return factory.queryFn(args);
+  });
+  const context = {
+    requestedSessionId: 'session-retry',
+    runtimeSessionEpoch: 'epoch-retry',
+    runtimeSignature: 'sig-retry',
+    permissionMode: 'default',
+    options: { cwd: process.cwd() },
+  };
+  const first = __testing.acquireRuntime(context);
+  const second = __testing.acquireRuntime(context);
+  await assert.rejects(first, /startup failed/);
+  assert.equal((await second).closed, false);
+  assert.equal(factory.runtimes.length, 1);
 });
 
 test('active session runtime is not disposed by idle cleanup while a turn is executing', async () => {

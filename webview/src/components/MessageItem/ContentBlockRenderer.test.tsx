@@ -21,6 +21,12 @@ vi.mock('../toolBlocks', () => ({
   BashToolBlock: () => null,
   EditToolBlock: () => null,
   GenericToolBlock: () => null,
+  ReportFindingsToolBlock: ({ data }: { data: { findings: unknown[] } }) => (
+    <div data-testid="report-findings-block">{data.findings.length}</div>
+  ),
+  parseReportFindingsInput: (input?: { findings?: unknown }) => (
+    Array.isArray(input?.findings) ? { findings: input.findings } : null
+  ),
   TaskExecutionBlock: () => null,
 }));
 
@@ -86,6 +92,30 @@ function renderThinking(options: {
 }
 
 describe('ContentBlockRenderer block-level streaming', () => {
+  it('routes a valid ReportFindings tool call to its structured renderer', () => {
+    render(
+      <ContentBlockRenderer
+        block={{
+          type: 'tool_use',
+          name: 'ReportFindings',
+          input: { findings: [{ summary: 'A structured finding' }] },
+        } as ClaudeContentBlock}
+        messageIndex={0}
+        messageType="assistant"
+        isStreaming={false}
+        isThinkingExpanded={false}
+        isThinking={false}
+        isLastMessage={true}
+        isLastBlock={true}
+        t={t}
+        onToggleThinking={() => {}}
+        findToolResult={() => null}
+      />,
+    );
+
+    expect(document.querySelector('[data-testid="report-findings-block"]')?.textContent).toBe('1');
+  });
+
   it('keeps the last block streaming while the message is still streaming', () => {
     renderTextBlock({ isStreaming: true, isLastBlock: true });
     expect(markdownProps.isStreaming).toBe(true);

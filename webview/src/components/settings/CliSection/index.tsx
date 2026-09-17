@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ProviderModelIcon } from '../../shared/ProviderModelIcon';
 import { copyToClipboard } from '../../../utils/copyUtils';
+import { openBrowser } from '../../../utils/bridge';
+import { useHiddenCliProviders } from '../../../hooks/useCliProviderVisibility';
+import { setCliProviderHidden } from '../../../utils/cliProviderVisibility';
 import DshConnectionCard from './DshConnectionCard';
 import {
   CLI_TOOL_DEFINITIONS,
@@ -161,8 +164,11 @@ const InstallDialog = ({ tool, onClose, onCopy }: InstallDialogProps) => {
           <a
             className={styles.docsLink}
             href={tool.docsUrl}
-            target="_blank"
-            rel="noreferrer noopener"
+            onClick={(e) => {
+              // VS Code webviews don't route target=_blank — go through the openExternal bridge.
+              e.preventDefault();
+              openBrowser(tool.docsUrl);
+            }}
           >
             <span className="codicon codicon-link-external" aria-hidden="true" />
             {t('settings.cli.installDialog.openDocs')}
@@ -187,6 +193,7 @@ const CliSection = ({ addToast }: CliSectionProps) => {
   const [installTool, setInstallTool] = useState<CliToolDefinition | null>(null);
   const addToastRef = useRef(addToast);
   const statusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hiddenProviders = useHiddenCliProviders();
 
   useEffect(() => {
     addToastRef.current = addToast;
@@ -250,7 +257,11 @@ const CliSection = ({ addToast }: CliSectionProps) => {
   }, []);
 
   const openDocs = useCallback((url: string) => {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    openBrowser(url);
+  }, []);
+
+  const toggleSwitcherVisibility = useCallback((id: CliToolId, hidden: boolean) => {
+    setCliProviderHidden(id, hidden);
   }, []);
 
   const { installedCount, totalCount, hasStatus } = useMemo(() => {
@@ -335,6 +346,10 @@ const CliSection = ({ addToast }: CliSectionProps) => {
 
             const howToInstallLabel = t('settings.cli.howToInstall');
             const openDocsLabel = t('settings.cli.installDialog.openDocs');
+            const switcherHidden = hiddenProviders.has(tool.id);
+            const visibilityLabel = switcherHidden
+              ? t('settings.cli.visibility.show', { defaultValue: 'Show in provider switcher' })
+              : t('settings.cli.visibility.hide', { defaultValue: 'Hide in provider switcher' });
 
             return (
               <div
@@ -342,7 +357,7 @@ const CliSection = ({ addToast }: CliSectionProps) => {
                 className={tool.id === 'dsh' ? styles.dshGroup : undefined}
               >
                 <div
-                  className={`${styles.cliCard} ${installed ? styles.installed : styles.missing}`}
+                  className={`${styles.cliCard} ${installed ? styles.installed : styles.missing} ${switcherHidden ? styles.switcherHidden : ''}`}
                 >
                 {/* Left: identity + path/description */}
                 <div className={styles.cliMain} title={metaTitle}>
@@ -362,6 +377,17 @@ const CliSection = ({ addToast }: CliSectionProps) => {
 
                 {/* Right: status + actions */}
                 <div className={styles.cliActions}>
+                  <button
+                    type="button"
+                    className={styles.iconBtn}
+                    onClick={() => toggleSwitcherVisibility(tool.id, !switcherHidden)}
+                    data-tooltip={visibilityLabel}
+                    title={visibilityLabel}
+                    aria-label={visibilityLabel}
+                    aria-pressed={switcherHidden}
+                  >
+                    <span className={`codicon ${switcherHidden ? 'codicon-eye-closed' : 'codicon-eye'}`} />
+                  </button>
                   {installed ? (
                     <>
                       <span className={`${styles.statusBadge} ${styles.ok}`}>

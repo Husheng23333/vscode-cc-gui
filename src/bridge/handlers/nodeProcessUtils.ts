@@ -20,6 +20,14 @@ export type ProcessKind = 'DAEMON' | 'CHANNEL' | 'ORPHAN';
  * "grokky" does not.
  */
 export function providerForCommand(command: string): string | undefined {
+  const lower = command.toLowerCase();
+  // JetBrains AI Assistant's ACP Codex is a separate long-lived process. Keep it
+  // distinct from CC GUI's own Codex so the orphan controls can never mistake
+  // external work for our own process (upstream c2b1e37b NodeProcessRegistry).
+  if (lower.includes('@agentclientprotocol/codex-acp')
+    || (lower.includes('coding-copilot-jetbrains') && lower.includes('codex-acp'))) {
+    return 'jetbrains-codex';
+  }
   if (command.includes('codex')) return 'codex';
   if (command.includes('claude')) return 'claude';
   if (/\bgrok\b/i.test(command)) return 'grok';
@@ -27,6 +35,8 @@ export function providerForCommand(command: string): string | undefined {
   if (command.includes('opencode')) return 'opencode';
   if (/\bpi\b/.test(command) || command.includes(' pi ')) return 'pi';
   if (/\bomp\b/.test(command)) return 'omp';
+  if (/\bzcode\b/i.test(command)) return 'zcode';
+  if (/\bminimax\b/i.test(command) || /\bmcode\b/i.test(command)) return 'minimax';
   return undefined;
 }
 

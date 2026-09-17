@@ -121,8 +121,7 @@
       "collapse": "要約を折りたたむ"
     },
     "openSourceBannerStar": "Star",
-    "openSourceBannerStarToast": "リポジトリのURLをクリップボードにコピーしました。ブラウザに貼り付けてアクセスできます ⭐",
-    "openSourceBannerStarAria": "リポジトリのURLをコピーして GitHub でスター",
+    "openSourceBannerStarAria": "GitHub でリポジトリを開いてスター",
     "cacheHitsWithRatio": "（キャッシュヒット {{tokens}}、{{ratio}}）",
     "planModeEnabled": "Plan モードを有効にしました",
     "commandProviderOnly": "{{command}} は {{provider}} プロバイダーでのみ利用できます",
@@ -233,7 +232,8 @@
         "provider": {
           "claude": "Claude Code",
           "codex": "Codex",
-          "grok": "Grok CLI"
+          "grok": "Grok CLI",
+          "zcode": "ZCode"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
@@ -369,6 +369,18 @@
     },
     "usage": "使用統計",
     "usageDesc": "トークン消費量、コスト統計、使用傾向分析を表示",
+    "socialDocs": "公式ドキュメント",
+    "socialTitle": "フォローする",
+    "socialGithub": "GitHub リポジトリ — Star をお願いします！",
+    "socialX": "X（Twitter）@ZPeng31310",
+    "socialZhihu": "Zhihu @vscodeai",
+    "socialXiaohongshu": "Xiaohongshu（RED）",
+    "socialDouyin": "Douyin — ホバーしてスキャン",
+    "socialYoutube": "YouTube チャンネル",
+    "douyinQrAlt": "Douyin QRコード",
+    "douyinId": "Douyin ID: nengyongai",
+    "douyinCopied": "Douyin ID をクリップボードにコピーしました",
+    "douyinCopyFailed": "コピーに失敗しました。手動でコピーしてください。",
     "mcp": "MCPサーバー",
     "mcpDesc": "Model Context Protocolサーバーを設定および管理",
     "permissions": "権限",
@@ -472,11 +484,6 @@
     "communityDesc": "下のQRコードをスキャンして、公式WeChatグループに参加し、最新ニュースと技術サポートを入手",
     "communityQrTip": "WeChatでスキャンしてコミュニティに参加",
     "communityQrAlt": "公式WeChatコミュニティQRコード",
-    "githubTitle": "GitHub リポジトリ",
-    "githubDesc": "このプロジェクトは GitHub でオープンソースです。Star で応援してください！",
-    "githubCopyBtn": "リポジトリURLをコピー",
-    "githubCopied": "リポジトリURLがクリップボードにコピーされました。ブラウザでアクセスしてください。",
-    "githubCopyFailed": "コピーに失敗しました。手動でコピーしてください。",
     "sponsor": "Sponsor",
     "sponsorDesc": "If this project helps you, consider sponsoring to support ongoing maintenance!",
     "alipay": "Alipay",
@@ -822,6 +829,14 @@
         "omp": {
           "name": "OMP CLI",
           "description": "マルチプロバイダーのモデルに対応した Oh My Pi ターミナルコーディングエージェント"
+        },
+        "minimax": {
+          "name": "MiniMax Code",
+          "description": "MiniMax ターミナルコーディングエージェント。Node.js 22.19+ / 24+（23 は不可）が必要。コマンド: minimax / mcode"
+        },
+        "zcode": {
+          "name": "ZCode",
+          "description": "GLM モデルを搭載した Zhipu ZCode デスクトップコーディングアプリ"
         }
       },
       "installDialog": {
@@ -839,7 +854,11 @@
       "listTitle": "Local CLI tools",
       "summary": "{{installed}} / {{total}} installed",
       "moreComingSoon": "More coming soon",
-      "copyPath": "Copy path"
+      "copyPath": "Copy path",
+      "visibility": {
+        "hide": "プロバイダー切り替えメニューに表示しない",
+        "show": "プロバイダー切り替えメニューに表示する"
+      }
     }
   },
   "history": {
@@ -1253,7 +1272,32 @@
     "bashGroupBatchExecution": "Batch Execution",
     "bashGroupCompleted": "completed",
     "bashGroupAllCompleted": "All Completed",
-    "bashGroupFailed": "failed"
+    "bashGroupFailed": "failed",
+    "reportFindings": {
+      "title": "レビュー指摘",
+      "findingsCount_one": "{{count}} 件の指摘",
+      "findingsCount_other": "{{count}} 件の指摘",
+      "confirmedCount_one": "確認済み {{count}} 件",
+      "confirmedCount_other": "確認済み {{count}} 件",
+      "plausibleCount_one": "要確認 {{count}} 件",
+      "plausibleCount_other": "要確認 {{count}} 件",
+      "confirmed": "確認済み",
+      "plausible": "要確認",
+      "fixed": "修正済み",
+      "skipped": "スキップ",
+      "noChangeNeeded": "修正不要",
+      "empty": "指摘はありません",
+      "summaryLabel": "レビュー概要",
+      "summary": "概要",
+      "failureScenario": "発生シナリオ",
+      "reviewLevel": "レビューレベル: {{level}}",
+      "openFile": "{{filePath}} を開く",
+      "expandFinding": "指摘の詳細を展開",
+      "collapseFinding": "指摘の詳細を折りたたむ",
+      "expandReport": "レビュー指摘を展開",
+      "collapseReport": "レビュー指摘を折りたたむ",
+      "untitled": "無題の指摘"
+    }
   },
   "todo": {
     "inProgress": "進行中 {{completed}}/{{total}} タスク",
@@ -1457,13 +1501,13 @@
         "label": "Haiku 4.5",
         "description": "Haiku 4.5 · 迅速な回答に最速"
       },
-      "opus48": {
-        "label": "Opus 4.8",
-        "description": "Opus 4.8 · 前世代の Opus モデル"
+      "fable51": {
+        "label": "Fable 5.1",
+        "description": "Fable 5.1 · 最も強力 · Mythosクラス"
       },
       "fable5": {
         "label": "Fable 5",
-        "description": "Fable 5 · 最も強力 · Mythosクラス"
+        "description": "Fable 5 · 前世代の Fable モデル"
       },
       "sonnet5": {
         "label": "Sonnet 5",
@@ -1522,6 +1566,10 @@
       "gpt56luna": {
         "label": "GPT-5.6 Luna",
         "description": "コスト重視のワークロードに最適化された GPT-5.6 モデル"
+      },
+      "gpt6astra": {
+        "label": "GPT-6 Astra",
+        "description": "自律的なコンピュータ操作と長時間のエージェントタスク向けの新世代フラッグシップ"
       }
     },
     "searchPlaceholder": "モデルを検索",
@@ -1545,10 +1593,17 @@
       "tooltip": "ファイル編集を自動的に承認",
       "description": "ファイルの作成/編集を自動的に承認し、確認手順を削減"
     },
+    "auto": {
+      "label": "自動承認モード",
+      "shortLabel": "自動承認",
+      "tooltip": "プロバイダーのネイティブ審査に承認リクエストを自動処理させます",
+      "description": "安全境界を維持しながらプロバイダーのネイティブ審査を使用します"
+    },
     "bypassPermissions": {
-      "label": "自動モード",
+      "label": "完全自動",
       "tooltip": "すべての権限チェックをバイパス",
-      "description": "完全自動、すべての権限チェックをバイパス[注意して使用]"
+      "description": "完全自動、すべての権限チェックをバイパス[注意して使用]",
+      "shortLabel": "完全自動"
     }
   },
   "ompModes": {
@@ -1589,6 +1644,12 @@
       "tooltip": "Codex approval_policy=on-request – asks for approval when needed",
       "description": "Balanced option. Allows normal editing flow while still requiring approvals when needed."
     },
+    "auto": {
+      "label": "代わりに承認",
+      "shortLabel": "自動承認",
+      "tooltip": "Codex approvals_reviewer=auto_review – 自動審査が対象の承認リクエストを処理します。",
+      "description": "workspace-write サンドボックスを維持し、承認できないリクエストはエスカレーションします。"
+    },
     "bypassPermissions": {
       "label": "Full Auto",
       "tooltip": "Codex approval_policy=never – runs commands and writes files without prompting (workspace sandbox still enforced).",
@@ -1624,6 +1685,13 @@
       "badge": "Beta",
       "title": "Beta Feature",
       "message": "This feature is still in Beta. If you encounter any bugs, please report them to the author promptly."
+    },
+    "manageCli": "CLI 設定",
+    "minimax": {
+      "label": "MiniMax Code"
+    },
+    "zcode": {
+      "label": "ZCode"
     }
   },
   "promptEnhancer": {

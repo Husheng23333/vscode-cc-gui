@@ -11,10 +11,11 @@ export interface BridgeHandler {
   handle(message: BridgeMessage): Promise<boolean> | boolean;
 }
 
-export type RuntimeProviderId = 'claude' | 'codex' | 'grok' | 'kimi' | 'opencode' | 'pi' | 'omp' | 'dsh';
+export type RuntimeProviderId = 'claude' | 'codex' | 'grok' | 'kimi' | 'opencode' | 'pi' | 'omp' | 'dsh' | 'zcode' | 'minimax';
 
 export interface BridgeCallbacks {
   setActiveProvider(provider: RuntimeProviderId): void;
+  getActiveProvider(): RuntimeProviderId;
   setSelectedModel(model: string): void;
   syncProviderToDisk(providers: unknown[]): void;
   playSound(content: string): void;

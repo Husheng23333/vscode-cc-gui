@@ -29,6 +29,7 @@ function logDebug(...args) {
  * @param {string} [options.effort] - reasoning effort
  * @param {string} [options.approvalPolicy] - e.g. never | on-request | untrusted
  * @param {string} [options.sandboxMode]
+ * @param {object} [options.configOverrides] - extra config map merged into thread/start params (e.g. approvals_reviewer)
  * @param {object} [options.cliEnv]
  * @param {AbortSignal} [options.signal]
  * @param {(delta: string) => void} [options.onContentDelta]
@@ -48,6 +49,7 @@ export async function runCodexAppServerTurn(options = {}) {
     effort,
     approvalPolicy = 'never',
     sandboxMode,
+    configOverrides,
     cliEnv,
     signal,
     onContentDelta,
@@ -394,6 +396,9 @@ export async function runCodexAppServerTurn(options = {}) {
         startParams.config = {
           sandbox_mode: sandboxMode,
         };
+      }
+      if (configOverrides && typeof configOverrides === 'object') {
+        startParams.config = { ...(startParams.config || {}), ...configOverrides };
       }
       const started = await sendRequest('thread/start', startParams);
       currentThreadId =

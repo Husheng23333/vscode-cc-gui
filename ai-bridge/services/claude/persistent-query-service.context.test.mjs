@@ -1,3 +1,5 @@
+// Isolate credentials before the runtime caches the user's home directory.
+import './testing/cli-login-home.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

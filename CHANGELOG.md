@@ -1,5 +1,73 @@
 # Changelog
 
+##### **2026年9月17日（v0.1.9）**
+
+English:
+
+✨ Features
+- Add **ZCode CLI as a new AI provider**: a persistent `zcode app-server` JSON-RPC runtime with streaming thinking deltas, merged tool-call cards, mid-turn permission-mode switching, reasoning-effort mapping, session history readback/deletion, and automatic credential resolution from the ZCode desktop client — no API key entry needed
+- Add **MiniMax Code (mcode) as a new AI provider**: streaming chat via headless `minimax exec`, session resume, image attachments, full session-history readback and safe deletion, and a model picker fed from `~/.minimax/config.yaml`
+- Add a native **"Auto" permission mode for Claude and Codex**: the provider-side reviewer decides first and only escalations reach the approval dialog; Codex maps it to the guarded workspace-write sandbox with on-request approval (codex-sdk ≥ 0.146.0), while headless CLI providers safely downgrade it to Default
+- Give **code-review results a dedicated findings card**: verdict, category, clickable file:line links that jump into the editor, and collapsible details, localized across all 10 languages
+- Add **pluggable relay usage vendors** for the plan-usage indicator: Kimi For Coding, MiniMax Coding Plan, and z.ai / bigmodel.cn hosts are matched from `ANTHROPIC_BASE_URL`, with TLS-only credential transport and a bounded hashed cache
+- Support **dsh ≥ 0.1.5 hosts**: an observed modern wire dialect with browser-session cookie authentication, bidirectional mux streaming, fail-closed negotiation (never silently downgrades to unauthenticated legacy), and DoS-bounded frames
+- Allow **hiding CLI providers from the provider switcher**: an eye toggle on each card in Settings → Providers → CLI removes the provider from the switcher dropdown (a hidden active provider keeps working), and the provider dropdown gains a **CLI Settings** footer entry that deep-links into that page
+- Add an **open-source banner with a Star button** to the changelog dialog, and rework the **settings community section** into a social-links row — every external link opens through the VS Code system-browser bridge
+
+🔧 Improvements
+- Flatten the **model list directly into the model-config popover**: effort / 1M-context rows sit beside an inline model list, so picking a model no longer requires crossing a nested fly-out
+- **Permission, AskUserQuestion, and plan-approval dialogs survive webview reloads**: per-request dialog tokens, persisted drafts, absolute deadlines, and an ordered replay with acknowledgements — stale decisions can no longer resolve superseded requests or write permission memory
+- **Provider runtime lifecycle cleanup**: idle runtimes are reaped after 60s, and the ai-bridge daemon self-exits after 3 minutes fully idle
+- Unify **permission-mode normalization** (legacy `autoEdit` → `acceptEdits`) and serialize per-runtime mode transitions
+- Update the **model lineup**: add `claude-fable-5-1` (Fable 5.1) as the new top entry with 200K / 1M context handling and xhigh / max reasoning-effort support, add **GPT-6 Astra** (`gpt-6-astra`) above GPT-5.6 Sol, and retire **Opus 4.8** — saved `claude-opus-4-8` / `claude-opus-4-6` sessions migrate to `claude-opus-5`
+
+🐛 Fixes
+- Stop **queued chat messages from being silently dropped between turns**: dequeue+execute is now atomic, the queue is cleared on session transitions, and a plain interrupt keeps it
+- Preserve **streaming thinking/text block boundaries** across lagging backend snapshots
+- Make **session titles work behind relays that route by session**, and keep background task-notification results out of foreground turns
+- Render **unlabeled code blocks as plain text** instead of highlight.js auto-detection guesses, and render edit-card code in the code font
+- Treat the **read-tool offset as a 1-based starting line**, and preserve large images for provider aliases
+- Fix **consecutive image-only sends** and quote/copy buttons overlapping message text
+- Resolve CLIs installed under **Node version managers** (nvm / fnm / mise / asdf / volta / nvmd / hermes), **bun / yarn / pnpm global bins**, and the **OMP Windows native installer** (`%LOCALAPPDATA%\omp`), with an allowlisted login-shell fallback as the last resort
+- Fix **`@file#L1` line references sent to pi/omp**: references are rewritten to `@file (lines N[-M])` so the mention still resolves and line info survives as prose, and a prompt starting with `@` is no longer misparsed as a CLI file argument
+- Keep **OMP model roles (smol / slow / plan …) out of the model dropdown**, and hide the **runtime-provider menu entry for beta CLI providers** — only Claude and Codex support runtime provider switching
+- Truncate **long file paths in tool blocks from the start** with an ellipsis prefix; show the **inline copy button on user messages only on hover**; emit each `[SESSION_ID]` exactly once across stream retries
+- Stop **`<recommended_plugins>` injection from becoming Codex session titles**
+
+中文：
+
+✨ 新功能
+- 新增 **ZCode CLI 作为 AI Provider**：持久化 `zcode app-server` JSON-RPC 运行时，支持流式 thinking 增量、合并的工具调用卡片、回合中途切换权限模式、推理强度映射、会话历史读取/删除，并自动复用 ZCode 桌面客户端的凭证——无需填写 API Key
+- 新增 **MiniMax Code（mcode）作为 AI Provider**：通过无头 `minimax exec` 流式对话，支持会话续接、图片附件、完整会话历史读取与安全删除、从 `~/.minimax/config.yaml` 读取的模型选择器
+- 新增 Claude 与 Codex 的原生 **「Auto」权限模式**：由 Provider 侧审查器先行裁决，只有升级请求才会弹出批准对话框；Codex 将其映射为受护栏约束的 workspace-write 沙箱 + 按需批准（要求 codex-sdk ≥ 0.146.0），无头 CLI Provider 会安全降级为 Default
+- 代码审查结果新增 **专用 Findings 卡片**：结论、分类、可点击跳转到编辑器的文件:行号链接、可折叠详情，全部 10 种语言本地化
+- 新增 **可插拔的中继用量查询 vendor**：根据 `ANTHROPIC_BASE_URL` 匹配 Kimi For Coding、MiniMax Coding Plan 与 z.ai / bigmodel.cn，凭证仅走 TLS 传输，缓存带哈希且有界
+- 支持 **dsh ≥ 0.1.5 主机**：可观测的现代线协议方言、浏览器会话 Cookie 认证、双向 mux 流、失败即报错绝不降级为无认证旧协议的协商策略，以及防 DoS 的有界帧
+- 支持 **在 Provider 切换器中隐藏 CLI Provider**：设置 → 供应商 → CLI 管理页中每张卡片新增眼睛开关（已激活的隐藏 Provider 仍可正常使用）；Provider 下拉底部新增 **CLI 设置** 深链入口
+- 版本记录弹窗新增 **开源横幅与 Star 按钮**，设置页社区板块改为 **社交链接行**——所有外部链接统一走 VS Code 系统浏览器桥打开
+
+🔧 优化
+- **模型列表平铺进模型配置弹层**：推理强度 / 1M 上下文行位于内联模型列表旁，选模型不再需要穿越嵌套飞出菜单
+- **权限、提问与计划批准弹窗在 webview 刷新后可恢复**：每个请求独立 dialogToken、草稿持久化、绝对截止时间、带确认的有序重放——过期的旧决策无法再解决已被取代的请求或写入权限记忆
+- **Provider 运行时生命周期清理**：空闲 60 秒的运行时被回收，ai-bridge 守护进程完全空闲 3 分钟后自行退出
+- 统一 **权限模式归一化**（旧值 `autoEdit` → `acceptEdits`），并按运行时串行化模式切换
+- 更新 **模型清单**：新增 `claude-fable-5-1`（Fable 5.1）为首位模型，支持 200K / 1M 上下文与 xhigh / max 推理强度；Codex 侧在 GPT-5.6 Sol 之上新增 **GPT-6 Astra**（`gpt-6-astra`）；移除已下线的 **Opus 4.8**，已保存的 `claude-opus-4-8` / `claude-opus-4-6` 会话迁移到 `claude-opus-5`
+
+🐛 修复
+- 修复 **回合之间排队的聊天消息被静默丢弃**：出队与执行改为原子操作，会话切换时清空队列，普通打断保留队列
+- 修复后端快照滞后时 **流式 thinking/文本块边界被吞** 的问题
+- 修复 **按会话路由的中继下会话标题不生效**，后台任务通知结果不再混入前台回合
+- **未标注语言的代码块按纯文本渲染**，不再交给 highlight.js 自动猜测；编辑卡片中的代码改用代码字体
+- **read 工具的 offset 按 1 起始行号处理**；Provider 别名下的大图不再被压缩
+- 修复 **纯图片连续发送报错** 与引用/复制按钮遮挡消息文字
+- 支持解析安装在 **Node 版本管理器**（nvm / fnm / mise / asdf / volta / nvmd / hermes）、**bun / yarn / pnpm 全局 bin 目录** 以及 **OMP Windows 原生安装器**（`%LOCALAPPDATA%\omp`）下的 CLI，并以白名单登录 shell 兜底
+- 修复发送给 pi/omp 的 **`@文件#L行号` 引用**：重写为 `@文件 (lines N[-M])` 使 mention 仍可解析、行号信息以文本保留；以 `@` 开头的 prompt 不再被 CLI 误当作文件参数
+- **OMP 模型角色（smol / slow / plan …）不再出现在模型下拉中**；对 Beta CLI Provider **隐藏「切换运行时供应商」菜单项**——仅 Claude 与 Codex 支持运行时供应商切换
+- 工具块中的 **超长文件路径改为从开头截断** 并加省略号前缀；用户消息的 **内联复制按钮改为仅悬停时显示**；流重试时每个 `[SESSION_ID]` 只发一次
+- 清除 Codex 会话标题中的 **`<recommended_plugins>` 注入**
+
+---
+
 ##### **2026年8月27日（v0.1.8）**
 
 English:

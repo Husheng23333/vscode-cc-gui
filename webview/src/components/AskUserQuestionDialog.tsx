@@ -4,6 +4,7 @@ import { formatCountdown } from '../utils/helpers';
 import { useDialogCountdownTimeout } from '../hooks/useDialogCountdownTimeout';
 import { DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS } from '../utils/permissionDialogTimeout';
 import { isEditableEventTarget } from '../utils/isEditableEventTarget';
+import { clearDialogDraft, readDialogDraft, writeDialogDraft } from '../utils/dialogStateStorage';
 import './AskUserQuestionDialog.css';
 
 // Special marker to identify the "Other" option
@@ -28,6 +29,8 @@ export interface AskUserQuestionRequest {
   requestId: string;
   toolName: string;
   questions: Question[];
+  deadlineMs?: number;
+  dialogToken?: string;
 }
 
 interface AskUserQuestionDialogProps {
@@ -36,6 +39,14 @@ interface AskUserQuestionDialogProps {
   onSubmit: (requestId: string, answers: Record<string, string | string[]>) => void;
   onCancel: (requestId: string) => void;
   timeoutSeconds?: number;
+}
+interface AskUserQuestionDraft {
+  deadlineMs?: number;
+  dialogToken?: string;
+  answers?: Record<string, string[]>;
+  customInputs?: Record<string, string>;
+  currentQuestionIndex?: number;
+  isCollapsed?: boolean;
 }
 
 function normalizeQuestion(raw: any): Question | null {
@@ -70,18 +81,21 @@ const AskUserQuestionDialog = ({
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [hydratedRequestKey, setHydratedRequestKey] = useState<string | null>(null);
 
   const customInputRef = useRef<HTMLTextAreaElement>(null);
   const handleTimeout = useCallback(() => {
     if (request) {
+      clearDialogDraft('askUserQuestion', request.requestId, request.dialogToken);
       onCancel(request.requestId);
     }
   }, [request, onCancel]);
 
   const { remainingSeconds, isTimeWarning, markSubmitted } = useDialogCountdownTimeout({
     isOpen,
-    requestKey: request?.requestId,
+    requestKey: request?.dialogToken ?? request?.requestId,
     timeoutSeconds,
+    deadlineMs: request?.deadlineMs,
     onTimeout: handleTimeout,
   });
   const normalizedQuestions = (Array.isArray(request?.questions) ? request!.questions : [])
@@ -90,28 +104,83 @@ const AskUserQuestionDialog = ({
 
   const handleCancel = useCallback(() => {
     if (request && markSubmitted()) {
+      clearDialogDraft('askUserQuestion', request.requestId, request.dialogToken);
       onCancel(request.requestId);
     }
   }, [request, markSubmitted, onCancel]);
 
   useEffect(() => {
-    if (isOpen && request) {
-      const questions = (Array.isArray(request.questions) ? request.questions : [])
-        .map(normalizeQuestion)
-        .filter(Boolean) as Question[];
-
-      const initialAnswers: Record<string, Set<string>> = {};
-      const initialCustomInputs: Record<string, string> = {};
-      questions.forEach((q) => {
-        initialAnswers[q.question] = new Set<string>();
-        initialCustomInputs[q.question] = '';
-      });
-      setAnswers(initialAnswers);
-      setCustomInputs(initialCustomInputs);
-      setCurrentQuestionIndex(0);
-      setIsCollapsed(false);
+    if (!isOpen || !request) {
+      setHydratedRequestKey(null);
+      return;
     }
-  }, [isOpen, request?.requestId]);
+
+    const questions = (Array.isArray(request.questions) ? request.questions : [])
+      .map(normalizeQuestion)
+      .filter(Boolean) as Question[];
+
+    const initialAnswers: Record<string, Set<string>> = {};
+    const initialCustomInputs: Record<string, string> = {};
+    questions.forEach((q) => {
+      initialAnswers[q.question] = new Set<string>();
+      initialCustomInputs[q.question] = '';
+    });
+
+    const draft = readDialogDraft<AskUserQuestionDraft>('askUserQuestion', request.requestId, request.deadlineMs, request.dialogToken);
+    if (draft?.answers) {
+      for (const [question, labels] of Object.entries(draft.answers)) {
+        if (Array.isArray(labels)) {
+          initialAnswers[question] = new Set(labels.filter((label): label is string => typeof label === 'string'));
+        }
+      }
+    }
+    if (draft?.customInputs && typeof draft.customInputs === 'object') {
+      for (const [question, value] of Object.entries(draft.customInputs)) {
+        if (typeof value === 'string') {
+          initialCustomInputs[question] = value.slice(0, MAX_CUSTOM_INPUT_LENGTH);
+        }
+      }
+    }
+    setAnswers(initialAnswers);
+    setCustomInputs(initialCustomInputs);
+    setCurrentQuestionIndex(
+      typeof draft?.currentQuestionIndex === 'number' && Number.isInteger(draft.currentQuestionIndex)
+        ? Math.max(0, draft.currentQuestionIndex)
+        : 0,
+    );
+    setIsCollapsed(draft?.isCollapsed === true);
+    setHydratedRequestKey(request.dialogToken ?? request.requestId);
+  }, [isOpen, request?.requestId, request?.dialogToken, request?.deadlineMs]);
+
+  useEffect(() => {
+    const requestId = request?.requestId;
+    const deadlineMs = request?.deadlineMs;
+    if (!isOpen || requestId === undefined || hydratedRequestKey !== (request?.dialogToken ?? requestId)) {
+      return;
+    }
+    const serializedAnswers: Record<string, string[]> = {};
+    for (const [question, labels] of Object.entries(answers)) {
+      serializedAnswers[question] = Array.from(labels);
+    }
+    writeDialogDraft('askUserQuestion', requestId, {
+      deadlineMs,
+      dialogToken: request?.dialogToken,
+      answers: serializedAnswers,
+      customInputs,
+      currentQuestionIndex,
+      isCollapsed,
+    });
+  }, [
+    answers,
+    customInputs,
+    currentQuestionIndex,
+    hydratedRequestKey,
+    isCollapsed,
+    isOpen,
+    request?.requestId,
+    request?.dialogToken,
+    request?.deadlineMs,
+  ]);
 
   // Keyboard event handling - separate effect to avoid frequent listener registration/removal
   useEffect(() => {
@@ -262,6 +331,7 @@ const AskUserQuestionDialog = ({
     });
 
     onSubmit(request.requestId, formattedAnswers);
+    clearDialogDraft('askUserQuestion', request.requestId, request.dialogToken);
   };
 
   // Check if we can proceed:

@@ -123,8 +123,7 @@
       "collapse": "Collapse summary"
     },
     "openSourceBannerStar": "Star",
-    "openSourceBannerStarToast": "Repo link copied to clipboard — paste it in your browser to visit ⭐",
-    "openSourceBannerStarAria": "Copy repository link and star on GitHub",
+    "openSourceBannerStarAria": "Open the repository on GitHub and star it",
     "cacheHitsWithRatio": "(cache hits {{tokens}}, {{ratio}})",
     "planModeEnabled": "Plan mode enabled",
     "commandProviderOnly": "{{command}} is only available for {{provider}}",
@@ -248,7 +247,8 @@
         "provider": {
           "claude": "Claude Code",
           "codex": "Codex",
-          "grok": "Grok CLI"
+          "grok": "Grok CLI",
+          "zcode": "ZCode"
         },
         "currentProviderAuto": "Currently using automatic selection: {{provider}}",
         "currentProviderManual": "Currently using manually selected provider: {{provider}}",
@@ -455,6 +455,18 @@
     },
     "usage": "Usage Statistics",
     "usageDesc": "View your Token consumption, cost statistics and usage trend analysis",
+    "socialDocs": "Official Documentation",
+    "socialTitle": "Follow Us",
+    "socialGithub": "GitHub repository — star us!",
+    "socialX": "X (Twitter) @ZPeng31310",
+    "socialZhihu": "Zhihu @vscodeai",
+    "socialXiaohongshu": "Xiaohongshu (RED)",
+    "socialDouyin": "Douyin — hover to scan and follow",
+    "socialYoutube": "YouTube channel",
+    "douyinQrAlt": "Douyin QR code",
+    "douyinId": "Douyin ID: nengyongai",
+    "douyinCopied": "Douyin ID copied to clipboard",
+    "douyinCopyFailed": "Failed to copy. Please copy manually.",
     "mcp": "MCP Servers",
     "mcpDesc": "Configure and manage Model Context Protocol servers",
     "permissions": "Permissions",
@@ -562,11 +574,6 @@
     "versionHistoryDesc": "View all version update records",
     "communityQrTip": "Scan with WeChat to join the community",
     "communityQrAlt": "Official WeChat community QR code",
-    "githubTitle": "GitHub Repository",
-    "githubDesc": "This project is open source on GitHub. Star us to show your support!",
-    "githubCopyBtn": "Copy Repository URL",
-    "githubCopied": "Repository URL copied to clipboard. Please visit it in your browser.",
-    "githubCopyFailed": "Failed to copy. Please copy manually.",
     "sponsor": "Sponsor",
     "sponsorDesc": "If this project helps you, consider sponsoring to support ongoing maintenance!",
     "alipay": "Alipay",
@@ -1021,6 +1028,14 @@
         "dsh": {
           "name": "DeepSeek Harness",
           "description": "DeepSeek terminal agent harness (persistent dsh web host)"
+        },
+        "minimax": {
+          "name": "MiniMax Code",
+          "description": "MiniMax terminal coding agent. Requires Node.js 22.19+ / 24+ (not 23); commands: minimax / mcode"
+        },
+        "zcode": {
+          "name": "ZCode",
+          "description": "Zhipu ZCode desktop coding app with GLM models"
         }
       },
       "installDialog": {
@@ -1055,6 +1070,10 @@
         "stopHost": "Stop host (plugin-spawned only)",
         "stopHostShort": "Stop host",
         "autoStart": "Auto-start when needed"
+      },
+      "visibility": {
+        "hide": "Hide in provider switcher",
+        "show": "Show in provider switcher"
       }
     }
   },
@@ -1521,7 +1540,32 @@
     "bashGroupFailed": "failed",
     "promptLabel": "Prompt",
     "updatePlan": "Update Plan",
-    "applyPatch": "Apply Patch"
+    "applyPatch": "Apply Patch",
+    "reportFindings": {
+      "title": "Report Findings",
+      "findingsCount_one": "{{count}} finding",
+      "findingsCount_other": "{{count}} findings",
+      "confirmedCount_one": "{{count}} confirmed",
+      "confirmedCount_other": "{{count}} confirmed",
+      "plausibleCount_one": "{{count}} to review",
+      "plausibleCount_other": "{{count}} to review",
+      "confirmed": "Confirmed",
+      "plausible": "To review",
+      "fixed": "Fixed",
+      "skipped": "Skipped",
+      "noChangeNeeded": "No change needed",
+      "empty": "No findings",
+      "summaryLabel": "Review summary",
+      "summary": "Summary",
+      "failureScenario": "Failure scenario",
+      "reviewLevel": "Review level: {{level}}",
+      "openFile": "Open {{filePath}}",
+      "expandFinding": "Expand finding",
+      "collapseFinding": "Collapse finding",
+      "expandReport": "Expand findings report",
+      "collapseReport": "Collapse findings report",
+      "untitled": "Untitled finding"
+    }
   },
   "todo": {
     "inProgress": "In Progress {{completed}}/{{total}} tasks",
@@ -1767,13 +1811,13 @@
         "label": "Haiku 4.5",
         "description": "Haiku 4.5 · Fastest for quick answers"
       },
-      "opus48": {
-        "label": "Opus 4.8",
-        "description": "Opus 4.8 · Previous Opus generation"
+      "fable51": {
+        "label": "Fable 5.1",
+        "description": "Fable 5.1 · Most powerful · Mythos-class"
       },
       "fable5": {
         "label": "Fable 5",
-        "description": "Fable 5 · Most powerful · Mythos-class"
+        "description": "Fable 5 · Previous Fable generation"
       },
       "sonnet5": {
         "label": "Sonnet 5",
@@ -1832,6 +1876,10 @@
       "gpt56luna": {
         "label": "GPT-5.6 Luna",
         "description": "GPT-5.6 model optimized for cost-sensitive workloads."
+      },
+      "gpt6astra": {
+        "label": "GPT-6 Astra",
+        "description": "New-generation flagship for autonomous computer use and long agentic tasks."
       }
     },
     "searchPlaceholder": "Search models",
@@ -1872,9 +1920,15 @@
       "tooltip": "Automatically accept file edits",
       "description": "Automatically accept file creation/editing, reducing confirmation steps"
     },
-    "bypassPermissions": {
+    "auto": {
       "label": "Auto Mode",
       "shortLabel": "Auto",
+      "tooltip": "Let the provider review approval requests automatically",
+      "description": "Uses the provider-native reviewer while retaining safety boundaries"
+    },
+    "bypassPermissions": {
+      "label": "Full Auto",
+      "shortLabel": "Full Auto",
       "tooltip": "Bypass all permission checks",
       "description": "Fully automated, bypassing all permission checks [Use with caution]"
     }
@@ -1918,6 +1972,12 @@
       "tooltip": "Codex approval_policy=on-request – asks for approval when needed",
       "description": "Balanced option. Allows normal editing flow while still requiring approvals when needed."
     },
+    "auto": {
+      "label": "Approve for me",
+      "shortLabel": "Auto",
+      "tooltip": "Codex approvals_reviewer=auto_review – an automatic reviewer handles eligible approval requests.",
+      "description": "Keeps the workspace-write sandbox and escalates requests the reviewer cannot approve."
+    },
     "bypassPermissions": {
       "label": "Full Auto",
       "tooltip": "Codex approval_policy=never – runs commands and writes files without prompting (workspace sandbox still enforced).",
@@ -1956,6 +2016,13 @@
     },
     "dsh": {
       "label": "DeepSeek Harness"
+    },
+    "manageCli": "CLI Settings",
+    "minimax": {
+      "label": "MiniMax Code"
+    },
+    "zcode": {
+      "label": "ZCode"
     }
   },
   "promptEnhancer": {

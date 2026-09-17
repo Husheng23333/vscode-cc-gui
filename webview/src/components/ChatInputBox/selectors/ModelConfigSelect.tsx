@@ -52,13 +52,19 @@ const CONTEXT_SWITCH_STYLE: React.CSSProperties = {
 };
 
 /**
- * Delay before switching an already-open fly-out. The model list sits above
- * the other rows, so the pointer has to cross "Effort" / "Speed" to reach
- * it; without a grace period those rows steal the submenu on the way.
+ * Delay before switching an already-open fly-out. The effort fly-out sits
+ * beside its row, so the pointer may cross the 1M context / speed rows on
+ * the way; without a grace period those rows steal the submenu.
  */
 export const SUBMENU_HOVER_DELAY_MS = 200;
+/**
+ * Delay before opening the first fly-out on hover. The function rows sit at
+ * the popover's bottom edge — right where the pointer enters from the
+ * trigger — so an instant open would fire on every pass-through.
+ */
+export const SUBMENU_TRIGGER_DELAY_MS = 500;
 
-type ActiveSubmenu = 'none' | 'model' | 'effort' | 'speed';
+type ActiveSubmenu = 'none' | 'effort' | 'speed';
 
 interface ModelConfigSelectProps {
   selectedModel: string;
@@ -86,8 +92,10 @@ function getReasoningLabel(
 }
 
 /**
- * Nested model-settings selector: one summary trigger, fly-out submenus for
- * model / effort / context / Codex speed.
+ * Model-settings selector: one summary trigger whose popover keeps the model
+ * list flat at the top; the function rows (1M context / Codex speed /
+ * effort) sit below it, next to the trigger. Rows that offer a choice open
+ * fly-out submenus beside them.
  */
 export const ModelConfigSelect = ({
   selectedModel,
@@ -113,7 +121,6 @@ export const ModelConfigSelect = ({
   const hoverTimerRef = useRef<number | undefined>(undefined);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const modelTriggerRef = useRef<HTMLDivElement>(null);
   const effortTriggerRef = useRef<HTMLDivElement>(null);
   const speedTriggerRef = useRef<HTMLDivElement>(null);
 
@@ -134,20 +141,19 @@ export const ModelConfigSelect = ({
       clearHoverTimer();
       return;
     }
-    // First open can be immediate; only switching between fly-outs is delayed.
-    if (activeSubmenuRef.current === 'none') {
-      openSubmenu(submenu);
-      return;
-    }
     clearHoverTimer();
+    // Opening the first fly-out waits longer than switching between open
+    // fly-outs: the pointer may only be crossing a row on its way elsewhere.
+    const delay = activeSubmenuRef.current === 'none'
+      ? SUBMENU_TRIGGER_DELAY_MS
+      : SUBMENU_HOVER_DELAY_MS;
     hoverTimerRef.current = window.setTimeout(() => {
       hoverTimerRef.current = undefined;
       setActiveSubmenu(submenu);
-    }, SUBMENU_HOVER_DELAY_MS);
-  }, [clearHoverTimer, openSubmenu]);
+    }, delay);
+  }, [clearHoverTimer]);
 
   const triggerRefFor = (submenu: ActiveSubmenu) => {
-    if (submenu === 'model') return modelTriggerRef.current;
     if (submenu === 'effort') return effortTriggerRef.current;
     if (submenu === 'speed') return speedTriggerRef.current;
     return null;
@@ -167,7 +173,7 @@ export const ModelConfigSelect = ({
     }
   }, [clearHoverTimer]);
 
-  const { positionedStyle: mainPositionedStyle, recalculate: mainRecalculate } = useDropdownPosition({
+  const { positionedStyle: mainPositionedStyle, maxHeight: mainMaxHeight, recalculate: mainRecalculate } = useDropdownPosition({
     buttonRef,
     dropdownRef,
     preferredAlignment: 'right',
@@ -200,6 +206,7 @@ export const ModelConfigSelect = ({
   const showEffortRow = showEffort && !!onReasoningChange;
   const showSpeed = currentProvider === 'codex' && !!onCodexFastModeChange;
   const contextSupported = modelSupports1MContext(selectedModel);
+  const hasTrailingRows = showContextRow || showSpeed;
 
   const modelLabel = currentModel
     ? resolveModelDisplayLabel(currentModel, {
@@ -215,7 +222,6 @@ export const ModelConfigSelect = ({
   const speedLabel = t(`codexFastMode.${codexFastMode}.label`, {
     defaultValue: codexFastMode === 'fast' ? 'Fast' : 'Standard',
   });
-  const hasLeadingRows = showContextRow || showEffortRow || showSpeed;
 
   const summaryParts = [
     modelLabel,
@@ -306,9 +312,33 @@ export const ModelConfigSelect = ({
           ref={dropdownRef}
           className="selector-dropdown model-config-dropdown"
           data-testid="model-config-dropdown"
-          style={{ ...DROPDOWN_STYLE, ...mainPositionedStyle }}
+          style={{ ...DROPDOWN_STYLE, ...mainPositionedStyle, maxHeight: mainMaxHeight, boxSizing: 'border-box' }}
           onMouseOverCapture={retainActiveSubmenu}
         >
+          {/* The flat list has no hover row of its own; entering it must
+              dismiss any open fly-out (effort / speed). It sits at the top
+              so model switching — the most frequent action — never crosses
+              the submenu rows. */}
+          <div className="model-config-models" onMouseEnter={() => scheduleSubmenu('none')}>
+            <ModelSelect
+              value={selectedModel}
+              onChange={onModelSelect}
+              models={models}
+              currentProvider={currentProvider}
+              loading={loading}
+              error={error}
+              onRetry={onRetry}
+              onAddModel={onAddModel}
+              longContextEnabled={longContextEnabled}
+              onLongContextChange={onLongContextChange}
+              inline
+              hideLongContextToggle
+              onClose={closeMenu}
+            />
+          </div>
+
+          {(showEffortRow || hasTrailingRows) && <div className="selector-divider" />}
+
           {showContextRow && (
             <div
               className="selector-option"
@@ -334,6 +364,35 @@ export const ModelConfigSelect = ({
                   onLongContextChange?.(checked);
                 }}
               />
+            </div>
+          )}
+
+          {showSpeed && onCodexFastModeChange && (
+            <div
+              ref={speedTriggerRef}
+              className={`selector-option${activeSubmenu === 'speed' ? ' selected' : ''}`}
+              data-testid="model-config-option-speed"
+              onMouseEnter={() => scheduleSubmenu('speed')}
+              onClick={(event) => {
+                event.stopPropagation();
+                openSubmenu('speed');
+              }}
+              style={OPTION_RELATIVE_STYLE}
+            >
+              <span style={OPTION_LABEL_STYLE}>{t('modelConfig.speed', { defaultValue: 'Speed' })}</span>
+              <div style={OPTION_VALUE_STYLE}>
+                <span>{speedLabel}</span>
+                <span className="codicon codicon-chevron-right" style={ARROW_ICON_STYLE} />
+              </div>
+              {activeSubmenu === 'speed' && (
+                <CodexFastModeSelect
+                  value={codexFastMode}
+                  onChange={onCodexFastModeChange}
+                  embedded
+                  triggerRef={speedTriggerRef}
+                  onClose={closeMenu}
+                />
+              )}
             </div>
           )}
 
@@ -367,73 +426,6 @@ export const ModelConfigSelect = ({
               )}
             </div>
           )}
-
-          {showSpeed && onCodexFastModeChange && (
-            <div
-              ref={speedTriggerRef}
-              className={`selector-option${activeSubmenu === 'speed' ? ' selected' : ''}`}
-              data-testid="model-config-option-speed"
-              onMouseEnter={() => scheduleSubmenu('speed')}
-              onClick={(event) => {
-                event.stopPropagation();
-                openSubmenu('speed');
-              }}
-              style={OPTION_RELATIVE_STYLE}
-            >
-              <span style={OPTION_LABEL_STYLE}>{t('modelConfig.speed', { defaultValue: 'Speed' })}</span>
-              <div style={OPTION_VALUE_STYLE}>
-                <span>{speedLabel}</span>
-                <span className="codicon codicon-chevron-right" style={ARROW_ICON_STYLE} />
-              </div>
-              {activeSubmenu === 'speed' && (
-                <CodexFastModeSelect
-                  value={codexFastMode}
-                  onChange={onCodexFastModeChange}
-                  embedded
-                  triggerRef={speedTriggerRef}
-                  onClose={closeMenu}
-                />
-              )}
-            </div>
-          )}
-
-          {hasLeadingRows && <div className="selector-divider" />}
-
-          <div
-            ref={modelTriggerRef}
-            className={`selector-option${activeSubmenu === 'model' ? ' selected' : ''}`}
-            data-testid="model-config-option-model"
-            onMouseEnter={() => scheduleSubmenu('model')}
-            onClick={(event) => {
-              event.stopPropagation();
-              openSubmenu('model');
-            }}
-            style={OPTION_RELATIVE_STYLE}
-          >
-            <span style={OPTION_LABEL_STYLE}>{t('modelConfig.model', { defaultValue: 'Model' })}</span>
-            <div style={OPTION_VALUE_STYLE}>
-              <span className="model-config-option-value-text">{modelLabel}</span>
-              <span className="codicon codicon-chevron-right" style={ARROW_ICON_STYLE} />
-            </div>
-            {activeSubmenu === 'model' && (
-              <ModelSelect
-                value={selectedModel}
-                onChange={onModelSelect}
-                models={models}
-                currentProvider={currentProvider}
-                loading={loading}
-                error={error}
-                onRetry={onRetry}
-                onAddModel={onAddModel}
-                longContextEnabled={longContextEnabled}
-                onLongContextChange={onLongContextChange}
-                embedded
-                hideLongContextToggle
-                triggerRef={modelTriggerRef}
-                onClose={closeMenu}
-              />
-            )}
-          </div>
         </div>
       )}
     </div>

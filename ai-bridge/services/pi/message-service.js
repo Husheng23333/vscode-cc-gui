@@ -33,6 +33,7 @@ import {
   isNonEmptySessionId,
   safePromptArg,
 } from '../../utils/marker-protocol.js';
+import { reformatFileLineReferences } from '../../utils/file-line-references.js';
 
 const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
@@ -122,14 +123,17 @@ export async function sendMessage(
 ) {
   beginStream();
 
+  // pi/omp cannot parse `@path#L1` mentions; rewrite to `@path (lines N[-M])`.
+  const promptText = reformatFileLineReferences(message || '');
+
   const bin = resolvePiCliPath();
-  const args = buildPiArgs({ message, sessionId, model, reasoningEffort });
+  const args = buildPiArgs({ message: promptText, sessionId, model, reasoningEffort });
   if (isNonEmptySessionId(sessionId)) {
     emitSessionId(sessionId.trim());
   }
 
   logDebug('spawn', bin, args.slice(0, -1).join(' '),
-    `promptLen=${String(message || '').length}`);
+    `promptLen=${String(promptText || '').length}`);
 
   const env = { ...process.env };
   const home = process.env.HOME || process.env.USERPROFILE || homedir();

@@ -23,6 +23,7 @@ export function ChatInputBoxFooter({
   isEnhancing,
   selectedModel,
   permissionMode,
+  codexNativeAutoReviewAvailable = true,
   currentProvider,
   reasoningEffort,
   codexFastMode,
@@ -44,6 +45,7 @@ export function ChatInputBoxFooter({
   onAgentSelect,
   onOpenAgentSettings,
   onAddModel,
+  onOpenCliSettings,
   onClearAgent,
   longContextEnabled = true,
   onLongContextChange,
@@ -62,6 +64,7 @@ export function ChatInputBoxFooter({
   isEnhancing: boolean;
   selectedModel: string;
   permissionMode: PermissionMode;
+  codexNativeAutoReviewAvailable?: boolean;
   currentProvider: string;
   reasoningEffort: ReasoningEffort;
   codexFastMode?: CodexFastMode;
@@ -83,6 +86,7 @@ export function ChatInputBoxFooter({
   onAgentSelect?: (agent: SelectedAgent) => void;
   onOpenAgentSettings?: () => void;
   onAddModel?: () => void;
+  onOpenCliSettings?: () => void;
   onClearAgent: () => void;
   longContextEnabled?: boolean;
   onLongContextChange?: (enabled: boolean) => void;
@@ -113,6 +117,7 @@ export function ChatInputBoxFooter({
         isEnhancing={isEnhancing}
         selectedModel={selectedModel}
         permissionMode={permissionMode}
+        codexNativeAutoReviewAvailable={codexNativeAutoReviewAvailable}
         currentProvider={currentProvider}
         reasoningEffort={reasoningEffort}
         codexFastMode={codexFastMode}
@@ -134,6 +139,7 @@ export function ChatInputBoxFooter({
         onAgentSelect={(agent) => onAgentSelect?.(agent)}
         onOpenAgentSettings={onOpenAgentSettings}
         onAddModel={onAddModel}
+        onOpenCliSettings={onOpenCliSettings}
         onClearAgent={onClearAgent}
         longContextEnabled={longContextEnabled}
         onLongContextChange={onLongContextChange}

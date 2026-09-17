@@ -1,3 +1,5 @@
+// Isolate credentials before the runtime caches the user's home directory.
+import './testing/cli-login-home.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -72,6 +74,45 @@ test('setPermissionModePersistent applies the new mode to SDK and reactive state
   assert.equal(runtime.currentPermissionMode, 'acceptEdits');
   assert.equal(runtime.permissionModeState.value, 'acceptEdits');
 });
+
+test('setPermissionModePersistent applies native auto mode to SDK and reactive state', async () => {
+  let appliedMode = null;
+  const runtime = createFakeRuntime({
+    currentPermissionMode: 'default',
+    setPermissionMode: async (mode) => { appliedMode = mode; }
+  });
+  __testing.setActiveTurnRuntime(runtime);
+
+  await setPermissionModePersistent({
+    sessionId: 'sess-1',
+    runtimeSessionEpoch: 'epoch-1',
+    permissionMode: 'auto'
+  });
+
+  assert.equal(appliedMode, 'auto');
+  assert.equal(runtime.currentPermissionMode, 'auto');
+  assert.equal(runtime.permissionModeState.value, 'auto');
+});
+
+test('setPermissionModePersistent ignores a stale runtime epoch', async () => {
+  let calls = 0;
+  const runtime = createFakeRuntime({
+    currentPermissionMode: 'default',
+    setPermissionMode: async () => { calls += 1; },
+  });
+  __testing.setActiveTurnRuntime(runtime);
+
+  await setPermissionModePersistent({
+    sessionId: 'sess-1',
+    runtimeSessionEpoch: 'stale-epoch',
+    permissionMode: 'auto',
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(runtime.currentPermissionMode, 'default');
+  assert.equal(runtime.permissionModeState.value, 'default');
+});
+
 
 test('setPermissionModePersistent is a no-op when the mode is unchanged', async () => {
   let calls = 0;

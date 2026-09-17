@@ -1,5 +1,5 @@
 import type { ToolInput, ToolResultBlock } from '../types';
-import { getFileName, truncate } from './helpers';
+import { getFileName, truncate, truncatePathFromStart } from './helpers';
 import { extractFilePathFromCommand, isCommandToolName, unwrapShellCommand } from './toolCommandPath';
 import { normalizeToolInput } from './toolInputNormalization';
 import { normalizeToolName } from './toolConstants';
@@ -241,7 +241,7 @@ export const resolveToolTarget = (input: ToolInput, name?: string): ToolTargetIn
         const rawPath = paths[0];
         const { start, end } = parseLineSuffix(rawPath);
         const openPath = stripLineSuffix(rawPath);
-        const displayPath = relativizeDisplayPath(rawPath, workdir);
+        const displayPath = truncatePathFromStart(relativizeDisplayPath(rawPath, workdir));
         const fileName = getFileName(displayPath);
         const cleanFileName = getFileName(stripLineSuffix(displayPath));
         const isDirectory = detectDirectory(rawPath);
@@ -281,7 +281,7 @@ export const resolveToolTarget = (input: ToolInput, name?: string): ToolTargetIn
 
   const { start, end } = parseLineSuffix(rawPath);
   const openPath = stripLineSuffix(rawPath);
-  const displayPath = relativizeDisplayPath(rawPath, workdir);
+  const displayPath = truncatePathFromStart(relativizeDisplayPath(rawPath, workdir));
   const fileName = getFileName(displayPath);
   const cleanFileName = getFileName(stripLineSuffix(displayPath));
   const isDirectory = detectDirectory(rawPath);
@@ -306,10 +306,14 @@ export const getToolLineInfo = (
 ): { start?: number; end?: number } => {
   const offset = parseNumber(input.offset);
   const limit = parseNumber(input.limit);
+  // Read-tool offset is a 1-based starting line number (defaults to 1), so the
+  // range covers lines [offset, offset + limit - 1]. Clamp 0 to 1 — the schema
+  // still allows 0 and the tool treats it the same as 1.
   if (offset !== undefined && limit !== undefined) {
+    const startLine = Math.max(offset, 1);
     return {
-      start: offset + 1,
-      end: offset + limit,
+      start: startLine,
+      end: startLine + limit - 1,
     };
   }
 

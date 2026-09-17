@@ -28,6 +28,26 @@ import { collectUnresolvedToolUseIds } from './streamingCallbacks';
 
 const isTruthy = (v: unknown) => v === true || v === 'true';
 
+/** Build a bounded signature for a structural JSON value. */
+function getStructuralValueSignature(value: unknown): string {
+  let serialized: string;
+  try {
+    serialized = typeof value === 'string' ? value : JSON.stringify(value) ?? '';
+  } catch {
+    return '';
+  }
+  // Two independent hashes (Java-style + FNV-1a) make a collision-driven
+  // missed structural change practically impossible.
+  let hash = 0;
+  let fnv = 0x811c9dc5;
+  for (let i = 0; i < serialized.length; i += 1) {
+    const code = serialized.charCodeAt(i);
+    hash = ((hash << 5) - hash + code) | 0;
+    fnv = Math.imul(fnv ^ code, 0x01000193);
+  }
+  return `${serialized.length}:${hash}:${fnv}`;
+}
+
 /**
  * Build a lightweight string signature from non-text raw blocks so we can
  * cheaply detect structural changes (new tool_use/tool_result blocks) without
@@ -50,9 +70,9 @@ function getStructuralRawBlockSignature(
     if (type === 'text' || type === 'thinking') continue;
 
     if (type === 'tool_use') {
-      parts.push(`tu:${block.id ?? ''}:${block.name ?? ''}`);
+      parts.push(`tu:${block.id ?? ''}:${block.name ?? ''}:${getStructuralValueSignature(block.input)}`);
     } else if (type === 'tool_result') {
-      parts.push(`tr:${block.tool_use_id ?? ''}:${block.is_error === true ? '1' : '0'}`);
+      parts.push(`tr:${block.tool_use_id ?? ''}:${block.is_error === true ? '1' : '0'}:${getStructuralValueSignature(block.content)}`);
     } else if (type === 'attachment') {
       parts.push(`at:${block.fileName ?? ''}:${block.mediaType ?? ''}`);
     } else if (type === 'image') {
@@ -61,9 +81,9 @@ function getStructuralRawBlockSignature(
         : undefined;
       const mediaType = block.mediaType ?? source?.media_type ?? '';
       const src = block.src ?? source?.url ?? source?.data ?? '';
-      parts.push(`im:${src}:${mediaType}`);
+      parts.push(`im:${getStructuralValueSignature(src)}:${mediaType}`);
     } else {
-      parts.push(type);
+      parts.push(`${type}:${getStructuralValueSignature(block)}`);
     }
   }
 
@@ -150,6 +170,7 @@ export function registerMessageCallbacks(
     window.__pendingUpdateRaf = null;
     window.__pendingUpdateJson = null;
     window.__pendingUpdateSequence = null;
+    window.__streamingDeltaRenderDeferred = false;
   };
   window.__cancelPendingUpdateMessages = cancelPendingUpdateMessages;
 
@@ -400,11 +421,12 @@ export function registerMessageCallbacks(
       window.__lastStreamActivityAt = Date.now();
     }
 
-    // During streaming, coalesce rapid updateMessages calls into one-per-frame.
-    // The backend coalescer may push every 50ms; JSON.parse of large payloads
-    // (100KB+ for long conversations) blocks the main thread and causes dropped
-    // frames ("fake freeze"). Deferring to rAF ensures we only parse the latest
-    // payload and yield to the browser between frames.
+    // During streaming, buffer updateMessages calls and process only the latest
+    // one per short (~16ms) timer. Structural snapshots are sparse, but a single
+    // snapshot can still be large enough to block the browser while parsing.
+    // Deltas that arrive while a snapshot is pending mark
+    // __streamingDeltaRenderDeferred and resume via __flushDeferredStreamingRenders
+    // once the snapshot has been applied.
     if (isStreamingRef.current) {
       pendingUpdateJson = json;
       pendingUpdateSequence = sequence;
@@ -423,6 +445,7 @@ export function registerMessageCallbacks(
           if (latestJson) {
             processUpdateMessages(latestJson, latestSequence);
           }
+          window.__flushDeferredStreamingRenders?.();
         }, 16);
         pendingUpdateRaf = timerId as unknown as number;
         window.__pendingUpdateRaf = timerId as unknown as number;

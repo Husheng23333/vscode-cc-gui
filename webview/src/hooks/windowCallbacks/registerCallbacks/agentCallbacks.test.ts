@@ -49,7 +49,6 @@ function createOptions(
     suppressNextStatusToastRef: { current: false },
     streamingContentRef: { current: '' },
     streamingThinkingRef: { current: '' },
-    thinkingBlockBoundariesRef: { current: [] as number[] },
     isStreamingRef: { current: false },
     useBackendStreamingRenderRef: { current: false },
     autoExpandedThinkingKeysRef: { current: new Set() },

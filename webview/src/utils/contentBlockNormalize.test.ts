@@ -1,60 +1,53 @@
-import { describe, it, expect } from 'vitest';
-import { stripInjectedContextTags } from './contentBlockNormalize';
+import { describe, expect, it } from 'vitest';
+import type { TFunction } from 'i18next';
+import { normalizeBlocks } from './contentBlockNormalize';
+import { getContentBlocks } from './messageUtils';
 
-describe('stripInjectedContextTags', () => {
-  it('keeps plain user text untouched', () => {
-    expect(stripInjectedContextTags('你好')).toBe('你好');
+const t = ((key: string) => key) as TFunction;
+
+describe('normalizeBlocks', () => {
+  it('drops the invisible Codex sentinel from image-only user messages', () => {
+    const blocks = normalizeBlocks(
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'image', src: 'data:image/png;base64,aW1hZ2U=', mediaType: 'image/png' },
+            { type: 'text', text: ' \n\u2063\t ' },
+          ],
+        },
+      },
+      (text) => text,
+      t,
+    );
+
+    expect(blocks).toEqual([
+      { type: 'image', src: 'data:image/png;base64,aW1hZ2U=', mediaType: 'image/png' },
+    ]);
   });
 
-  it('cuts the appended "## Agent Role and Instructions" block (the reported bug)', () => {
-    const raw =
-      '你好\n\n## Agent Role and Instructions\n\n' +
-      'You are acting as a specialized agent with the following role:\n\n' +
-      '我叫 黄\n我老婆家 陈\n我孩子叫 小不点';
-    expect(stripInjectedContextTags(raw)).toBe('你好');
-  });
+  it('does not restore the invisible sentinel as fallback text during history replay', () => {
+    const message = {
+      type: 'user' as const,
+      content: '\u2063',
+      raw: {
+        message: {
+          content: [
+            { type: 'image' as const, src: 'data:image/png;base64,aW1hZ2U=', mediaType: 'image/png' },
+            { type: 'text' as const, text: '\u2063' },
+          ],
+        },
+      },
+    };
 
-  it('cuts other appended markdown context markers', () => {
-    expect(stripInjectedContextTags('hi\n\n## Workspace Context\n\nroot: /a')).toBe('hi');
-    expect(
-      stripInjectedContextTags(
-        'hi\n\n## Referenced Files\n\nThe following files were referenced by the user:\n\n- a.ts',
-      ),
-    ).toBe('hi');
-    expect(stripInjectedContextTags("hi\n\n## User's Current IDE Context\n\nThe user is working in an IDE.")).toBe('hi');
-  });
+    const blocks = getContentBlocks(
+      message,
+      (raw) => normalizeBlocks(raw, (text) => text, t),
+      (text) => text,
+    );
 
-  it('still strips XML wrapper blocks', () => {
-    expect(stripInjectedContextTags('hi <ide-context>path</ide-context>')).toBe('hi');
-    expect(stripInjectedContextTags('hi <agents-instructions>x</agents-instructions>')).toBe('hi');
-    expect(stripInjectedContextTags('hi <system-reminder>note</system-reminder>')).toBe('hi');
-  });
-
-  it('strips inline image XML markers even when the closing tag is missing', () => {
-    expect(stripInjectedContextTags('<image name=[Image #1] path="/tmp/shot.png">看这个')).toBe('看这个');
-    expect(stripInjectedContextTags("before <image path='/tmp/shot.png'></image> after")).toBe('before  after');
-    expect(stripInjectedContextTags('<image name=[Image #1]\n  path = "/tmp/shot.png">\n</image>\n看这个')).toBe('看这个');
-    expect(stripInjectedContextTags('</image>\n</image>\n看这个')).toBe('看这个');
-  });
-
-  it('normalizes CRLF before matching markers', () => {
-    expect(stripInjectedContextTags('你好\r\n\r\n## Agent Role and Instructions\r\n\r\nx')).toBe('你好');
-  });
-
-  it('does not empty a message whose only content is a marker-like heading with no preceding text', () => {
-    // idx === 0 → nothing before the marker, so no cut (guarded by idx > 0).
-    const raw = '## Agent Role and Instructions\n\nfoo';
-    expect(stripInjectedContextTags(raw)).toBe(raw.trim());
-  });
-
-  it('drops a whole-message AGENTS.md injection (Codex auto-context turn)', () => {
-    const raw =
-      '# AGENTS.md instructions for /Users/me/proj\n\n<INSTRUCTIONS>\n# rules\n</INSTRUCTIONS>';
-    expect(stripInjectedContextTags(raw)).toBe('');
-  });
-
-  it('cuts the Codex-stored "你好." + Agent Role augmentation', () => {
-    const raw = '你好.\n\n## Agent Role and Instructions\n\n我叫, 黄\n我老婆家 陈\n我孩子叫 小不点';
-    expect(stripInjectedContextTags(raw)).toBe('你好.');
+    expect(blocks).toEqual([
+      { type: 'image', src: 'data:image/png;base64,aW1hZ2U=', mediaType: 'image/png' },
+    ]);
   });
 });

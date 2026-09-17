@@ -1,6 +1,10 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ModelConfigSelect, SUBMENU_HOVER_DELAY_MS } from './ModelConfigSelect';
+import {
+  ModelConfigSelect,
+  SUBMENU_HOVER_DELAY_MS,
+  SUBMENU_TRIGGER_DELAY_MS,
+} from './ModelConfigSelect';
 
 vi.mock('antd/es/switch', () => ({
   default: ({
@@ -40,10 +44,6 @@ const codexModels = [
 ];
 
 describe('ModelConfigSelect', () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
   it('collapses model and effort into one summary trigger', () => {
     render(
       <ModelConfigSelect
@@ -65,7 +65,7 @@ describe('ModelConfigSelect', () => {
     expect(screen.queryByTestId('model-config-dropdown')).toBeNull();
   });
 
-  it('opens a nested menu with context, effort, and model rows', () => {
+  it('shows the model list flat with the function rows below it', () => {
     render(
       <ModelConfigSelect
         selectedModel="claude-sonnet-5"
@@ -81,14 +81,46 @@ describe('ModelConfigSelect', () => {
 
     fireEvent.click(screen.getByTestId('model-config-trigger'));
 
-    expect(screen.getByTestId('model-config-option-context')).toBeTruthy();
-    expect(screen.getByTestId('model-config-option-context').textContent).toContain('1M Context');
+    // Model list is inline, not behind a fly-out row.
+    expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
+    expect(screen.getByTestId('model-option-claude-sonnet-5')).toBeTruthy();
+    // All function rows sit below the model list, next to the trigger.
+    const modelList = screen.getByTestId('model-selector-dropdown');
+    for (const rowTestId of ['model-config-option-context', 'model-config-option-effort']) {
+      expect(
+        modelList.compareDocumentPosition(screen.getByTestId(rowTestId))
+          & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+    // Effort is a row that opens a fly-out.
     expect(screen.getByTestId('model-config-option-effort')).toBeTruthy();
-    expect(screen.getByTestId('model-config-option-model')).toBeTruthy();
+    expect(screen.getByTestId('model-config-option-effort').textContent).toContain('High');
+    expect(screen.queryByTestId('reasoning-selector-dropdown')).toBeNull();
+    expect(screen.getByTestId('model-config-option-context')).toBeTruthy();
     expect(screen.queryByTestId('model-config-option-speed')).toBeNull();
   });
 
-  it('opens the effort submenu and selects a new level', () => {
+  it('selects a model from the inline list without closing the popover', () => {
+    const onModelSelect = vi.fn();
+    render(
+      <ModelConfigSelect
+        selectedModel="claude-sonnet-5"
+        onModelSelect={onModelSelect}
+        models={claudeModels}
+        currentProvider="claude"
+        reasoningEffort="high"
+        onReasoningChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('model-config-trigger'));
+    fireEvent.click(screen.getByTestId('model-option-claude-haiku-4-5'));
+
+    expect(onModelSelect).toHaveBeenCalledWith('claude-haiku-4-5');
+    expect(screen.getByTestId('model-config-dropdown')).toBeTruthy();
+  });
+
+  it('opens the effort fly-out and selects a new level, closing the menu', () => {
     const onReasoningChange = vi.fn();
     render(
       <ModelConfigSelect
@@ -113,29 +145,7 @@ describe('ModelConfigSelect', () => {
     expect(screen.queryByTestId('model-config-dropdown')).toBeNull();
   });
 
-  it('opens the model submenu and selects a model', () => {
-    const onModelSelect = vi.fn();
-    render(
-      <ModelConfigSelect
-        selectedModel="claude-sonnet-5"
-        onModelSelect={onModelSelect}
-        models={claudeModels}
-        currentProvider="claude"
-        reasoningEffort="high"
-        onReasoningChange={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByTestId('model-config-trigger'));
-    fireEvent.mouseEnter(screen.getByTestId('model-config-option-model'));
-
-    expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('model-option-claude-haiku-4-5'));
-
-    expect(onModelSelect).toHaveBeenCalledWith('claude-haiku-4-5');
-  });
-
-  it('hides effort for Claude models without adaptive thinking', () => {
+  it('hides the effort row for Claude models without adaptive thinking', () => {
     render(
       <ModelConfigSelect
         selectedModel="claude-haiku-4-5"
@@ -151,7 +161,7 @@ describe('ModelConfigSelect', () => {
 
     fireEvent.click(screen.getByTestId('model-config-trigger'));
     expect(screen.queryByTestId('model-config-option-effort')).toBeNull();
-    expect(screen.getByTestId('model-config-option-model')).toBeTruthy();
+    expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
   });
 
   it('shows Codex speed as a nested row instead of a toolbar dropdown', () => {
@@ -173,14 +183,22 @@ describe('ModelConfigSelect', () => {
     expect(trigger.textContent).toContain('GPT-5.6 Sol');
     expect(trigger.textContent).not.toContain('Standard');
 
-    fireEvent.click(trigger);
-    fireEvent.mouseEnter(screen.getByTestId('model-config-option-speed'));
-    fireEvent.click(screen.getByText('Fast'));
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(trigger);
+      fireEvent.mouseEnter(screen.getByTestId('model-config-option-speed'));
+      act(() => {
+        vi.advanceTimersByTime(SUBMENU_TRIGGER_DELAY_MS);
+      });
+      fireEvent.click(screen.getByText('Fast'));
 
-    expect(onCodexFastModeChange).toHaveBeenCalledWith('fast');
+      expect(onCodexFastModeChange).toHaveBeenCalledWith('fast');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('toggles Claude 1M context from the nested menu', () => {
+  it('toggles Claude 1M context from the trailing rows', () => {
     const onLongContextChange = vi.fn();
     render(
       <ModelConfigSelect
@@ -210,7 +228,7 @@ describe('ModelConfigSelect', () => {
       vi.useRealTimers();
     });
 
-    it('does not steal the model submenu while the pointer crosses the effort row', () => {
+    it('does not steal the effort submenu while the pointer crosses the context row', () => {
       render(
         <ModelConfigSelect
           selectedModel="claude-sonnet-5"
@@ -225,27 +243,56 @@ describe('ModelConfigSelect', () => {
       );
 
       fireEvent.click(screen.getByTestId('model-config-trigger'));
-      fireEvent.mouseEnter(screen.getByTestId('model-config-option-model'));
-      expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
-
       fireEvent.mouseEnter(screen.getByTestId('model-config-option-effort'));
-      expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
-      expect(screen.queryByTestId('reasoning-selector-dropdown')).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(SUBMENU_TRIGGER_DELAY_MS);
+      });
+      expect(screen.getByTestId('reasoning-selector-dropdown')).toBeTruthy();
 
+      // Crossing the context row arms a delayed dismiss of the fly-out.
+      fireEvent.mouseEnter(screen.getByTestId('model-config-option-context'));
       act(() => {
         vi.advanceTimersByTime(SUBMENU_HOVER_DELAY_MS - 1);
       });
-      expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
-      expect(screen.queryByTestId('reasoning-selector-dropdown')).toBeNull();
+      expect(screen.getByTestId('reasoning-selector-dropdown')).toBeTruthy();
 
       // Arriving in the fly-out (which stops mouseenter bubbling) still
-      // cancels the pending effort switch.
-      fireEvent.mouseOver(screen.getByTestId('model-selector-dropdown'));
+      // cancels the pending dismiss.
+      fireEvent.mouseOver(screen.getByTestId('reasoning-selector-dropdown'));
       act(() => {
         vi.advanceTimersByTime(SUBMENU_HOVER_DELAY_MS);
       });
-      expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
+      expect(screen.getByTestId('reasoning-selector-dropdown')).toBeTruthy();
+    });
+
+    it('dismisses the effort fly-out when the pointer moves onto the flat model list', () => {
+      render(
+        <ModelConfigSelect
+          selectedModel="claude-sonnet-5"
+          onModelSelect={vi.fn()}
+          models={claudeModels}
+          currentProvider="claude"
+          reasoningEffort="high"
+          onReasoningChange={vi.fn()}
+          longContextEnabled
+          onLongContextChange={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('model-config-trigger'));
+      fireEvent.mouseEnter(screen.getByTestId('model-config-option-effort'));
+      act(() => {
+        vi.advanceTimersByTime(SUBMENU_TRIGGER_DELAY_MS);
+      });
+      expect(screen.getByTestId('reasoning-selector-dropdown')).toBeTruthy();
+
+      fireEvent.mouseEnter(document.querySelector('.model-config-models') as HTMLElement);
+      act(() => {
+        vi.advanceTimersByTime(SUBMENU_HOVER_DELAY_MS);
+      });
       expect(screen.queryByTestId('reasoning-selector-dropdown')).toBeNull();
+      // The main popover stays open; only the fly-out is dismissed.
+      expect(screen.getByTestId('model-config-dropdown')).toBeTruthy();
     });
 
     it('opens the effort submenu after the pointer rests on it, or immediately on click', () => {
@@ -263,17 +310,59 @@ describe('ModelConfigSelect', () => {
       );
 
       fireEvent.click(screen.getByTestId('model-config-trigger'));
-      fireEvent.mouseEnter(screen.getByTestId('model-config-option-model'));
       fireEvent.mouseEnter(screen.getByTestId('model-config-option-effort'));
+      act(() => {
+        vi.advanceTimersByTime(SUBMENU_TRIGGER_DELAY_MS);
+      });
+      expect(screen.getByTestId('reasoning-selector-dropdown')).toBeTruthy();
 
+      // Resting on the context row dismisses the fly-out after the switch delay.
+      fireEvent.mouseEnter(screen.getByTestId('model-config-option-context'));
       act(() => {
         vi.advanceTimersByTime(SUBMENU_HOVER_DELAY_MS);
       });
-      expect(screen.getByTestId('reasoning-selector-dropdown')).toBeTruthy();
-      expect(screen.queryByTestId('model-selector-dropdown')).toBeNull();
+      expect(screen.queryByTestId('reasoning-selector-dropdown')).toBeNull();
 
-      fireEvent.click(screen.getByTestId('model-config-option-model'));
-      expect(screen.getByTestId('model-selector-dropdown')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('model-config-option-effort'));
+      expect(screen.getByTestId('reasoning-selector-dropdown')).toBeTruthy();
+    });
+
+    it('delays the first fly-out so a passing pointer does not trigger it', () => {
+      render(
+        <ModelConfigSelect
+          selectedModel="claude-sonnet-5"
+          onModelSelect={vi.fn()}
+          models={claudeModels}
+          currentProvider="claude"
+          reasoningEffort="high"
+          onReasoningChange={vi.fn()}
+          longContextEnabled
+          onLongContextChange={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('model-config-trigger'));
+      fireEvent.mouseEnter(screen.getByTestId('model-config-option-effort'));
+
+      // Passing by: no fly-out yet.
+      act(() => {
+        vi.advanceTimersByTime(SUBMENU_TRIGGER_DELAY_MS - 1);
+      });
+      expect(screen.queryByTestId('reasoning-selector-dropdown')).toBeNull();
+
+      // Leaving the row before the delay cancels the pending open.
+      fireEvent.mouseEnter(document.querySelector('.model-config-models') as HTMLElement);
+      act(() => {
+        vi.advanceTimersByTime(SUBMENU_TRIGGER_DELAY_MS);
+      });
+      expect(screen.queryByTestId('reasoning-selector-dropdown')).toBeNull();
+
+      // Resting on the row for the full delay opens the fly-out.
+      fireEvent.mouseEnter(screen.getByTestId('model-config-option-effort'));
+      act(() => {
+        vi.advanceTimersByTime(SUBMENU_TRIGGER_DELAY_MS);
+      });
+      expect(screen.getByTestId('reasoning-selector-dropdown')).toBeTruthy();
     });
   });
 });
