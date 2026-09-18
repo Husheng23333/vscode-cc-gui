@@ -372,11 +372,6 @@ export const CLAUDE_MODELS: ModelInfo[] = [
     description: 'Fable 5.1 · Most powerful · Mythos-class',
   },
   {
-    id: 'claude-fable-5',
-    label: 'Fable 5',
-    description: 'Fable 5 · Previous Fable generation',
-  },
-  {
     id: 'claude-opus-5',
     label: 'Opus 5',
     description: 'Opus 5 · Latest Opus upgrade',
