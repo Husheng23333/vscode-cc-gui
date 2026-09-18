@@ -335,14 +335,60 @@ export class ProviderHandler implements BridgeHandler {
         encoding: 'utf8',
         timeout: 10000,
       });
-      const parsed = parseJson<{ success?: boolean; providers?: unknown[]; error?: string }>(output, {});
+      const parsed = parseJson<{ success?: boolean; providers?: unknown[]; commonConfig?: string | null; error?: string }>(output, {});
       if (!parsed.success) {
         throw new Error(parsed.error || 'cc-switch database import failed');
       }
 
-      postJson(webview, 'import_preview_result', { providers: Array.isArray(parsed.providers) ? parsed.providers : [] });
+      const providers = Array.isArray(parsed.providers) ? parsed.providers : [];
+      for (const provider of providers) {
+        this.mergeCcSwitchCommonConfig(provider, parsed.commonConfig);
+      }
+
+      postJson(webview, 'import_preview_result', { providers });
     } catch (error: any) {
       this.postBackendNotification(webview, 'error', 'Import failed', this.errorMessage(error));
+    }
+  }
+
+  /**
+   * Merges the cc-switch common config (通用配置, JSON in common_config_claude)
+   * beneath one parsed provider's settingsConfig — provider values win on conflict.
+   * A failure to parse or merge only degrades to the un-merged provider.
+   */
+  private mergeCcSwitchCommonConfig(provider: unknown, commonConfig: string | null | undefined): void {
+    if (!commonConfig || !commonConfig.trim() || !provider || typeof provider !== 'object') {
+      return;
+    }
+    try {
+      const common = JSON.parse(commonConfig) as Record<string, unknown>;
+      const record = provider as Record<string, unknown>;
+      const settingsConfig = record.settingsConfig && typeof record.settingsConfig === 'object' && !Array.isArray(record.settingsConfig)
+        ? record.settingsConfig as Record<string, unknown>
+        : {};
+      this.overlayJsonValues(settingsConfig, common);
+      record.settingsConfig = settingsConfig;
+    } catch (error: any) {
+      this.context.log.appendLine(`[ProviderHandler] Failed to merge cc-switch common config, importing without it: ${error?.message || error}`);
+    }
+  }
+
+  /**
+   * Recursively overlays `base` beneath `override`: keys missing from `override`
+   * are copied from `base`, nested objects are merged, conflicts keep `override`.
+   * `override` is modified in place.
+   */
+  private overlayJsonValues(override: Record<string, unknown>, base: Record<string, unknown>): void {
+    for (const [key, baseValue] of Object.entries(base)) {
+      const overrideValue = override[key];
+      if (!(key in override)) {
+        override[key] = baseValue;
+      } else if (
+        overrideValue && typeof overrideValue === 'object' && !Array.isArray(overrideValue) &&
+        baseValue && typeof baseValue === 'object' && !Array.isArray(baseValue)
+      ) {
+        this.overlayJsonValues(overrideValue as Record<string, unknown>, baseValue as Record<string, unknown>);
+      }
     }
   }
 
