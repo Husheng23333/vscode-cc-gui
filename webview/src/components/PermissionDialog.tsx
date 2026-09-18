@@ -6,6 +6,7 @@ import { DEFAULT_PERMISSION_DIALOG_TIMEOUT_SECONDS } from '../utils/permissionDi
 import MarkdownBlock from './MarkdownBlock';
 import { useDialogResize } from '../hooks/useDialogResize';
 import { isEditableEventTarget } from '../utils/isEditableEventTarget';
+import { clearDialogDraft, readDialogDraft, writeDialogDraft } from '../utils/dialogStateStorage';
 
 export interface PermissionRequest {
   channelId: string;
@@ -14,6 +15,8 @@ export interface PermissionRequest {
   /** Working directory from the bridge (top-level field, not only inside inputs). */
   cwd?: string;
   suggestions?: any;
+  deadlineMs?: number;
+  dialogToken?: string;
 }
 
 interface PermissionDialogProps {
@@ -23,6 +26,12 @@ interface PermissionDialogProps {
   onSkip: (channelId: string) => void;
   onApproveAlways: (channelId: string) => void;
   timeoutSeconds?: number;
+}
+interface PermissionDialogDraft {
+  deadlineMs?: number;
+  dialogToken?: string;
+  showCommand?: boolean;
+  selectedIndex?: number;
 }
 
 /**
@@ -76,44 +85,73 @@ const PermissionDialog = ({
 }: PermissionDialogProps) => {
   const [showCommand, setShowCommand] = useState(true);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [hydratedRequestKey, setHydratedRequestKey] = useState<string | null>(null);
   const { t } = useTranslation();
   const { dialogRef, dialogHeight, setDialogHeight, handleResizeStart } = useDialogResize({ minHeight: 150 });
 
   const handleTimeout = useCallback(() => {
     if (request) {
+      clearDialogDraft('permission', request.channelId, request.dialogToken);
       onSkip(request.channelId);
     }
   }, [request, onSkip]);
 
   const { remainingSeconds, isTimeWarning, markSubmitted } = useDialogCountdownTimeout({
     isOpen,
-    requestKey: request?.channelId,
+    requestKey: request?.dialogToken ?? request?.channelId,
     timeoutSeconds,
+    deadlineMs: request?.deadlineMs,
     onTimeout: handleTimeout,
   });
 
   const handleApprove = useCallback(() => {
     if (!request || !markSubmitted()) return;
+    clearDialogDraft('permission', request.channelId, request.dialogToken);
     onApprove(request.channelId);
   }, [request, markSubmitted, onApprove]);
 
   const handleApproveAlways = useCallback(() => {
     if (!request || !markSubmitted()) return;
+    clearDialogDraft('permission', request.channelId, request.dialogToken);
     onApproveAlways(request.channelId);
   }, [request, markSubmitted, onApproveAlways]);
 
   const handleSkip = useCallback(() => {
     if (!request || !markSubmitted()) return;
+    clearDialogDraft('permission', request.channelId, request.dialogToken);
     onSkip(request.channelId);
   }, [request, markSubmitted, onSkip]);
 
   useEffect(() => {
-    if (isOpen && request) {
-      setShowCommand(true);
-      setSelectedIndex(0);
-      setDialogHeight(null);
+    if (!isOpen || !request) {
+      setHydratedRequestKey(null);
+      return;
     }
-  }, [isOpen, request?.channelId, setDialogHeight]);
+    const draft = readDialogDraft<PermissionDialogDraft>('permission', request.channelId, request.deadlineMs, request.dialogToken);
+    const restoredIndex = draft?.selectedIndex;
+    setShowCommand(draft?.showCommand !== false);
+    setSelectedIndex(
+      typeof restoredIndex === 'number' && Number.isInteger(restoredIndex)
+        ? Math.max(0, Math.min(2, restoredIndex))
+        : 0,
+    );
+    setDialogHeight(null);
+    setHydratedRequestKey(request.dialogToken ?? request.channelId);
+  }, [isOpen, request?.channelId, request?.dialogToken, request?.deadlineMs, setDialogHeight]);
+
+  useEffect(() => {
+    const channelId = request?.channelId;
+    const deadlineMs = request?.deadlineMs;
+    if (!isOpen || channelId === undefined || hydratedRequestKey !== (request?.dialogToken ?? channelId)) {
+      return;
+    }
+    writeDialogDraft('permission', channelId, {
+      deadlineMs,
+      dialogToken: request?.dialogToken,
+      showCommand,
+      selectedIndex,
+    });
+  }, [hydratedRequestKey, isOpen, request?.channelId, request?.dialogToken, request?.deadlineMs, selectedIndex, showCommand]);
 
   useEffect(() => {
     if (!isOpen || !request) {

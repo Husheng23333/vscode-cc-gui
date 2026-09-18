@@ -21,8 +21,8 @@ import {
   extractPatchFromResponseItemPayload,
   parseApplyPatchToOperations,
 } from './codex-patch-parser.js';
-import { emitFileChangeItemAsTools } from './codex-file-change-emit.js';
 import { extractUpdatePlanFromResponseItemPayload } from './codex-plan-parser.js';
+import { emitFileChangeItemAsTools } from './codex-file-change-emit.js';
 import {
   truncateForDisplay, getStableItemId, extractCommand,
   smartToolName, smartDescription, mapCommandToolNameToPermissionToolName,
@@ -309,6 +309,7 @@ export function createInitialEventState(emitMessage) {
     processedSessionFunctionOutputIds: new Set(),
     processedSessionCustomToolCallIds: new Set(),
     processedSessionCustomToolOutputIds: new Set(),
+
     emittedFileChangeToolIds: new Set(),
     reasoningTextCache: new Map(),
     assistantTextCache: new Map(),
@@ -659,8 +660,23 @@ function emitDeniedCommandToolResultOnce(state, toolUseId, messageText = 'Comman
   state.emittedDeniedCommandToolResultIds.add(toolUseId);
 }
 
+/**
+ * Whether the event stream still needs the plugin's Java approval bridge.
+ * Codex native review resolves approval before item.started is emitted.
+ * @param {object} config
+ * @returns {boolean}
+ */
+export function shouldBridgeCodexApproval(config) {
+  const approvalPolicy = config?.threadOptions?.approvalPolicy;
+  return config?.normalizedPermissionMode !== 'auto'
+    && typeof approvalPolicy === 'string'
+    && approvalPolicy !== 'never';
+}
+
 async function maybeRequestCommandApprovalViaBridge(state, config, { toolUseId, command, smartTool, description }) {
-  const shouldBridgeApproval = config.threadOptions.approvalPolicy && config.threadOptions.approvalPolicy !== 'never';
+  // `item.started` is emitted after Codex has resolved the command approval and
+  // started the process. Native auto review must therefore not ask Java again.
+  const shouldBridgeApproval = shouldBridgeCodexApproval(config);
   if (!shouldBridgeApproval) return true;
   const permissionToolName = mapCommandToolNameToPermissionToolName(smartTool);
   const requestInput = { command, description, source: 'codex_command_execution' };
@@ -897,7 +913,7 @@ async function handleFileChange(item, state, config) {
 
     const shouldBridgeApproval = !isError &&
       !isAutoEditPermissionMode(config.normalizedPermissionMode) &&
-      (config.threadOptions.approvalPolicy && config.threadOptions.approvalPolicy !== 'never');
+      shouldBridgeCodexApproval(config);
     if (shouldBridgeApproval && patchBatches.length > 0) {
       deniedCallIds = await requestPatchApprovalsViaBridge(patchBatches);
       if (deniedCallIds.size > 0) {
@@ -987,6 +1003,7 @@ export async function processCodexEventStream(events, state, config) {
         state.processedSessionFunctionOutputIds.clear();
         state.processedSessionCustomToolCallIds.clear();
         state.processedSessionCustomToolOutputIds.clear();
+
         console.log('[THREAD_ID]', state.currentThreadId);
         break;
       }
@@ -1074,6 +1091,7 @@ export async function processCodexEventStream(events, state, config) {
         if (replayed.toolUses > 0 || replayed.toolResults > 0) {
           console.log('[DEBUG] Replayed session function calls:', JSON.stringify(replayed));
         }
+        flushPendingCustomPlanCalls(state);
         // Final pass: synthesize any apply_patch ops still only in the session log
         // (covers non-streaming exec turns where file_change never fired).
         try {

@@ -3,10 +3,35 @@ import assert from 'node:assert/strict';
 
 import {
   mapModelIdToSdkName,
+  normalizeRetiredModelId,
   resolveModelFromSettings,
   setModelEnvironmentVariables,
   modelSupportsVision,
 } from './model-utils.js';
+
+// --- normalizeRetiredModelId --------------------------------------------
+
+test('normalizeRetiredModelId maps retired Claude ids to their live replacement', () => {
+  // Retired defaults must self-heal on read (#1678, #1693).
+  assert.equal(normalizeRetiredModelId('claude-sonnet-4-6'), 'claude-sonnet-5');
+  assert.equal(normalizeRetiredModelId('claude-sonnet-4-7'), 'claude-sonnet-5');
+  assert.equal(normalizeRetiredModelId('claude-opus-4-6'), 'claude-opus-4-8');
+});
+
+test('normalizeRetiredModelId preserves the [1m] suffix while migrating', () => {
+  assert.equal(normalizeRetiredModelId('claude-sonnet-4-6[1m]'), 'claude-sonnet-5[1m]');
+  assert.equal(normalizeRetiredModelId('claude-opus-4-6[1m]'), 'claude-opus-4-8[1m]');
+});
+
+test('normalizeRetiredModelId passes through live and non-Claude ids unchanged', () => {
+  assert.equal(normalizeRetiredModelId('claude-sonnet-5'), 'claude-sonnet-5');
+  assert.equal(normalizeRetiredModelId('claude-opus-4-8[1m]'), 'claude-opus-4-8[1m]');
+  assert.equal(normalizeRetiredModelId('gpt-5.5'), 'gpt-5.5');
+  assert.equal(normalizeRetiredModelId('  claude-sonnet-4-6  '), 'claude-sonnet-5');
+  assert.equal(normalizeRetiredModelId(''), '');
+  assert.equal(normalizeRetiredModelId(null), null);
+  assert.equal(normalizeRetiredModelId(undefined), undefined);
+});
 
 // --- mapModelIdToSdkName ------------------------------------------------
 

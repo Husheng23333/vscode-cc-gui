@@ -1,6 +1,6 @@
-import { useState, useCallback, memo } from 'react';
+import { useState, useCallback, memo, useMemo } from 'react';
 import type { TFunction } from 'i18next';
-import type { ClaudeContentBlock, ToolResultBlock, CompactSummaryMetadata } from '../../types';
+import type { ClaudeContentBlock, ToolResultBlock, CompactSummaryMetadata, ToolInput } from '../../types';
 
 import MarkdownBlock from '../MarkdownBlock';
 import CollapsibleTextBlock from '../CollapsibleTextBlock';
@@ -8,10 +8,12 @@ import {
   BashToolBlock,
   EditToolBlock,
   GenericToolBlock,
+  ReportFindingsToolBlock,
   TaskExecutionBlock,
+  parseReportFindingsInput,
 } from '../toolBlocks';
 import type { EditToolItem } from '../toolBlocks/EditToolBlock';
-import { EDIT_TOOL_NAMES, BASH_TOOL_NAMES, TASK_MANAGE_TOOL_NAMES, AGENT_TOOL_NAMES, isToolName, isTransientInternalToolName, normalizeToolName } from '../../utils/toolConstants';
+import { EDIT_TOOL_NAMES, BASH_TOOL_NAMES, TASK_MANAGE_TOOL_NAMES, AGENT_TOOL_NAMES, REPORT_FINDINGS_TOOL_NAMES, isToolName, isTransientInternalToolName, normalizeToolName } from '../../utils/toolConstants';
 import { TASK_STATUS_COLORS } from '../../utils/messageUtils';
 
 const IMAGE_BLOCK_STYLE: React.CSSProperties = { cursor: 'pointer' };
@@ -31,6 +33,31 @@ const SingleEditToolBlock = memo(function SingleEditToolBlock({
   toolId,
 }: EditToolItem) {
   return <EditToolBlock items={[{ name, input, result, toolId }]} />;
+});
+
+/**
+ * Stable adapter for ReportFindings calls. Parsing the structured input once per
+ * input snapshot keeps the findings array identity stable across streaming
+ * re-renders (a fresh array every render would defeat ReportFindingsToolBlock's
+ * memo); malformed payloads fall back to the generic card, which shows the raw
+ * input exactly as before.
+ */
+const ReportFindingsOrGenericBlock = memo(function ReportFindingsOrGenericBlock({
+  name,
+  input,
+  result,
+  toolId,
+}: {
+  name?: string;
+  input?: ToolInput;
+  result?: ToolResultBlock | null;
+  toolId?: string;
+}) {
+  const report = useMemo(() => parseReportFindingsInput(input), [input]);
+  if (!report) {
+    return <GenericToolBlock name={name} input={input} result={result} toolId={toolId} />;
+  }
+  return <ReportFindingsToolBlock data={report} result={result} toolId={toolId} />;
 });
 
 function getImageStyle(isUser: boolean): React.CSSProperties {
@@ -326,6 +353,17 @@ export function ContentBlockRenderer({
 
     if (!isStreaming && isTransientInternalToolName(block.name)) {
       return null;
+    }
+
+    if (REPORT_FINDINGS_TOOL_NAMES.has(toolName)) {
+      return (
+        <ReportFindingsOrGenericBlock
+          name={block.name}
+          input={block.input}
+          result={findToolResult(block.id, messageIndex)}
+          toolId={block.id}
+        />
+      );
     }
 
     if (AGENT_TOOL_NAMES.has(toolName)) {

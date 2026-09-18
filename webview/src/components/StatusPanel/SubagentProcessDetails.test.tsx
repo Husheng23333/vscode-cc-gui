@@ -39,7 +39,6 @@ describe('SubagentProcessDetails', () => {
     const { container } = render(<SubagentProcessDetails history={history} canLoad />);
     expect(container.querySelector('.subagent-prompt-card')).toBeNull();
   });
-
   it('shows history errors only for terminal error status', () => {
     const { container, rerender } = render(
       <SubagentProcessDetails
@@ -69,5 +68,16 @@ describe('SubagentProcessDetails', () => {
     );
 
     expect(container.querySelector('.subagent-error')?.textContent).toBe('Subagent log not found');
+  });
+
+  it('keeps legacy provider-less error payloads visible', () => {
+    const { container } = render(
+      <SubagentProcessDetails
+        history={{ success: false, error: 'Subagent session not found' }}
+        canLoad
+      />,
+    );
+
+    expect(container.querySelector('.subagent-error')?.textContent).toBe('Subagent session not found');
   });
 });

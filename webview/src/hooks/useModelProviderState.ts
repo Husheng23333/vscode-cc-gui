@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { sendBridgeEvent } from '../utils/bridge';
 import {
@@ -14,10 +14,12 @@ import { useClaudeProvider } from './providers/useClaudeProvider';
 import { useCodexProvider } from './providers/useCodexProvider';
 import { useGrokProvider } from './providers/useGrokProvider';
 import { useKimiProvider } from './providers/useKimiProvider';
+import { useMiniMaxProvider } from './providers/useMiniMaxProvider';
 import { useOpenCodeProvider } from './providers/useOpenCodeProvider';
 import { usePiProvider } from './providers/usePiProvider';
 import { useOmpProvider } from './providers/useOmpProvider';
 import { useDshProvider } from './providers/useDshProvider';
+import { useZcodeProvider } from './providers/useZcodeProvider';
 import { isCliOnlyProvider, normalizeCliPermissionMode, ompModeForModelId } from './providers/cliProviders';
 import { useOmpRoles } from './providers/useCliModels';
 import { useUsageTracking } from './providers/useUsageTracking';
@@ -45,6 +47,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   const codex = useCodexProvider();
   const grok = useGrokProvider();
   const kimi = useKimiProvider();
+  const miniMax = useMiniMaxProvider();
   const openCode = useOpenCodeProvider();
   const pi = usePiProvider();
   const omp = useOmpProvider();
@@ -52,6 +55,7 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
   // loaded) — drive mode⇔model unification for omp.
   const ompRoles = useOmpRoles();
   const dsh = useDshProvider();
+  const zcode = useZcodeProvider();
   const { isSdkInstalled, ...usage } = useUsageTracking();
   const settings = useProviderSettings({ addToast, t });
 
@@ -76,6 +80,10 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     kimiPermissionMode, setKimiPermissionMode,
   } = kimi;
   const {
+    selectedMiniMaxModel, setSelectedMiniMaxModel,
+    miniMaxPermissionMode, setMiniMaxPermissionMode,
+  } = miniMax;
+  const {
     selectedOpenCodeModel, setSelectedOpenCodeModel,
     openCodePermissionMode, setOpenCodePermissionMode,
   } = openCode;
@@ -92,6 +100,10 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     dshPermissionMode, setDshPermissionMode,
     dshPreset, setDshPreset,
   } = dsh;
+  const {
+    selectedZcodeModel, setSelectedZcodeModel,
+    zcodePermissionMode, setZcodePermissionMode,
+  } = zcode;
 
   useModelStatePersistence({
     setCurrentProvider,
@@ -101,16 +113,20 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setCodexPermissionMode,
     setSelectedGrokModel,
     setSelectedKimiModel,
+    setSelectedMiniMaxModel,
     setSelectedOpenCodeModel,
     setSelectedPiModel,
     setSelectedOmpModel,
     setSelectedDshModel,
+    setSelectedZcodeModel,
     setGrokPermissionMode,
     setKimiPermissionMode,
+    setMiniMaxPermissionMode,
     setOpenCodePermissionMode,
     setPiPermissionMode,
     setOmpPermissionMode,
     setDshPermissionMode,
+    setZcodePermissionMode,
     setDshPreset,
     setPermissionMode,
     setLongContextEnabled,
@@ -123,16 +139,20 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     codexPermissionMode,
     selectedGrokModel,
     selectedKimiModel,
+    selectedMiniMaxModel,
     selectedOpenCodeModel,
     selectedPiModel,
     selectedOmpModel,
     selectedDshModel,
+    selectedZcodeModel,
     grokPermissionMode,
     kimiPermissionMode,
+    miniMaxPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
     ompPermissionMode,
     dshPermissionMode,
+    zcodePermissionMode,
     dshPreset,
     longContextEnabled,
     reasoningEffort,
@@ -145,24 +165,51 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       ? selectedGrokModel
       : currentProvider === 'kimi'
         ? selectedKimiModel
-        : currentProvider === 'opencode'
-          ? selectedOpenCodeModel
-          : currentProvider === 'pi'
-            ? selectedPiModel
+        : currentProvider === 'minimax'
+          ? selectedMiniMaxModel
+          : currentProvider === 'opencode'
+            ? selectedOpenCodeModel
+            : currentProvider === 'pi'
+              ? selectedPiModel
             : currentProvider === 'omp'
               ? selectedOmpModel
               : currentProvider === 'dsh'
                 ? selectedDshModel
-                : selectedClaudeModel;
+                : currentProvider === 'zcode'
+                  ? selectedZcodeModel
+                  : selectedClaudeModel;
 
   const currentSdkInstalled = useMemo(
     () => isSdkInstalled(currentProvider),
     [isSdkInstalled, currentProvider],
   );
 
+  // Codex native auto review config is available in the verified @openai/codex-sdk 0.146.0 floor.
+  // Unknown (`undefined`, backend has not reported yet) is treated conservatively as
+  // unavailable so an 'auto' send cannot race the dependency-status response.
+  const codexSdkMeetsMinimum = usage.sdkStatus?.['codex-sdk']?.meetsMinimumVersion;
+  const codexNativeAutoReviewAvailable = codexSdkMeetsMinimum === true;
+
+  // A saved auto mode can outlive the SDK that supports it. Reset it before a
+  // send can race the dependency-status response; otherwise the selected mode
+  // would be sent to an SDK that cannot implement the native reviewer.
+  useEffect(() => {
+    if (codexSdkMeetsMinimum !== false || codexPermissionMode !== 'auto') {
+      return;
+    }
+    setCodexPermissionMode('default');
+    if (currentProvider === 'codex' && permissionMode === 'auto') {
+      setPermissionMode('default');
+      sendBridgeEvent('set_mode', 'default');
+    }
+  }, [codexPermissionMode, codexSdkMeetsMinimum, currentProvider, permissionMode, setCodexPermissionMode, setPermissionMode]);
+
   const handleModeSelect = useCallback((mode: PermissionMode) => {
     if (currentProvider === 'codex') {
-      const codexMode: PermissionMode = mode === 'plan' ? 'default' : mode;
+      const codexMode: PermissionMode = mode === 'plan'
+        || (mode === 'auto' && codexSdkMeetsMinimum === false)
+        ? 'default'
+        : mode;
       setPermissionMode(codexMode);
       setCodexPermissionMode(codexMode);
       sendBridgeEvent('set_mode', codexMode);
@@ -173,9 +220,11 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       setPermissionMode(cliMode);
       if (currentProvider === 'grok') setGrokPermissionMode(cliMode);
       if (currentProvider === 'kimi') setKimiPermissionMode(cliMode);
+      if (currentProvider === 'minimax') setMiniMaxPermissionMode(cliMode);
       if (currentProvider === 'opencode') setOpenCodePermissionMode(cliMode);
       if (currentProvider === 'pi') setPiPermissionMode(cliMode);
       if (currentProvider === 'dsh') setDshPermissionMode(cliMode);
+      if (currentProvider === 'zcode') setZcodePermissionMode(cliMode);
       if (currentProvider === 'omp') {
         setOmpPermissionMode(cliMode);
         // The omp mode selector is a shortcut over the model value: role modes
@@ -198,15 +247,18 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     sendBridgeEvent('set_mode', mode);
   }, [
     currentProvider,
+    codexSdkMeetsMinimum,
     setCodexPermissionMode,
     setClaudePermissionMode,
     setGrokPermissionMode,
     setKimiPermissionMode,
+    setMiniMaxPermissionMode,
     setOpenCodePermissionMode,
     setPiPermissionMode,
     setOmpPermissionMode,
     setSelectedOmpModel,
     setDshPermissionMode,
+    setZcodePermissionMode,
   ]);
 
   const handleModelSelect = useCallback((modelId: string) => {
@@ -223,6 +275,9 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       sendBridgeEvent('set_model', modelId);
     } else if (currentProvider === 'kimi') {
       setSelectedKimiModel(modelId);
+      sendBridgeEvent('set_model', modelId);
+    } else if (currentProvider === 'minimax') {
+      setSelectedMiniMaxModel(modelId);
       sendBridgeEvent('set_model', modelId);
     } else if (currentProvider === 'opencode') {
       setSelectedOpenCodeModel(modelId);
@@ -246,6 +301,9 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     } else if (currentProvider === 'dsh') {
       setSelectedDshModel(modelId);
       sendBridgeEvent('set_model', modelId);
+    } else if (currentProvider === 'zcode') {
+      setSelectedZcodeModel(modelId);
+      sendBridgeEvent('set_model', modelId);
     }
   }, [
     currentProvider,
@@ -255,11 +313,13 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     setSelectedCodexModel,
     setSelectedGrokModel,
     setSelectedKimiModel,
+    setSelectedMiniMaxModel,
     setSelectedOpenCodeModel,
     setSelectedPiModel,
     setSelectedOmpModel,
     setOmpPermissionMode,
     setSelectedDshModel,
+    setSelectedZcodeModel,
   ]);
 
   const handleProviderSelect = useCallback((providerId: string) => {
@@ -268,11 +328,19 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
 
     let modeToSet: PermissionMode = claudePermissionMode;
     if (providerId === 'codex') {
-      modeToSet = normalizeCliPermissionMode(codexPermissionMode, providerId);
+      // Check for 'auto' BEFORE normalizeCliPermissionMode, which coerces
+      // 'auto' → 'default' for every CLI provider — after normalization the
+      // SDK-floor check would be dead code and a saved 'auto' would be
+      // silently demoted on every provider switch.
+      modeToSet = codexPermissionMode === 'auto'
+        ? (codexSdkMeetsMinimum === false ? 'default' : 'auto')
+        : normalizeCliPermissionMode(codexPermissionMode, providerId);
     } else if (providerId === 'grok') {
       modeToSet = normalizeCliPermissionMode(grokPermissionMode, providerId);
     } else if (providerId === 'kimi') {
       modeToSet = normalizeCliPermissionMode(kimiPermissionMode, providerId);
+    } else if (providerId === 'minimax') {
+      modeToSet = normalizeCliPermissionMode(miniMaxPermissionMode, providerId);
     } else if (providerId === 'opencode') {
       modeToSet = normalizeCliPermissionMode(openCodePermissionMode, providerId);
     } else if (providerId === 'pi') {
@@ -281,6 +349,8 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
       modeToSet = normalizeCliPermissionMode(ompPermissionMode, providerId);
     } else if (providerId === 'dsh') {
       modeToSet = normalizeCliPermissionMode(dshPermissionMode, providerId);
+    } else if (providerId === 'zcode') {
+      modeToSet = normalizeCliPermissionMode(zcodePermissionMode, providerId);
     }
     setPermissionMode(modeToSet);
     // Dynamic omp roles are not in the backend's static mode whitelist — the
@@ -293,28 +363,35 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     if (providerId === 'codex') newModel = selectedCodexModel;
     else if (providerId === 'grok') newModel = selectedGrokModel;
     else if (providerId === 'kimi') newModel = selectedKimiModel;
+    else if (providerId === 'minimax') newModel = selectedMiniMaxModel;
     else if (providerId === 'opencode') newModel = selectedOpenCodeModel;
     else if (providerId === 'pi') newModel = selectedPiModel;
     else if (providerId === 'omp') newModel = selectedOmpModel;
     else if (providerId === 'dsh') newModel = selectedDshModel;
+    else if (providerId === 'zcode') newModel = selectedZcodeModel;
     sendBridgeEvent('set_model', newModel);
   }, [
     claudePermissionMode,
     codexPermissionMode,
+    codexSdkMeetsMinimum,
     grokPermissionMode,
     kimiPermissionMode,
+    miniMaxPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
     ompPermissionMode,
     dshPermissionMode,
+    zcodePermissionMode,
     selectedCodexModel,
     selectedClaudeModel,
     selectedGrokModel,
     selectedKimiModel,
+    selectedMiniMaxModel,
     selectedOpenCodeModel,
     selectedPiModel,
     selectedOmpModel,
     selectedDshModel,
+    selectedZcodeModel,
     longContextEnabled,
   ]);
 
@@ -376,16 +453,19 @@ export function useModelProviderState({ addToast, t }: UseModelProviderStateOpti
     ...codex,
     ...grok,
     ...kimi,
+    ...miniMax,
     ...openCode,
     ...pi,
     ...omp,
     ...dsh,
+    ...zcode,
     ...usage,
     ...settings,
     currentProvider, setCurrentProvider,
     permissionMode, setPermissionMode,
     selectedModel,
     currentSdkInstalled,
+    codexNativeAutoReviewAvailable,
     currentProviderRef,
     handleModeSelect,
     handleModelSelect,

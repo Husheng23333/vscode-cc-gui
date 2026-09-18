@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import styles from './style.module.less';
 import { AVAILABLE_PROVIDERS } from '../ChatInputBox/types';
 import { ProviderModelIcon } from '../shared/ProviderModelIcon';
+import { useHiddenCliProviders } from '../../hooks/useCliProviderVisibility';
 
 const ROOT_STYLE: React.CSSProperties = {
   position: 'relative',
@@ -43,6 +44,10 @@ export const BlinkingLogo = ({ provider, onProviderChange }: BlinkingLogoProps) 
   const [toastMessage, setToastMessage] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Hidden CLI providers stay usable when already active; they are only
+  // removed from the switcher menu below.
+  const hiddenProviders = useHiddenCliProviders();
+  const visibleProviders = AVAILABLE_PROVIDERS.filter((p) => !hiddenProviders.has(p.id));
 
   useEffect(() => {
     if (provider !== displayProvider) {
@@ -149,10 +154,10 @@ export const BlinkingLogo = ({ provider, onProviderChange }: BlinkingLogoProps) 
       {isOpen && (
         <div
           ref={dropdownRef}
-          className="selector-dropdown"
+          className="selector-dropdown provider-dropdown"
           style={DROPDOWN_STYLE}
         >
-          {AVAILABLE_PROVIDERS.map((p) => (
+          {visibleProviders.map((p) => (
             <div
               key={p.id}
               className={`selector-option ${p.id === provider ? 'selected' : ''} ${!p.enabled ? 'disabled' : ''}`}
@@ -164,9 +169,11 @@ export const BlinkingLogo = ({ provider, onProviderChange }: BlinkingLogoProps) 
             >
               <ProviderModelIcon providerId={p.id} size={16} colored />
               <span>{getProviderLabel(p.id)}</span>
-              {p.id === provider && (
-                <span className="codicon codicon-check check-mark" />
-              )}
+              <span className="provider-option-trailing">
+                {p.id === provider && (
+                  <span className="provider-active-dot" aria-hidden="true" />
+                )}
+              </span>
             </div>
           ))}
         </div>

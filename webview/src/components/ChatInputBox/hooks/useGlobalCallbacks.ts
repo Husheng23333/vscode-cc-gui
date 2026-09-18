@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { createTextFragment } from '../utils/selectionUtils.js';
+import {
+  parseExplicitFileReferences,
+  registerAbsoluteFileReference,
+  registerLineFileReference,
+} from '../utils/fileReferences.js';
 
 interface UseGlobalCallbacksOptions {
   editableRef: React.RefObject<HTMLDivElement | null>;
@@ -36,23 +41,11 @@ export function useGlobalCallbacks({
   // Register global function to receive file path from Java
   useEffect(() => {
     /**
-     * Insert a single file path into the input box
+     * Insert text at the caret, or append at the end when the caret is not a
+     * valid insertion point inside the input box.
      */
-    const insertSingleFilePath = (filePath: string) => {
+    const insertTextAtCaretOrEnd = (textToInsert: string) => {
       if (!editableRef.current) return;
-
-      const absolutePath = filePath.trim();
-      if (!absolutePath) return;
-
-      // Add path to path mapping
-      const fileName = absolutePath.split(/[/\\]/).pop() || absolutePath;
-
-      // Add path to pathMappingRef to make it a "valid reference"
-      pathMappingRef.current.set(fileName, absolutePath);
-      pathMappingRef.current.set(absolutePath, absolutePath);
-
-      // Insert file path into input box (auto-add @ prefix), add space to trigger rendering
-      const pathToInsert = (filePath.startsWith('@') ? filePath : `@${filePath}`) + ' ';
 
       const selection = window.getSelection();
       if (
@@ -62,12 +55,12 @@ export function useGlobalCallbacks({
       ) {
         // Cursor inside input box, insert at cursor position
         const range = selection.getRangeAt(0);
-        // File paths arrive from external actions (file explorer / toolbar), not
-        // from typing. A stale non-collapsed selection must not be replaced by
-        // deleteContents() - that wiped the existing content. Only a collapsed
-        // caret is a real insertion point; otherwise append at end.
+        // External content arrives from IDE actions, not from typing. A stale
+        // non-collapsed selection must not be replaced by deleteContents() -
+        // that wiped the existing content (#1700). Only a collapsed caret is
+        // a real insertion point; otherwise append at end.
         if (!range.collapsed) {
-          const textNode = document.createTextNode(pathToInsert);
+          const textNode = document.createTextNode(textToInsert);
           editableRef.current.appendChild(textNode);
           const appendRange = document.createRange();
           appendRange.setStartAfter(textNode);
@@ -76,7 +69,7 @@ export function useGlobalCallbacks({
           selection.addRange(appendRange);
         } else {
           range.deleteContents();
-          const textNode = document.createTextNode(pathToInsert);
+          const textNode = document.createTextNode(textToInsert);
           range.insertNode(textNode);
 
           // Move cursor after inserted text
@@ -88,7 +81,7 @@ export function useGlobalCallbacks({
       } else {
         // Cursor not inside input box, append to end
         // Use appendChild instead of innerText to avoid breaking existing file tags
-        const textNode = document.createTextNode(pathToInsert);
+        const textNode = document.createTextNode(textToInsert);
         editableRef.current.appendChild(textNode);
 
         // Move cursor to end
@@ -98,6 +91,20 @@ export function useGlobalCallbacks({
         selection?.removeAllRanges();
         selection?.addRange(range);
       }
+    };
+
+    /**
+     * Insert a single file path into the input box
+     */
+    const insertSingleFilePath = (filePath: string): boolean => {
+      if (!editableRef.current) return false;
+
+      const absolutePath = registerAbsoluteFileReference(pathMappingRef.current, filePath);
+      if (!absolutePath) return false;
+
+      // File identity comes from exact registration, not inferred separators.
+      insertTextAtCaretOrEnd(`@${absolutePath} `);
+      return true;
     };
 
     window.handleFilePathFromJava = (filePathInput: string | string[]) => {
@@ -124,11 +131,28 @@ export function useGlobalCallbacks({
           return;
         }
 
-        // Insert all file paths
+        // Insert all file paths. Never silently drop content from the host
+        // bridge: a payload that fails strict registration (e.g. a legacy
+        // relative path) is kept as ordinary text instead of becoming an
+        // unrenderable file tag.
+        let handledCount = 0;
         for (const filePath of filePaths) {
-          if (filePath && filePath.trim()) {
-            insertSingleFilePath(filePath.trim());
+          if (insertSingleFilePath(filePath)) {
+            handledCount++;
+            continue;
           }
+          const plainText = filePath?.trim();
+          if (plainText) {
+            console.warn(
+              '[useGlobalCallbacks] Not an absolute file reference, inserting as plain text:',
+              plainText,
+            );
+            insertTextAtCaretOrEnd(`${plainText} `);
+            handledCount++;
+          }
+        }
+        if (handledCount === 0) {
+          return;
         }
 
         // Close all completion menus
@@ -243,12 +267,12 @@ export function useGlobalCallbacks({
       }
 
       const range = selection.getRangeAt(0);
-      // External snippets come from external actions (editor selection), never
-      // from typing inside the input. A stale NON-collapsed selection (user last
-      // selected text in the box, then triggered an external insert) must not be
-      // replaced by deleteContents() - that wiped the existing content. Only a
-      // collapsed caret is a real insertion point; otherwise fall back to
-      // appending at the end.
+      // External snippets come from IDE actions (editor selection), never from
+      // typing inside the input. A stale NON-collapsed selection (user last
+      // selected text in the box, then went back to the editor) must not be
+      // replaced by deleteContents() - that wiped the existing content (#1700).
+      // Only a collapsed caret is a real insertion point; otherwise fall back
+      // to appending at the end.
       if (!range.collapsed) {
         return false;
       }
@@ -270,15 +294,34 @@ export function useGlobalCallbacks({
       try {
         if (!editableRef.current) return;
 
+        // The generic bridge remains for selected code, but in the VS Code
+        // port it also carries file references (sendSelectionReference sends
+        // `@path#L10-20`, sendFilePath sends `@path1 @path2`). Only strict
+        // reference forms are registered as file tags; ordinary code and
+        // arbitrary @ text are inserted byte-for-byte as snippets.
+        const lineReference = registerLineFileReference(pathMappingRef.current, selectionInfo);
+        const explicitPaths = lineReference
+          ? null
+          : parseExplicitFileReferences(selectionInfo);
+        let normalizedSelectionInfo = selectionInfo;
+        if (lineReference) {
+          normalizedSelectionInfo = `@${lineReference}`;
+        } else if (explicitPaths) {
+          for (const explicitPath of explicitPaths) {
+            registerAbsoluteFileReference(pathMappingRef.current, explicitPath);
+          }
+          normalizedSelectionInfo = explicitPaths.map((filePath) => `@${filePath}`).join(' ');
+        }
+
         // Read caret BEFORE focus() to avoid focus side-effects on selection.
         // If caret is inside the editable, insert at caret. Otherwise (e.g. window
         // just regained focus from an external IDE action with no prior caret),
         // fall back to appending at the end with a leading newline separator.
-        const insertedAtCaret = tryInsertExternalSnippetAtCaret(selectionInfo);
+        const insertedAtCaret = tryInsertExternalSnippetAtCaret(normalizedSelectionInfo);
 
         if (!insertedAtCaret) {
           editableRef.current.focus();
-          appendExternalSnippetToEnd(selectionInfo);
+          appendExternalSnippetToEnd(normalizedSelectionInfo);
         }
 
         // Trigger state update
@@ -306,5 +349,5 @@ export function useGlobalCallbacks({
       delete window.insertCodeSnippetAtCursor;
       delete window.focusChatInput;
     };
-  }, [editableRef, getTextContent, renderFileTags, adjustHeight, onInput, setHasContent, focusInput]);
+  }, [editableRef, pathMappingRef, getTextContent, renderFileTags, adjustHeight, onInput, setHasContent, focusInput]);
 }

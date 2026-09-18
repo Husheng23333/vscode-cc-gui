@@ -8,9 +8,8 @@ import { mkdir, writeFile, readdir, stat as statAsync, unlink } from 'fs/promise
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import { modelSupportsVision } from '../../utils/model-utils.js';
-
-// Image temp directory shared across the daemon's lifetime.
+// Retain cleanup (and the Codex local_image materialization below) for image
+// files written by older plugin versions.
 const TEMP_IMAGE_SUBDIR = 'cc-gui-images';
 // Files older than 24h are removed at daemon startup to bound disk growth.
 const TEMP_IMAGE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -106,13 +105,11 @@ export async function loadAttachments(stdinData) {
 }
 
 /**
- * Save base64 image data to a temporary file for cross-model compatibility.
+ * Save base64 image data to a temporary file.
  *
- * Some models (e.g. mimo-v2.5-pro, deepseek, qwen) do not handle Anthropic
- * vision content blocks reliably — especially when routed through third-party
- * proxies that may strip image blocks during translation. Saving to a file and
- * referencing the path lets the model use the Read tool to load the image,
- * matching Claude Code CLI's universal image handling approach.
+ * Used by the Codex sender (services/codex/message-service.js), whose CLI only
+ * accepts images as `local_image` file paths. The Claude paths keep images as
+ * inline base64 vision blocks — see buildContentBlocks.
  *
  * @param {string} base64Data - Base64-encoded image data (no "data:" prefix)
  * @param {string} mediaType - MIME type (e.g. "image/png")
@@ -178,50 +175,24 @@ export async function cleanupStaleTempImages() {
 /**
  * Build user message content blocks (supports images and text).
  *
- * Image transmission strategy depends on the target model:
- * - Claude models: Inline base64 vision content blocks (most efficient,
- *   natively supported by the Anthropic API).
- * - Non-Claude models (mimo, deepseek, qwen, etc.): Save images to temp files
- *   and reference paths in the message text. The model is asked to use the
- *   Read tool to load them, matching Claude Code CLI behavior. This avoids
- *   issues where third-party proxies silently drop vision content blocks.
+ * Preserve structured image input for every model. Provider aliases do not
+ * describe vision capabilities, and replacing images with file paths loses
+ * visual input on endpoints that only accept images in user content blocks.
  *
  * @param {Array} attachments - Attachment array
  * @param {string} message - User message text
- * @param {string|null} modelId - Resolved model ID actually sent to the API
- *                                  (e.g. "claude-sonnet-4-5", "mimo-v2.5-pro").
- *                                  Used to decide image transmission strategy.
  * @returns {Array} Content block array
  */
-export async function buildContentBlocks(attachments, message, modelId = null) {
+export async function buildContentBlocks(attachments, message) {
   const contentBlocks = [];
-  const useNativeVision = modelSupportsVision(modelId);
-  const imagePathRefs = [];
 
   for (const a of attachments) {
     const mt = typeof a.mediaType === 'string' ? a.mediaType : '';
     if (mt.startsWith('image/')) {
-      if (useNativeVision) {
-        contentBlocks.push({
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: mt || 'image/png',
-            data: a.data
-          }
-        });
-      } else {
-        const tempPath = await saveImageToTemp(a.data, mt, a.fileName);
-        if (tempPath) {
-          imagePathRefs.push(tempPath);
-          console.log('[ATTACHMENTS] Saved image to temp for non-vision model:', tempPath);
-        } else {
-          contentBlocks.push({
-            type: 'image',
-            source: { type: 'base64', media_type: mt || 'image/png', data: a.data }
-          });
-        }
-      }
+      contentBlocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: mt, data: a.data }
+      });
     } else {
       const name = a.fileName || 'Attachment';
       contentBlocks.push({ type: 'text', text: `[Attachment: ${name}]` });
@@ -230,9 +201,7 @@ export async function buildContentBlocks(attachments, message, modelId = null) {
 
   let userText = message;
   if (!userText || userText.trim() === '') {
-    const totalImages = useNativeVision
-      ? contentBlocks.filter(b => b.type === 'image').length
-      : imagePathRefs.length;
+    const totalImages = contentBlocks.filter(b => b.type === 'image').length;
     const textCount = contentBlocks.filter(b => b.type === 'text').length;
     if (totalImages > 0) {
       userText = `[Uploaded ${totalImages} image(s)]`;
@@ -241,13 +210,6 @@ export async function buildContentBlocks(attachments, message, modelId = null) {
     } else {
       userText = '[Empty message]';
     }
-  }
-
-  if (imagePathRefs.length > 0) {
-    const refs = imagePathRefs
-      .map((p, idx) => `[Image #${idx + 1}: ${p}]`)
-      .join('\n');
-    userText = `${refs}\n\nThe user has attached the image(s) above. Please use the Read tool to view them.\n\n${userText}`;
   }
 
   contentBlocks.push({ type: 'text', text: userText });

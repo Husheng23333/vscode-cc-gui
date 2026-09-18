@@ -29,6 +29,18 @@ describe('providerForCommand word-boundary detection', () => {
     assert.equal(providerForCommand('pi --headless'), 'pi');
     assert.equal(providerForCommand('omp serve'), 'omp');
   });
+  it('keeps JetBrains ACP Codex distinct from our own codex (upstream c2b1e37b)', () => {
+    assert.equal(
+      providerForCommand('node /opt/homebrew/bin/npx -y @agentclientprotocol/codex-acp@1.6.0'),
+      'jetbrains-codex',
+    );
+    assert.equal(
+      providerForCommand('node coding-copilot-jetbrains codex-acp'),
+      'jetbrains-codex',
+    );
+    // Our own one-shot codex channel keeps the plain codex label.
+    assert.equal(providerForCommand('node /ext/ai-bridge/channel-manager.js codex send'), 'codex');
+  });
 });
 
 describe('collectProtectedPids / classifyProcess daemon-tree protection', () => {

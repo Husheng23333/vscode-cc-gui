@@ -34,6 +34,7 @@ import { RuntimeContextService } from './bridge/services/RuntimeContextService';
 import { HistoryService } from './bridge/services/HistoryService';
 import { sanitizeProjectPath } from './bridge/services/historyEntrypoint';
 import { UsageStatisticsService } from './bridge/services/UsageStatisticsService';
+import { ClaudePlanUsageService } from './bridge/services/ClaudePlanUsageService';
 import { DiffService } from './bridge/services/DiffService';
 import { PermissionIpcService } from './bridge/services/PermissionIpcService';
 import { ProviderStore } from './bridge/services/ProviderStore';
@@ -47,6 +48,7 @@ import { sanitizeUserMessagePayload } from './bridge/services/userMessageSanitiz
 import type { SessionTemplate } from './sessionTemplate';
 import type { RuntimeProviderId } from './bridge/types';
 import { isRuntimeProvider } from './cli/cliTools';
+import { commonCliBinDirs } from './cli/cliBinDirs';
 import { CliStatusHandler } from './bridge/handlers/CliStatusHandler';
 import { CliModelsHandler } from './bridge/handlers/CliModelsHandler';
 import { DshHostHandler } from './bridge/handlers/DshHostHandler';
@@ -59,7 +61,6 @@ import {
   readNodeVersion,
 } from './nodeRequirements';
 import { planClaudeSettingsSync } from './bridge/services/claudeSettingsSync';
-import { cacheClaudeRateLimitInfo } from './bridge/services/claudePlanUsageService';
 import { dedupeTextChunks } from './bridge/services/textChunkDedupe';
 
 type MessageCallback = (event: string, content: string) => void;
@@ -103,6 +104,7 @@ export class BridgeServer {
   private readonly _runtimeContext: RuntimeContextService;
   private readonly _historyService: HistoryService;
   private readonly _usageStatistics: UsageStatisticsService;
+  private readonly _claudePlanUsage: ClaudePlanUsageService;
   private readonly _diffService: DiffService;
   private readonly _permissionIpc: PermissionIpcService;
   private readonly _providerStore: ProviderStore;
@@ -156,6 +158,11 @@ export class BridgeServer {
       this._callWebviewJson(webview, functionName, payload);
     }, () => this._workspacePath);
     this._usageStatistics = new UsageStatisticsService(this.context, () => this._workspacePath);
+    this._claudePlanUsage = new ClaudePlanUsageService(
+      undefined,
+      undefined,
+      (line) => this._log.appendLine(line),
+    );
     this._diffService = new DiffService(
       () => this._workspacePath,
       (webview, functionName, payload) => this._callWebviewJson(webview, functionName, payload),
@@ -168,6 +175,8 @@ export class BridgeServer {
       (bridgeRequestId) => this._pendingWebviews.get(bridgeRequestId),
       // Used to refuse "active webview" fallback when multiple tabs are open.
       () => this._knownWebviews.size,
+      // Dialog deadlines must match the webview's countdown setting.
+      () => this._settingsStore.getPermissionDialogTimeoutSeconds(),
     );
     this._settingsStore = new SettingsStore(context);
     this._providerStore = new ProviderStore(context, {
@@ -316,6 +325,7 @@ export class BridgeServer {
           this._activeProvider = provider;
           this._updateStatusBarItem();
         },
+        getActiveProvider: () => this.getActiveProvider(),
         setSelectedModel: (model) => {
           this._selectedModel = model;
           this._log.appendLine(`[BRIDGE] Model set to: ${this._selectedModel}`);
@@ -417,10 +427,10 @@ export class BridgeServer {
     dispatcher.register(new PromptEnhancerHandler(bridgeContext));
     dispatcher.register(new NodeProcessHandler(bridgeContext));
     dispatcher.register(new ContextUsageHandler(bridgeContext));
-    dispatcher.register(new ClaudePlanUsageHandler(bridgeContext));
     dispatcher.register(new RewindHandler(bridgeContext));
     dispatcher.register(new UndoFileHandler(this._diffService));
     dispatcher.register(new UsageStatisticsHandler(bridgeContext));
+    dispatcher.register(new ClaudePlanUsageHandler(bridgeContext, this._claudePlanUsage));
     dispatcher.register(new TokenTrackerHandler(bridgeContext));
     dispatcher.register(new CustomModelPricingHandler(bridgeContext));
     dispatcher.register(new ProviderHandler(bridgeContext));
@@ -656,6 +666,9 @@ export class BridgeServer {
   private _handleFrontendReady(webview: vscode.Webview): void {
     this._webview = webview;
     this._permissionIpc.start();
+    // A page (re)load can silently drop the one-shot dialog-show injection;
+    // replay pending dialogs (and unacknowledged closes) now that the page is ready.
+    this._permissionIpc.replayPendingDialogs(webview);
     this._refreshSlashCommands(webview);
     webview.postMessage({ type: 'mode_received', content: this._state('permission_mode', 'default') });
     setTimeout(() => this._pushActiveFile(vscode.window.activeTextEditor), 100);
@@ -714,6 +727,8 @@ export class BridgeServer {
       pi: 'PI',
       omp: 'OMP',
       dsh: 'DSH',
+      zcode: 'ZCode',
+      minimax: 'MiniMax',
     };
     const provider = providerLabels[this._activeProvider] ?? this._activeProvider;
     const model = this._selectedModel ? ` ${this._selectedModel}` : '';
@@ -1059,10 +1074,10 @@ export class BridgeServer {
     // Keep the Grok ACP daemon's long-lived cwd inside the workspace: a deleted
     // or out-of-project directory would otherwise root the persistent runtime
     // outside the project (mirrors jetbrains PathUtils.guardWorkingDirectory).
-    if (activeProvider === 'grok') {
+    if (activeProvider === 'grok' || activeProvider === 'zcode') {
       const guardedCwd = guardWorkingDirectory(params.cwd, this._workspacePath);
       if (guardedCwd !== null && guardedCwd !== params.cwd) {
-        this._log.appendLine(`[BRIDGE] grok cwd guard: ${params.cwd} -> ${guardedCwd}`);
+        this._log.appendLine(`[BRIDGE] ${activeProvider} cwd guard: ${params.cwd} -> ${guardedCwd}`);
         params.cwd = guardedCwd;
       }
     }
@@ -1079,10 +1094,10 @@ export class BridgeServer {
           : `${activeProvider}.send`,
       // Grok has a persistent ACP runtime with the same lifecycle commands as
       // Claude's persistent query runtime; route them to the grok namespace.
-      'preconnect':                    activeProvider === 'grok' ? 'grok.preconnect' : 'claude.preconnect',
+      'preconnect':                    activeProvider === 'grok' ? 'grok.preconnect' : activeProvider === 'zcode' ? 'zcode.preconnect' : 'claude.preconnect',
       'abort':                         'abort',
-      'reset_runtime':                 activeProvider === 'grok' ? 'grok.resetRuntime' : 'claude.resetRuntime',
-      'get_context_usage':             activeProvider === 'grok' ? 'grok.getContextUsage' : 'claude.getContextUsage',
+      'reset_runtime':                 activeProvider === 'grok' ? 'grok.resetRuntime' : activeProvider === 'zcode' ? 'zcode.resetRuntime' : 'claude.resetRuntime',
+      'get_context_usage':             activeProvider === 'grok' ? 'grok.getContextUsage' : activeProvider === 'zcode' ? 'zcode.getContextUsage' : 'claude.getContextUsage',
       'rewind_files':                  'claude.rewindFiles',
       'get_dependency_status':         'status',
       'heartbeat':                     'heartbeat',
@@ -1215,11 +1230,11 @@ export class BridgeServer {
   /**
    * Push permission mode to the live runtime so mid-turn tool calls honor it.
    * Codex rebuilds thread options per turn, so only Claude and Grok (persistent
-   * ACP runtime) are hot-swapped.
+   * ACP runtime) and ZCode (persistent app-server) are hot-swapped.
    */
   private _pushPermissionModeLive(mode: string): void {
     const provider = this.getActiveProvider();
-    if (provider !== 'claude' && provider !== 'grok') {
+    if (provider !== 'claude' && provider !== 'grok' && provider !== 'zcode') {
       return;
     }
     const sessionId = this._activeSessionId || undefined;
@@ -1292,6 +1307,26 @@ export class BridgeServer {
     // Remove proxy environment variables to prevent 502 Bad Gateway errors
     // Node.js HTTP client auto-reads these vars, but the proxy may not handle all requests correctly
     const bridgeEnv = { ...process.env };
+    // Sparse-PATH hardening (upstream 94c3292b EnvironmentConfigurator, mirrors
+    // ai-bridge/utils/cli-path.js commonCliBinDirs): the daemon's children —
+    // MCP servers, `#!/usr/bin/env node` CLI shims — inherit this env, so give
+    // it the detected node install dir plus the user's common CLI bin dirs.
+    const pathKey = process.platform === 'win32' ? 'Path' : 'PATH';
+    const pathSep = process.platform === 'win32' ? ';' : ':';
+    const existingPath = String(bridgeEnv[pathKey] || bridgeEnv.PATH || '')
+      .split(pathSep)
+      .filter(Boolean);
+    const seenPathDirs = new Set<string>();
+    const mergedPathParts: string[] = [];
+    for (const dir of [path.dirname(nodePath), ...existingPath, ...commonCliBinDirs()]) {
+      if (!dir || seenPathDirs.has(dir)) continue;
+      seenPathDirs.add(dir);
+      mergedPathParts.push(dir);
+    }
+    bridgeEnv[pathKey] = mergedPathParts.join(pathSep);
+    if (pathKey !== 'PATH') {
+      bridgeEnv.PATH = bridgeEnv[pathKey];
+    }
     const proxyVars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'];
     const removedProxyVars: string[] = [];
     for (const key of proxyVars) {
@@ -1353,6 +1388,9 @@ export class BridgeServer {
     if (msg.type === 'daemon') {
       if (msg.event === 'ready') {
         if (this._webview) this._webview.postMessage({ type: 'js_eval', content: 'window.onSdkLoaded && window.onSdkLoaded()' });
+      } else if (msg.event === 'sdk_ready') {
+        // Background SDK preload finished (ready fires before it since fa2010cc).
+        this._log.appendLine('[BRIDGE] daemon background SDK preload complete (sdk_ready)');
       } else if (msg.event === 'title_generated') {
         const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId.trim() : '';
         const title = typeof msg.title === 'string' ? msg.title.trim() : '';
@@ -1447,6 +1485,11 @@ export class BridgeServer {
           type: 'js_eval',
           content: 'window.onStreamingHeartbeat && window.onStreamingHeartbeat()',
         });
+      } else if (line === '[BLOCK_RESET]') {
+        // Content-block boundary mid-stream (content_block_start or per-block
+        // normalized assistant snapshot). The webview starts a fresh thinking
+        // block instead of merging subsequent deltas into the previous one.
+        webview.postMessage({ type: 'block_reset' });
       } else if (line.startsWith('[CONTENT_DELTA] ')) {
         let delta: string;
         const rawDelta = line.slice('[CONTENT_DELTA] '.length);
@@ -1690,13 +1733,14 @@ export class BridgeServer {
               `[STREAM] id=${msg.id} task_notification tool_use_id=${parsed.tool_use_id ?? ''} status=${parsed.status ?? ''}`,
             );
           }
-          // Claude subscription usage: the SDK emits rate_limit_event during turns
-          // (real Anthropic / OAuth backends only — proxies never send it). Cache the
-          // rate_limit_info so get_claude_plan_usage polls can surface utilization +
-          // reset in the ContextBar plan-usage indicator.
-          if (parsed.type === 'rate_limit_event' && parsed.rate_limit_info && typeof parsed.rate_limit_info === 'object') {
-            cacheClaudeRateLimitInfo(parsed.rate_limit_info);
-            this._log.appendLine(`[STREAM] id=${msg.id} cached Claude rate_limit_event`);
+          // Real Anthropic (OAuth subscription) backends emit rate_limit_event
+          // during turns; cache rate_limit_info so the get_claude_plan_usage poll
+          // can surface utilization + reset in the ContextBar. API-key/proxy
+          // backends never emit it, so the bar stays hidden there.
+          if (parsed.type === 'rate_limit_event'
+            && parsed.rate_limit_info
+            && typeof parsed.rate_limit_info === 'object') {
+            this._claudePlanUsage.cacheRateLimitInfo(parsed.rate_limit_info);
           }
         } catch { /* ignore */ }
         webview.postMessage({ type: 'message_data', content: payload });
@@ -2147,12 +2191,14 @@ export class BridgeServer {
     this.context.globalState.update(`ccg.${key}`, value);
   }
   /**
-   * Sync the active Claude provider env into ~/.claude/settings.json so the
+   * Repair the active Claude provider config in ~/.claude/settings.json so the
    * daemon and CLI follow the shared provider selection stored in ~/.codemoss/config.json.
    *
-   * Safety rules (prevents wiping cc-switch / user CLI credentials):
-   * - Never write when no managed provider is active (local / disabled / null).
-   * - Never clear managed env keys unless we have a non-empty env payload or CLI-login mode.
+   * Repair-only ("fill in the blanks") rules:
+   * - Only ADD provider-managed fields that are missing; never overwrite values
+   *   the user already has (env keys are judged independently).
+   * - Never write when no managed provider is active (local / CLI login / disabled / null).
+   * - Never write when the active provider has an empty env payload (incomplete state).
    */
   private _syncProviderToDisk(providers: any[]) {
     const active = providers.find((p: any) => p.isActive) ?? null;

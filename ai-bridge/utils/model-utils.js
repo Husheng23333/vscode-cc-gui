@@ -32,6 +32,47 @@ export function mapModelIdToSdkName(modelId) {
 }
 
 /**
+ * Migrate retired Claude model ids to their live replacement.
+ *
+ * Persisted AI-feature configs (Commit AI / Prompt Enhancer) keep whatever model id
+ * was saved forever. When a model is retired from the API (sonnet-4-6, sonnet-4-7,
+ * ...), a stored dead id makes every generation fail with an empty response - see
+ * #1693. Normalizing on read self-heals stale configs without touching storage.
+ * Same mapping as the upstream chat tab restore path (#1678).
+ *
+ * @param {string} modelId - Raw model id (may be nullish, blank, carry a [1m] suffix, or be retired)
+ * @returns {string} The model id to use - retired ids mapped to their live replacement,
+ *                   anything else (including non-Claude ids) passed through unchanged
+ */
+export function normalizeRetiredModelId(modelId) {
+  if (modelId == null) {
+    return modelId;
+  }
+  const trimmed = String(modelId).trim();
+  if (!trimmed) {
+    return modelId;
+  }
+  let base = trimmed;
+  let oneM = false;
+  if (base.endsWith('[1m]')) {
+    base = base.slice(0, -'[1m]'.length);
+    oneM = true;
+  }
+  switch (base) {
+    case 'claude-sonnet-4-6':
+    case 'claude-sonnet-4-7':
+      base = 'claude-sonnet-5';
+      break;
+    case 'claude-opus-4-6':
+      base = 'claude-opus-4-8';
+      break;
+    default:
+      return trimmed;
+  }
+  return oneM ? `${base}[1m]` : base;
+}
+
+/**
  * Resolve the actual model name for API calls from user's settings.json.
  * When the user configures a model mapping in their provider config (e.g. sonnet -> "MiniMax-M2.5"),
  * those values are written to ~/.claude/settings.json as ANTHROPIC_DEFAULT_*_MODEL env vars.

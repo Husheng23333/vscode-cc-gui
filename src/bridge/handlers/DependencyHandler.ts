@@ -80,6 +80,8 @@ export class DependencyHandler implements BridgeHandler {
   private sendDependencyStatus(webview: vscode.Webview): void {
     // Fable tier requires Claude Agent SDK >= 0.3.182 (v0.4.9).
     const CLAUDE_MIN_REQUIRED = '0.3.182';
+    // Codex native auto review config requires @openai/codex-sdk >= 0.146.0 (upstream ae562df8).
+    const CODEX_MIN_REQUIRED = '0.146.0';
     const check = (sdkId: string, pkg: string): {
       installed: boolean;
       version: string;
@@ -89,12 +91,16 @@ export class DependencyHandler implements BridgeHandler {
     } => {
       const sdkRootDir = path.join(homedir(), '.codemoss', 'dependencies', sdkId);
       const pkgDir = path.join(sdkRootDir, 'node_modules', ...pkg.split('/'));
+      const minRequiredVersion =
+        sdkId === 'claude-sdk' ? CLAUDE_MIN_REQUIRED
+          : sdkId === 'codex-sdk' ? CODEX_MIN_REQUIRED
+            : undefined;
       if (!fs.existsSync(pkgDir)) {
         return {
           installed: false,
           version: '',
           meetsMinimum: false,
-          minRequiredVersion: sdkId === 'claude-sdk' ? CLAUDE_MIN_REQUIRED : undefined,
+          minRequiredVersion,
         };
       }
       let version = '';
@@ -116,15 +122,13 @@ export class DependencyHandler implements BridgeHandler {
         }
       }
 
-      const meetsMinimum = sdkId === 'claude-sdk'
-        ? this.compareSemver(version, CLAUDE_MIN_REQUIRED) >= 0
-        : true;
+      const meetsMinimum = minRequiredVersion ? this.compareSemver(version, minRequiredVersion) >= 0 : true;
 
       return {
         installed: true,
         version,
         meetsMinimum,
-        minRequiredVersion: sdkId === 'claude-sdk' ? CLAUDE_MIN_REQUIRED : undefined,
+        minRequiredVersion,
       };
     };
     const claudeSdk = check('claude-sdk', '@anthropic-ai/claude-agent-sdk');
@@ -138,6 +142,8 @@ export class DependencyHandler implements BridgeHandler {
         installPath: path.join(homedir(), '.codemoss', 'dependencies', 'claude-sdk'),
         meetsMinimum: claudeSdk.meetsMinimum,
         minRequiredVersion: claudeSdk.minRequiredVersion,
+        meetsMinimumVersion: claudeSdk.meetsMinimum,
+        minimumVersion: claudeSdk.minRequiredVersion,
       },
       'codex-sdk': {
         id: 'codex-sdk',
@@ -146,6 +152,8 @@ export class DependencyHandler implements BridgeHandler {
         installedVersion: codexSdk.version,
         errorMessage: codexSdk.errorMessage,
         installPath: path.join(homedir(), '.codemoss', 'dependencies', 'codex-sdk'),
+        meetsMinimumVersion: codexSdk.meetsMinimum,
+        minimumVersion: codexSdk.minRequiredVersion,
       },
     });
   }

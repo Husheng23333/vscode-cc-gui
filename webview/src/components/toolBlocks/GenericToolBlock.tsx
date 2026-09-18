@@ -4,7 +4,7 @@ import type { ToolInput, ToolResultBlock } from '../../types';
 import { useIsToolDenied } from '../../hooks/useIsToolDenied';
 import { useResolvedFileLinkTooltip } from '../../hooks/useResolvedFileLinkTooltip';
 import { openFile } from '../../utils/bridge';
-import { formatParamValue, truncate } from '../../utils/helpers';
+import { formatParamValue, truncate, truncatePathFromStart } from '../../utils/helpers';
 import { getFileIcon, getFolderIcon } from '../../utils/fileIcons';
 import { isCommandToolName, parseCommandType } from '../../utils/toolCommandPath';
 import { getToolLineInfo, resolveToolTarget, summarizeToolCommand, extractPathsFromPatch } from '../../utils/toolPresentation';
@@ -253,7 +253,7 @@ const GenericToolBlock = ({ name, input, result, toolId }: GenericToolBlockProps
     const parsed = parseCommandType(commandStr);
     if (parsed.type === 'read' && parsed.path) {
       const pathParts = parsed.path.split('/');
-      summary = pathParts[pathParts.length - 1] || parsed.path;
+      summary = pathParts[pathParts.length - 1] || truncatePathFromStart(parsed.path);
     } else {
       summary = summarizeToolCommand(commandStr) ?? truncate(commandStr);
     }

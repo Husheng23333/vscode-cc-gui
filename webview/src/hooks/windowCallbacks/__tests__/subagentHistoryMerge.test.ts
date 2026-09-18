@@ -41,7 +41,6 @@ describe('subagentHistoryMerge', () => {
       provider: 'codex',
     });
   });
-
   it('keeps an authoritatively failed sidechain terminal', () => {
     expect(mergeSubagentHistory(
       { success: true, completed: false, status: 'error', error: 'Codex subagent turn was aborted' },
@@ -77,7 +76,8 @@ describe('subagentHistoryMerge', () => {
     });
   });
 
-  it('rejects responses from an inactive session or provider', () => {expect(isCurrentSubagentResponse(
+  it('rejects responses from an inactive session or provider', () => {
+    expect(isCurrentSubagentResponse(
       { sessionId: 'old-session', provider: 'codex' },
       'current-session',
       'codex',

@@ -30,28 +30,6 @@ export function sliceLatestConversationTurn(messages: ClaudeMessage[]): ClaudeMe
   return start >= 0 ? messages.slice(start) : [];
 }
 
-/**
- * Decide which message slice feeds the StatusPanel-derived lists (subagents,
- * todos). While a turn is streaming, the scope narrows to the latest turn so
- * settled sync tool progress from older turns does not clutter the panel; once
- * settled, the full conversation is shown. A run_in_background agent is the
- * exception: it starts in an older turn but keeps running after that turn
- * settles, and its terminal report lands in a later turn. Narrowing would drop
- * the agent's card while the user waits for it to return, so a session that
- * contains any async agent keeps the full conversation in scope.
- */
-export function computeStatusScopeMessages(
-  streamingActive: boolean,
-  hasAsyncAgents: boolean,
-  latestTurnMessages: ClaudeMessage[],
-  messages: ClaudeMessage[],
-  latestTurnHasToolUse: boolean,
-): ClaudeMessage[] {
-  if (!streamingActive) return messages;
-  if (hasAsyncAgents) return messages;
-  return latestTurnMessages.length > 0 && latestTurnHasToolUse ? latestTurnMessages : messages;
-}
-
 function findConversationTurnStartAt(messages: ClaudeMessage[], messageIndex: number): number {
   for (let i = Math.min(messageIndex, messages.length - 1); i >= 0; i -= 1) {
     const message = messages[i];
@@ -82,6 +60,35 @@ export function selectLatestSubagentTurn(
   return subagents.filter((_, index) => turnStarts[index] === latestTurnStart);
 }
 
+/**
+ * Decide which message slice feeds the StatusPanel-derived lists (subagents,
+ * todos). While a turn is streaming, the scope narrows to the latest turn so
+ * settled sync tool progress from older turns does not clutter the panel; once
+ * settled, the full conversation is shown. A run_in_background agent is the
+ * exception: it starts in an older turn but keeps running after that turn
+ * settles, and its terminal report lands in a later turn. Narrowing would drop
+ * the agent's card while the user waits for it to return, so a session that
+ * contains any async agent keeps the full conversation in scope.
+ */
+export function computeStatusScopeMessages(
+  streamingActive: boolean,
+  hasAsyncAgents: boolean,
+  latestTurnMessages: ClaudeMessage[],
+  messages: ClaudeMessage[],
+  latestTurnHasToolUse: boolean,
+): ClaudeMessage[] {
+  if (!streamingActive) return messages;
+  if (hasAsyncAgents) return messages;
+  return latestTurnMessages.length > 0 && latestTurnHasToolUse ? latestTurnMessages : messages;
+}
+
+/**
+ * When the parent turn settles, promote stuck in_progress todos to completed.
+ * Todos do not outlive the turn the way background agents do — an unfinished
+ * in_progress item after end_turn is almost always a missed TodoWrite update.
+ * Codex plans are the exception: update_plan snapshots keep their own
+ * in_progress state across the turn boundary.
+ */
 export function finalizeTodosForSettledTurn(
   todos: TodoItem[],
   isStreaming: boolean,

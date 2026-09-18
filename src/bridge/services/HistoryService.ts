@@ -21,6 +21,8 @@ import { codexImageTagRegex, imagePathFromCodexImageTagMatch, stripCodexInlineIm
 import { GrokHistoryReader } from './GrokHistoryReader';
 import { OmpHistoryReader } from './OmpHistoryReader';
 import { DshHistoryReader } from './DshHistoryReader';
+import { ZcodeHistoryReader } from './ZcodeHistoryReader';
+import { MiniMaxHistoryReader } from './MiniMaxHistoryReader';
 import { hasLocalHistorySupport, isCliOnlyProvider } from '../../cli/cliTools';
 
 const USER_INPUT_BY_SESSION_KEY = 'ccg.userInputBySession';
@@ -179,11 +181,15 @@ export class HistoryService {
     normalized = normalized.replace(/<agents?-instructions>[\s\S]*?<\/agents?-instructions>\s*/gi, '');
     normalized = normalized.replace(/<environment_context>[\s\S]*?<\/environment_context>\s*/gi, '');
     normalized = normalized.replace(/<ide-context>[\s\S]*?<\/ide-context>\s*/gi, '');
+    // Codex CLI injects a <recommended_plugins> context block as the first user
+    // turn (upstream bdcf21b2): stripped here so it cannot become the session title.
+    normalized = normalized.replace(/<recommended_plugins>[\s\S]*?<\/recommended_plugins>\s*/gi, '');
 
     // Fallback for malformed/truncated wrapper blocks without explicit closing tags.
     normalized = normalized.replace(/<agents?-instructions>[\s\S]*$/i, '');
     normalized = normalized.replace(/<environment_context>[\s\S]*$/i, '');
     normalized = normalized.replace(/<ide-context>[\s\S]*$/i, '');
+    normalized = normalized.replace(/<recommended_plugins>[\s\S]*$/i, '');
 
     // Codex rollout files store the fully augmented prompt (unlike Claude .jsonl),
     // so the appended markdown context blocks land here too. Mirror IDEA's
@@ -249,9 +255,11 @@ export class HistoryService {
       /^<environment_context>[\s\S]*<\/environment_context>$/i.test(trimmed) ||
       /^<ide-context>[\s\S]*<\/ide-context>$/i.test(trimmed) ||
       /^<agents?-instructions>[\s\S]*<\/agents?-instructions>$/i.test(trimmed) ||
+      /^<recommended_plugins>[\s\S]*<\/recommended_plugins>$/i.test(trimmed) ||
       /^<environment_context>[\s\S]*$/i.test(trimmed) ||
       /^<ide-context>[\s\S]*$/i.test(trimmed) ||
-      /^<agents?-instructions>[\s\S]*$/i.test(trimmed)
+      /^<agents?-instructions>[\s\S]*$/i.test(trimmed) ||
+      /^<recommended_plugins>[\s\S]*$/i.test(trimmed)
     );
   }
 
@@ -283,7 +291,11 @@ export class HistoryService {
     }
 
     const explicitDisplay = typeof displayOverride === 'string' ? displayOverride.trim() : '';
-    const normalizedDisplay = explicitDisplay || this.normalizeCodexUserTextForHistory(normalizedRaw);
+    // Re-run the normalizer even over a stored display string: entries cached by
+    // older builds (pre recommended_plugins stripping, upstream bdcf21b2) heal on
+    // read instead of needing a persisted-index version bump. The normalizer is
+    // idempotent over anything it produces, so fresh entries are unaffected.
+    const normalizedDisplay = this.normalizeCodexUserTextForHistory(explicitDisplay || normalizedRaw);
     const contentSource: CodexHistorySource = normalizedDisplay ? 'user_input' : 'system_context';
     if (!normalizedDisplay) return null;
     const normalizedUserBlocks = normalizedBlocks.length > 0
@@ -411,9 +423,18 @@ export class HistoryService {
       this.loadOmpHistoryData(webview);
       return;
     }
+    if (provider === 'minimax') {
+      this.loadMiniMaxHistoryData(webview);
+      return;
+    }
     if (provider === 'dsh') {
       // DSH history lives in the persistent host — fetched over RPC, async.
       void this.loadDshHistoryData(webview);
+      return;
+    }
+    if (provider === 'zcode') {
+      // ZCode history is a live app-server query via channel-manager — async.
+      void this.loadZcodeHistoryData(webview);
       return;
     }
     // Kimi / OpenCode / PI: chat works, but there is no local history reader yet.
@@ -600,6 +621,51 @@ export class HistoryService {
       });
     }
   }
+  private async loadZcodeHistoryData(webview: vscode.Webview): Promise<void> {
+    try {
+      const favorites = this.getFavorites();
+      const vscTitles: Record<string, string> = this.context.globalState.get('ccg.historyTitles') ?? {};
+      const reader = new ZcodeHistoryReader(this.context);
+      const result = await reader.getSessionsForProject(this.getWorkspacePath());
+      const toIso = (value: unknown): string => {
+        const ms = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+        return ms > 0 ? new Date(ms).toISOString() : new Date(0).toISOString();
+      };
+      const sessions = result.sessions.map((session) => ({
+        sessionId: session.sessionId,
+        // Prefer user-renamed titles so list and chat header stay in sync.
+        title: vscTitles[String(session.sessionId)] || session.title,
+        messageCount: session.messageCount ?? 0,
+        lastTimestamp: toIso(session.lastTimestamp),
+        firstTimestamp: toIso(session.firstTimestamp),
+        cwd: session.cwd,
+        provider: 'zcode',
+        isFavorited: Boolean(favorites[String(session.sessionId)]),
+        favoritedAt: favorites[String(session.sessionId)]?.favoritedAt,
+      }));
+      webview.postMessage({
+        type: 'history_data',
+        content: JSON.stringify({
+          success: result.success,
+          sessions,
+          total: sessions.length,
+          favorites,
+          error: result.error,
+        }),
+      });
+    } catch (error: any) {
+      this.log.appendLine(`[BRIDGE] loadZcodeHistoryData error: ${error?.message || error}`);
+      webview.postMessage({
+        type: 'history_data',
+        content: JSON.stringify({
+          success: false,
+          sessions: [],
+          total: 0,
+          error: String(error?.message || error),
+        }),
+      });
+    }
+  }
 
   private loadGrokHistoryData(webview: vscode.Webview): void {
     try {
@@ -687,6 +753,49 @@ export class HistoryService {
       });
     }
   }
+  private loadMiniMaxHistoryData(webview: vscode.Webview): void {
+    try {
+      const favorites = this.getFavorites();
+      const vscTitles: Record<string, string> = this.context.globalState.get('ccg.historyTitles') ?? {};
+      const reader = new MiniMaxHistoryReader();
+      const workspace = this.getWorkspacePath();
+      const result = reader.getSessionsForProject(workspace);
+      const sessions = (result.sessions || []).map((session) => ({
+        sessionId: session.sessionId,
+        // Prefer user-renamed titles so list and chat header stay in sync.
+        title: vscTitles[session.sessionId] || session.title,
+        messageCount: session.messageCount,
+        lastTimestamp: new Date(session.lastTimestamp).toISOString(),
+        firstTimestamp: new Date(session.firstTimestamp).toISOString(),
+        cwd: session.cwd,
+        provider: 'minimax',
+        isFavorited: Boolean(favorites[session.sessionId]),
+        favoritedAt: favorites[session.sessionId]?.favoritedAt,
+        fileSize: session.fileSize,
+      }));
+      webview.postMessage({
+        type: 'history_data',
+        content: JSON.stringify({
+          success: result.success,
+          sessions,
+          total: sessions.length,
+          favorites,
+          error: result.error,
+        }),
+      });
+    } catch (error: any) {
+      this.log.appendLine(`[BRIDGE] loadMiniMaxHistoryData error: ${error?.message || error}`);
+      webview.postMessage({
+        type: 'history_data',
+        content: JSON.stringify({
+          success: false,
+          sessions: [],
+          total: 0,
+          error: String(error?.message || error),
+        }),
+      });
+    }
+  }
 
   loadSession(sessionId: string, provider: string | undefined, webview: vscode.Webview): void {
     if (!this.isValidSessionId(sessionId)) {
@@ -695,7 +804,7 @@ export class HistoryService {
       return;
     }
 
-    const knownProviders = new Set(['claude', 'codex', 'grok', 'kimi', 'opencode', 'pi', 'omp', 'dsh']);
+    const knownProviders = new Set(['claude', 'codex', 'grok', 'kimi', 'opencode', 'pi', 'omp', 'dsh', 'zcode', 'minimax']);
     const normalizedProvider = provider && knownProviders.has(provider) ? provider : undefined;
     this.log.appendLine(`[BRIDGE] loadSession called: sessionId="${sessionId}" provider="${normalizedProvider ?? 'auto'}"`);
 
@@ -709,6 +818,23 @@ export class HistoryService {
           webview.postMessage({ type: 'session_messages', content: JSON.stringify(messages) });
         } catch (e: any) {
           this.log.appendLine(`[BRIDGE] loadSession dsh error: ${e?.message || e}`);
+          webview.postMessage({ type: 'session_messages', content: JSON.stringify([]) });
+        }
+      })();
+      return;
+    }
+
+    if (normalizedProvider === 'zcode') {
+      // ZCode transcripts live in the desktop client's store — live app-server
+      // query via channel-manager, never local files.
+      void (async () => {
+        try {
+          const reader = new ZcodeHistoryReader(this.context);
+          const messages = await reader.getSessionMessages(sessionId, this.getWorkspacePath());
+          this.log.appendLine(`[BRIDGE] loadSession: loaded ${messages.length} messages from zcode history`);
+          webview.postMessage({ type: 'session_messages', content: JSON.stringify(messages) });
+        } catch (e: any) {
+          this.log.appendLine(`[BRIDGE] loadSession zcode error: ${e?.message || e}`);
           webview.postMessage({ type: 'session_messages', content: JSON.stringify([]) });
         }
       })();
@@ -738,6 +864,19 @@ export class HistoryService {
         return;
       } catch (e: any) {
         this.log.appendLine(`[BRIDGE] loadSession omp error: ${e?.message || e}`);
+        webview.postMessage({ type: 'session_messages', content: JSON.stringify([]) });
+        return;
+      }
+    }
+    if (normalizedProvider === 'minimax') {
+      try {
+        const reader = new MiniMaxHistoryReader();
+        const messages = reader.getSessionMessages(sessionId, this.getWorkspacePath());
+        this.log.appendLine(`[BRIDGE] loadSession: loaded ${messages.length} messages from minimax history`);
+        webview.postMessage({ type: 'session_messages', content: JSON.stringify(messages) });
+        return;
+      } catch (e: any) {
+        this.log.appendLine(`[BRIDGE] loadSession minimax error: ${e?.message || e}`);
         webview.postMessage({ type: 'session_messages', content: JSON.stringify([]) });
         return;
       }
@@ -826,10 +965,32 @@ export class HistoryService {
         })();
         return;
       }
+      if (parsedProvider === 'zcode') {
+        // ZCode delete prunes the session family in the CLI's own sqlite store.
+        void (async () => {
+          try {
+            const deleted = await new ZcodeHistoryReader(this.context)
+              .deleteSession(String(sessionId || '').trim(), this.getWorkspacePath());
+            this.log.appendLine(`[HISTORY] Delete ZCode session ${sessionId}: ${deleted ? 'ok' : 'not found'}`);
+            webview.postMessage({ type: 'delete_history_session_result', content: JSON.stringify({ success: deleted, sessionId }) });
+          } catch (e: any) {
+            this.log.appendLine(`[HISTORY] Delete ZCode session ${sessionId} error: ${e?.message || e}`);
+            webview.postMessage({ type: 'delete_history_session_result', content: JSON.stringify({ success: false, sessionId, error: e?.message || String(e) }) });
+          }
+        })();
+        return;
+      }
       if (parsedProvider === 'omp') {
         // OMP sessions are plain jsonl files under ~/.omp/agent/sessions/.
         const deleted = new OmpHistoryReader().deleteSession(String(sessionId || '').trim(), this.getWorkspacePath());
         this.log.appendLine(`[HISTORY] Delete OMP session ${sessionId}: ${deleted ? 'ok' : 'not found'}`);
+        webview.postMessage({ type: 'delete_history_session_result', content: JSON.stringify({ success: deleted, sessionId }) });
+        return;
+      }
+      if (parsedProvider === 'minimax') {
+        // MiniMax sessions live under ~/.minimax/v2/sessions/YYYY/MM/DD/<dir>.
+        const deleted = new MiniMaxHistoryReader().deleteSession(String(sessionId || '').trim(), this.getWorkspacePath());
+        this.log.appendLine(`[HISTORY] Delete MiniMax session ${sessionId}: ${deleted ? 'ok' : 'not found'}`);
         webview.postMessage({ type: 'delete_history_session_result', content: JSON.stringify({ success: deleted, sessionId }) });
         return;
       }
@@ -862,6 +1023,40 @@ export class HistoryService {
       const parsed = this.safeJson<any>(content, { sessionId: content });
       const sessionId = String(parsed.sessionId ?? content).trim();
       const title = String(parsed.title ?? '');
+      // Provider-routed export (upstream HistoryExportService): CLI providers
+      // whose sessions live outside the Claude/Codex stores read via their reader.
+      const exportProvider = String(parsed.provider ?? '').trim();
+      if (exportProvider === 'zcode') {
+        void (async () => {
+          const messages = await new ZcodeHistoryReader(this.context)
+            .getSessionMessages(sessionId, this.getWorkspacePath());
+          if (!sessionId || messages.length === 0) {
+            this.callWebviewJson(webview, 'onExportSessionData', { error: 'Session not found', sessionId });
+            return;
+          }
+          this.callWebviewJson(webview, 'onExportSessionData', {
+            sessionId,
+            title: title || sessionId.slice(0, 8),
+            exportedAt: new Date().toISOString(),
+            messages,
+          });
+        })().catch((e) => this.callWebviewJson(webview, 'onExportSessionData', { error: e?.message || String(e) }));
+        return;
+      }
+      if (exportProvider === 'minimax') {
+        const messages = new MiniMaxHistoryReader().getSessionMessages(sessionId, this.getWorkspacePath());
+        if (!sessionId || messages.length === 0) {
+          this.callWebviewJson(webview, 'onExportSessionData', { error: 'Session not found', sessionId });
+          return;
+        }
+        this.callWebviewJson(webview, 'onExportSessionData', {
+          sessionId,
+          title: title || sessionId.slice(0, 8),
+          exportedAt: new Date().toISOString(),
+          messages,
+        });
+        return;
+      }
       const messages = this.readSessionMessages(sessionId);
       if (!sessionId || messages.length === 0) {
         this.callWebviewJson(webview, 'onExportSessionData', { error: 'Session not found', sessionId });

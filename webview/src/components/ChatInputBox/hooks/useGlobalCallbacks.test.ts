@@ -74,6 +74,7 @@ function renderUseGlobalCallbacks(editable: HTMLDivElement) {
 
   return {
     getTextContent,
+    pathMappingRef,
     setHasContent,
     adjustHeight,
     renderFileTags,
@@ -142,14 +143,14 @@ describe('useGlobalCallbacks', () => {
     expect(getTextContent()).toBe('draft question\n@/path/to/file ');
   });
 
-  it('does not wipe existing content when a stale non-collapsed selection exists', () => {
+  it('does not wipe existing content when a stale non-collapsed selection exists (#1700)', () => {
     const editable = createEditable();
     editable.appendChild(document.createTextNode('existing draft'));
     const { getTextContent } = renderUseGlobalCallbacks(editable);
 
     // Simulate the real repro: user selected text inside the box earlier, then went
-    // back to the editor and triggered an external insert. The webview's stale
-    // select-all range is still non-collapsed and still anchored in editable.
+    // back to the IDE editor and triggered "Add selection to CC GUI". The webview's
+    // stale select-all range is still non-collapsed and still anchored in editable.
     editable.blur();
     const selectAll = document.createRange();
     selectAll.selectNodeContents(editable);
@@ -164,7 +165,7 @@ describe('useGlobalCallbacks', () => {
     expect(getTextContent()).toBe('existing draft\n@src/file.ts#L10-20 ');
   });
 
-  it('handleFilePathFromJava does not wipe content on stale non-collapsed selection', () => {
+  it('handleFilePathFromJava does not wipe content on stale non-collapsed selection (#1700)', () => {
     const editable = createEditable();
     editable.appendChild(document.createTextNode('existing draft'));
     const { getTextContent } = renderUseGlobalCallbacks(editable);
@@ -181,5 +182,57 @@ describe('useGlobalCallbacks', () => {
 
     expect(getTextContent()).toContain('existing draft');
     expect(getTextContent()).toContain('@/abs/path/Helper.ts ');
+  });
+
+  it('keeps a legacy non-absolute payload as plain text instead of dropping it', () => {
+    const editable = createEditable();
+    const { getTextContent, pathMappingRef } = renderUseGlobalCallbacks(editable);
+
+    window.handleFilePathFromJava?.('docs/relative/note.md');
+    vi.runAllTimers();
+
+    expect(getTextContent()).toBe('docs/relative/note.md ');
+    expect(pathMappingRef.current.size).toBe(0);
+    expect(editable.querySelectorAll('.file-tag')).toHaveLength(0);
+  });
+
+  it('registers a strict line-number reference with spaces through the generic bridge', () => {
+    const editable = createEditable();
+    const { getTextContent, pathMappingRef } = renderUseGlobalCallbacks(editable);
+
+    window.insertCodeSnippetAtCursor?.('@C:\\Program Files\\src\\Main.java#L10-12');
+    vi.runAllTimers();
+
+    expect(getTextContent()).toBe('@C:\\Program Files\\src\\Main.java#L10-12 ');
+    expect(pathMappingRef.current.get('C:\\Program Files\\src\\Main.java')).toBe(
+      'C:\\Program Files\\src\\Main.java'
+    );
+    expect(pathMappingRef.current.get('C:\\Program Files\\src\\Main.java#L10-12')).toBe(
+      'C:\\Program Files\\src\\Main.java'
+    );
+  });
+
+  it('registers explicit file references sent through insertCodeSnippetAtCursor (sendFilePath)', () => {
+    const editable = createEditable();
+    const { getTextContent, pathMappingRef } = renderUseGlobalCallbacks(editable);
+
+    // The VS Code host sends `@path1 @path2` as one string through this
+    // generic bridge (ccGui.sendFilePath), so explicit absolute references
+    // must be registered here for chip rendering to survive the multi-@
+    // fallback guard.
+    window.insertCodeSnippetAtCursor?.(
+      '@C:\\project\\templates\\view file.xml @C:\\project\\pages\\index.vue'
+    );
+    vi.runAllTimers();
+
+    expect(getTextContent()).toBe(
+      '@C:\\project\\templates\\view file.xml @C:\\project\\pages\\index.vue '
+    );
+    expect(pathMappingRef.current.get('view file.xml')).toBe(
+      'C:\\project\\templates\\view file.xml'
+    );
+    expect(pathMappingRef.current.get('index.vue')).toBe(
+      'C:\\project\\pages\\index.vue'
+    );
   });
 });

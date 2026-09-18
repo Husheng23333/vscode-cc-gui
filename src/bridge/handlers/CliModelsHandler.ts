@@ -11,7 +11,7 @@ import { getDshSettings } from '../services/DshSettingsStore';
 const CHANNEL_SCRIPT = 'channel-manager.js';
 const TIMEOUT_MS = 50_000;
 const MAX_OUTPUT_CHARS = 64_000;
-const LIST_MODEL_PROVIDERS = new Set(['grok', 'kimi', 'opencode', 'pi', 'omp', 'dsh']);
+const LIST_MODEL_PROVIDERS = new Set(['grok', 'kimi', 'opencode', 'pi', 'omp', 'dsh', 'zcode', 'minimax']);
 
 /**
  * Lists models for headless CLI providers (Kimi / OpenCode / PI / OMP / DSH) via channel-manager.

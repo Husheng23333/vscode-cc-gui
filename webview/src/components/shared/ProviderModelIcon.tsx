@@ -134,6 +134,28 @@ const OmpIcon = (size: number): ReactElement => (
     <path fill="currentColor" d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z" />
   </svg>
 );
+/**
+ * ZCode badge — original "Z" letterform drawn for this project (the desktop
+ * app ships no monochrome mark). Mono follows currentColor like the Pi/OMP
+ * marks; colored inverts to white-on-brand like the Xiaomi wrapper.
+ */
+const ZCODE_BRAND_COLOR = '#4E6BFF';
+const ZCODE_Z_PATH = 'M16 16h32v6L26 42h22v6H16v-6l22-20H16z';
+const ZcodeIcon = (size: number, colored: boolean): ReactElement => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 64 64"
+    width={size}
+    height={size}
+    aria-label="ZCode"
+    role="img"
+    style={{ flex: 'none', display: 'block' }}
+  >
+    <title>ZCode</title>
+    {colored && <rect width={64} height={64} rx={14} fill={ZCODE_BRAND_COLOR} />}
+    <path fill={colored ? '#fff' : 'currentColor'} d={ZCODE_Z_PATH} />
+  </svg>
+);
 
 /**
  * Icon renderers for each vendor.
@@ -172,6 +194,10 @@ const VENDOR_ICON_MAP: Record<
     colored ? <ZhipuColor size={size} /> : <ZhipuMono size={size} />,
   minimax: (size, colored) =>
     colored ? <MinimaxColor size={size} /> : <MinimaxMono size={size} />,
+  // Original badge above; no lobehub ZCode icon exists. GLM-* model ids
+  // resolve to the zhipu brand via the pattern rules, not this entry.
+  zcode: (size, colored) =>
+    ZcodeIcon(size, colored),
   xiaomi: (size, colored) =>
     XiaomiMiMoIcon(size, colored),
   doubao: (size, colored) =>

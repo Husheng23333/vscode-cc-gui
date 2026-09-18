@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { sendBridgeEvent } from '../../utils/bridge';
 import type { ModelInfo } from '../../components/ChatInputBox/types';
-import { GROK_MODELS, KIMI_MODELS, OMP_MODELS, OMP_ROLE_MODELS, OPENCODE_MODELS, PI_MODELS, DSH_MODELS } from '../../components/ChatInputBox/types';
+import { GROK_MODELS, KIMI_MODELS, MINIMAX_MODELS, OMP_MODELS, OMP_ROLE_MODELS, OPENCODE_MODELS, PI_MODELS, DSH_MODELS, ZCODE_MODELS } from '../../components/ChatInputBox/types';
 import { isCliOnlyProvider } from './cliProviders';
 
 type CliModelsByProvider = Record<string, ModelInfo[]>;
@@ -33,10 +33,12 @@ const CLI_MODELS_TIMEOUT_MS = 15_000;
 function fallbackModels(providerId: string): ModelInfo[] {
   if (providerId === 'grok') return GROK_MODELS;
   if (providerId === 'kimi') return KIMI_MODELS;
+  if (providerId === 'minimax') return MINIMAX_MODELS;
   if (providerId === 'opencode') return OPENCODE_MODELS;
   if (providerId === 'pi') return PI_MODELS;
   if (providerId === 'omp') return OMP_MODELS;
   if (providerId === 'dsh') return DSH_MODELS;
+  if (providerId === 'zcode') return ZCODE_MODELS;
   return [];
 }
 

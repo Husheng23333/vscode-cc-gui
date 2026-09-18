@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { ClaudeContentBlock, ClaudeMessage, ToolResultBlock } from '../types';
 import { applySubagentHistoryCompletion, extractSubagentsFromMessages } from './useSubagents';
 
-const assistantWithAgent = (toolUseId: string): ClaudeMessage => ({
+const assistantWithAgent = (
+  toolUseId: string,
+  options?: { runInBackground?: boolean; description?: string },
+): ClaudeMessage => ({
   type: 'assistant',
   content: '',
   raw: {
@@ -14,8 +17,9 @@ const assistantWithAgent = (toolUseId: string): ClaudeMessage => ({
           name: 'Agent',
           input: {
             subagent_type: 'research',
-            description: '分析后端历史索引服务的设计模式',
+            description: options?.description ?? '分析后端历史索引服务的设计模式',
             prompt: '分析 ClaudeHistoryIndexService',
+            ...(options?.runInBackground ? { run_in_background: true } : {}),
           },
         },
       ],
@@ -23,7 +27,10 @@ const assistantWithAgent = (toolUseId: string): ClaudeMessage => ({
   },
 });
 
-const toolResultMessage = (toolUseId: string): ClaudeMessage => ({
+const toolResultMessage = (
+  toolUseId: string,
+  options?: { isError?: boolean; content?: string; withUsage?: boolean },
+): ClaudeMessage => ({
   type: 'user',
   content: '',
   raw: {
@@ -31,18 +38,21 @@ const toolResultMessage = (toolUseId: string): ClaudeMessage => ({
       {
         type: 'tool_result',
         tool_use_id: toolUseId,
-        content: [{ type: 'text', text: 'final report' }],
+        is_error: options?.isError,
+        content: [{ type: 'text', text: options?.content ?? 'final report' }],
       },
     ],
-    toolUseResult: {
-      status: 'completed',
-      agentId: 'af5a83aa15ca39691',
-      agentType: 'research',
-      totalDurationMs: 62629,
-      totalTokens: 110586,
-      totalToolUseCount: 4,
-      toolStats: { readCount: 4, searchCount: 0 },
-    },
+    toolUseResult: options?.withUsage === false
+      ? { agentId: 'agent-launch-ack' }
+      : {
+        status: 'completed',
+        agentId: 'af5a83aa15ca39691',
+        agentType: 'research',
+        totalDurationMs: 62629,
+        totalTokens: 110586,
+        totalToolUseCount: 4,
+        toolStats: { readCount: 4, searchCount: 0 },
+      },
   } as any,
 });
 
@@ -385,5 +395,85 @@ describe('extractSubagentsFromMessages', () => {
     expect(applySubagentHistoryCompletion(extracted, {
       tu_spawn: { success: true, completed: true, messages: [] },
     })[0].status).toBe('error');
+  });
+
+  it('flips to error only on an authoritatively observed sidechain failure', () => {
+    const messages = [
+      assistantWithAgent('tool-err', { runInBackground: true }),
+      toolResultMessage('tool-err', { content: 'launched', withUsage: false }),
+    ];
+
+    const extracted = extractSubagentsFromMessages(
+      messages, getContentBlocks, findToolResult(messages), getToolResultRaw(messages), {},
+    );
+
+    // Transient resolution/read failures (success === false) must keep the
+    // agent running so polling can correct them.
+    expect(applySubagentHistoryCompletion(extracted, {
+      'tool-err': { success: false, status: 'error', error: 'Read timed out' },
+    })[0].status).toBe('running');
+
+    // The backend read the sidechain and saw the turn abort: terminal error.
+    expect(applySubagentHistoryCompletion(extracted, {
+      'tool-err': { success: true, status: 'error', error: 'Codex subagent turn was aborted' },
+    })[0].status).toBe('error');
+  });
+});
+
+describe('extractSubagentsFromMessages spawn_agent', () => {
+  const spawnAssistant = (toolUseId: string, input: Record<string, unknown>): ClaudeMessage => ({
+    type: 'assistant',
+    content: '',
+    raw: {
+      message: {
+        content: [{ type: 'tool_use', id: toolUseId, name: 'spawn_agent', input }],
+      },
+    },
+  });
+
+  const spawnResult = (toolUseId: string, content: string, isError?: boolean): ClaudeMessage => ({
+    type: 'user',
+    content: '',
+    raw: {
+      content: [{ type: 'tool_result', tool_use_id: toolUseId, content, is_error: isError }],
+    } as any,
+  });
+
+  it('does not expose Codex spawn_agent message content in StatusPanel fields', () => {
+    const opaqueMessage = 'gAAAAABopaque-transport-content';
+    const messages = [spawnAssistant('call-safe-spawn', { task_name: '/root/reviewer', message: opaqueMessage })];
+
+    const [subagent] = extractSubagentsFromMessages(
+      messages, getContentBlocks, findToolResult(messages), getToolResultRaw(messages),
+    );
+
+    expect(subagent).toMatchObject({ type: 'reviewer', description: '', agentPath: '/root/reviewer' });
+    expect(subagent.prompt).toBeUndefined();
+    expect(JSON.stringify(subagent)).not.toContain(opaqueMessage);
+  });
+
+  it('filters only empty spawn_agent argument parsing noise', () => {
+    const messages = [
+      spawnAssistant('call-invalid-spawn', {}),
+      spawnResult('call-invalid-spawn', 'failed to parse function arguments: EOF while parsing a value'),
+    ];
+
+    expect(extractSubagentsFromMessages(
+      messages, getContentBlocks, findToolResult(messages), getToolResultRaw(messages),
+    )).toEqual([]);
+  });
+
+  it('retains a valid spawn_agent request that fails at runtime', () => {
+    const messages = [
+      spawnAssistant('call-valid-failure', { task_name: 'reviewer', message: 'opaque' }),
+      spawnResult('call-valid-failure', 'permission denied while starting agent', true),
+    ];
+
+    const subagents = extractSubagentsFromMessages(
+      messages, getContentBlocks, findToolResult(messages), getToolResultRaw(messages),
+    );
+
+    expect(subagents).toHaveLength(1);
+    expect(subagents[0]).toMatchObject({ type: 'reviewer', status: 'error' });
   });
 });

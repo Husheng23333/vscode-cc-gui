@@ -71,4 +71,30 @@ describe('userMessageSanitizer', () => {
       },
     });
   });
+  // Codex CLI injects <recommended_plugins> as the first user turn; it must never
+  // surface as transcript text or session title (upstream bdcf21b2).
+  describe('recommended_plugins injection', () => {
+    it('strips the injection block and keeps the real prompt in the same message', () => {
+      const raw = '<recommended_plugins>\nHere is a list of plugins...\n</recommended_plugins>\n\nWhat changed in main.ts?';
+      assert.equal(sanitizeUserFacingText(raw), 'What changed in main.ts?');
+    });
+
+    it('sanitizes an injection-only message to empty', () => {
+      assert.equal(
+        sanitizeUserFacingText('<recommended_plugins>\nHere is a list of plugins...\n</recommended_plugins>'),
+        '',
+      );
+    });
+
+    it('sanitizes a truncated injection (closing tag cut off) to empty', () => {
+      assert.equal(sanitizeUserFacingText('<recommended_plugins>\nHere is a list of plugi'), '');
+    });
+
+    it('strips a well-formed block mid-text while keeping surrounding user text', () => {
+      assert.equal(
+        sanitizeUserFacingText('before <recommended_plugins>x</recommended_plugins> after'),
+        'before after',
+      );
+    });
+  });
 });

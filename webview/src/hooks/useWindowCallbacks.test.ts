@@ -66,6 +66,8 @@ describe('useWindowCallbacks integration', () => {
     suppressNextStatusToastRef: { current: false },
     streamingContentRef: { current: '' },
     streamingThinkingRef: { current: '' },
+    recordStreamingBlockReset: vi.fn(),
+    clearStreamingBlockResets: vi.fn(),
     isStreamingRef: { current: false },
     useBackendStreamingRenderRef: { current: false },
     autoExpandedThinkingKeysRef: { current: new Set<string>() },
@@ -87,6 +89,9 @@ describe('useWindowCallbacks integration', () => {
     openPermissionDialog: vi.fn(),
     openAskUserQuestionDialog: vi.fn(),
     openPlanApprovalDialog: vi.fn(),
+    forceClosePermissionDialog: vi.fn(),
+    forceCloseAskUserQuestionDialog: vi.fn(),
+    forceClosePlanApprovalDialog: vi.fn(),
     openContextUsageDialog: vi.fn(),
     updateContextUsageData: vi.fn(),
     closeContextUsageDialog: vi.fn(),
@@ -424,7 +429,7 @@ describe('useWindowCallbacks integration', () => {
     act(() => {
       window.__sessionTransitioning = true;
       window.__resetTransientUiState!();
-      opts.setMessages.mockClear();
+      vi.mocked(opts.setMessages).mockClear();
     });
 
     // Timer fires — must NOT re-apply the old snapshot.
@@ -461,7 +466,7 @@ describe('useWindowCallbacks integration', () => {
 
     // setMessages may have been called by reset with loading flags only via
     // other setters — but not with the stale snapshot array.
-    const messageListWrites = opts.setMessages.mock.calls.filter(
+    const messageListWrites = vi.mocked(opts.setMessages).mock.calls.filter(
       (args: unknown[]) => Array.isArray(args[0]),
     );
     expect(messageListWrites).toHaveLength(0);
@@ -1493,43 +1498,85 @@ describe('useWindowCallbacks integration', () => {
       });
     });
 
-    it('onBlockReset clears streaming refs to prevent cross-turn content merging', () => {
+    it('defers delta rendering until a pending structural snapshot is processed', () => {
+      vi.useFakeTimers();
+      const rafCallbacks: FrameRequestCallback[] = [];
+      let nextRafId = 0;
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        rafCallbacks.push(callback);
+        nextRafId += 1;
+        return nextRafId;
+      });
+      vi.stubGlobal('cancelAnimationFrame', vi.fn());
+
+      const opts = createOptions();
+      renderHook(() => useWindowCallbacks(opts));
+
+      act(() => {
+        window.onStreamStart!();
+        window.updateMessages!(JSON.stringify([
+          {
+            type: 'assistant',
+            content: 'snapshot',
+            raw: {
+              message: {
+                content: [{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'ls' } }],
+              },
+            },
+          },
+        ]), 1);
+        window.onContentDelta!('delta-after-snapshot');
+      });
+
+      // The delta lands in the cumulative buffer, but no render is scheduled
+      // while the structural snapshot is still pending.
+      expect(opts.streamingContentRef.current).toBe('delta-after-snapshot');
+      expect(rafCallbacks).toHaveLength(0);
+
+      act(() => {
+        vi.advanceTimersByTime(16);
+      });
+
+      // Once the snapshot is applied, the deferred content + thinking renders
+      // are flushed together.
+      expect(rafCallbacks).toHaveLength(2);
+      vi.useRealTimers();
+    });
+
+    it('onBlockReset records a streaming block boundary without clearing the active stream', () => {
       stubSynchronousTimers();
 
       const opts = createOptions();
       renderHook(() => useWindowCallbacks(opts));
 
-      // Start streaming
+      // Start streaming (clears boundaries from any previous turn)
       act(() => { window.onStreamStart!(); });
       expect(opts.isStreamingRef.current).toBe(true);
+      expect(opts.clearStreamingBlockResets).toHaveBeenCalled();
 
-      // Simulate first turn's thinking delta
+      // Simulate first block's thinking delta
       act(() => { window.onThinkingDelta!('Turn1Thinking'); });
       expect(opts.streamingThinkingRef.current).toBe('Turn1Thinking');
 
-      // Simulate first turn's content delta
-      act(() => { window.onContentDelta!('Turn1Content'); });
-      expect(opts.streamingContentRef.current).toBe('Turn1Content');
-
-      // Block reset signal arrives (new assistant message in stream)
+      // Block reset signal arrives (new content block in stream)
       act(() => { window.onBlockReset!(); });
 
-      // Streaming refs should be cleared
-      expect(opts.streamingThinkingRef.current).toBe('');
-      expect(opts.streamingContentRef.current).toBe('');
+      // The thinking buffer stays cumulative (prefix-strip reconciliation
+      // depends on it); the boundary offset is recorded via the hook callback.
+      expect(opts.streamingThinkingRef.current).toBe('Turn1Thinking');
+      expect(opts.recordStreamingBlockReset).toHaveBeenCalledTimes(1);
 
-      // But streaming should still be active
+      // Streaming should still be active
       expect(opts.isStreamingRef.current).toBe(true);
 
-      // Second turn's deltas arrive - should NOT merge with first turn
+      // Second block's deltas accumulate after the boundary
       act(() => { window.onThinkingDelta!('Turn2Thinking'); });
-      expect(opts.streamingThinkingRef.current).toBe('Turn2Thinking');
+      expect(opts.streamingThinkingRef.current).toBe('Turn1ThinkingTurn2Thinking');
+      expect(opts.recordStreamingBlockReset).toHaveBeenCalledTimes(1);
 
-      act(() => { window.onContentDelta!('Turn2Content'); });
-      expect(opts.streamingContentRef.current).toBe('Turn2Content');
-
-      // If onBlockReset was NOT called, we would have "Turn1ThinkingTurn2Thinking"
-      // and "Turn1ContentTurn2Content" (merged content)
+      // A subsequent reset records another boundary
+      act(() => { window.onBlockReset!(); });
+      expect(opts.recordStreamingBlockReset).toHaveBeenCalledTimes(2);
     });
 
     it('onBlockReset is ignored when stream is not active', () => {
@@ -1552,7 +1599,8 @@ describe('useWindowCallbacks integration', () => {
       // Block reset arrives when stream is not active
       act(() => { window.onBlockReset!(); });
 
-      // Refs should NOT be cleared (stale signal ignored)
+      // No boundary recorded (stale signal ignored)
+      expect(opts.recordStreamingBlockReset).not.toHaveBeenCalled();
       expect(opts.streamingThinkingRef.current).toBe('StaleThinking');
       expect(opts.streamingContentRef.current).toBe('StaleContent');
     });

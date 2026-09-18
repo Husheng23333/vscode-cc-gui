@@ -7,6 +7,7 @@ import {
   createInitialEventState,
   isWindowsTaskkillParseNoise,
   processCodexEventStream,
+  shouldBridgeCodexApproval,
 } from './codex-event-handler.js';
 
 async function* eventsFrom(items) {
@@ -46,6 +47,30 @@ function makeConfig(overrides = {}) {
     ...overrides,
   };
 }
+
+test('native auto review does not invoke the late Java approval bridge', () => {
+  assert.equal(
+    shouldBridgeCodexApproval({
+      normalizedPermissionMode: 'auto',
+      threadOptions: { approvalPolicy: 'on-request' },
+    }),
+    false,
+  );
+  assert.equal(
+    shouldBridgeCodexApproval({
+      normalizedPermissionMode: 'default',
+      threadOptions: { approvalPolicy: 'on-request' },
+    }),
+    true,
+  );
+  assert.equal(
+    shouldBridgeCodexApproval({
+      normalizedPermissionMode: 'bypassPermissions',
+      threadOptions: { approvalPolicy: 'never' },
+    }),
+    false,
+  );
+});
 
 test('Codex item.updated agent_message emits incremental content deltas before completion', async () => {
   const emittedMessages = [];
@@ -457,7 +482,7 @@ test('custom_tool_call exec update_plan treats array script failure output as an
   });
 });
 
-test('session replay emits custom_tool_call exec plans found only in JSONL', async () => {
+test('current-turn session replay emits custom_tool_call exec plans found only in JSONL', async () => {
   const tempDirectory = await mkdtemp(join(tmpdir(), 'codex-custom-plan-replay-'));
   const tempSessionPath = join(tempDirectory, 'fixture-session.jsonl');
   await writeFile(tempSessionPath, '', 'utf8');
@@ -465,6 +490,8 @@ test('session replay emits custom_tool_call exec plans found only in JSONL', asy
   const emittedMessages = [];
   const state = createInitialEventState((message) => emittedMessages.push(message));
   state.sessionFilePath = tempSessionPath;
+  state.sessionTurnStartCursor = 0;
+  state.sessionFunctionCursor = 0;
 
   try {
     await writeFile(

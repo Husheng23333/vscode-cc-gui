@@ -434,6 +434,10 @@ export const MessageItem = memo(function MessageItem({
     () => blocks.filter((block) => !isNonRenderedToolUse(block, isMessageStreaming)),
     [blocks, isMessageStreaming],
   );
+  const isUserImageOnly =
+    message.type === 'user' &&
+    renderedBlocks.length > 0 &&
+    renderedBlocks.every((block) => block.type === 'image');
   const isEmptyStreamingPlaceholder =
     message.type === 'assistant' &&
     isMessageStreaming &&
@@ -724,7 +728,7 @@ export const MessageItem = memo(function MessageItem({
         </div>
       )}
 
-      <div className="message-content">
+      <div className={`message-content${isUserImageOnly ? ' image-only' : ''}`}>
         {renderGroupedBlocks()}
       </div>
 

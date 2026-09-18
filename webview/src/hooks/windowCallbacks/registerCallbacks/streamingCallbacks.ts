@@ -2,7 +2,9 @@
  * streamingCallbacks.ts
  *
  * Registers window bridge callbacks for streaming:
- * onStreamStart, onContentDelta, onThinkingDelta, onStreamEnd, onPermissionDenied.
+ * onStreamStart, onContentDelta, onThinkingDelta, onStreamEnd, onBlockReset,
+ * onStreamingHeartbeat, onPermissionDenied, plus __flushDeferredStreamingRenders
+ * (called after a pending structural snapshot is applied to resume delta rendering).
  */
 
 import type { UseWindowCallbacksOptions } from '../../useWindowCallbacks';
@@ -183,6 +185,8 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     setExpandedThinking,
     streamingContentRef,
     streamingThinkingRef,
+    recordStreamingBlockReset,
+    clearStreamingBlockResets,
     isStreamingRef,
     useBackendStreamingRenderRef,
     autoExpandedThinkingKeysRef,
@@ -270,8 +274,10 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     window.__streamEndProcessedTurnId = undefined;
     // Record turn start time for duration calculation in onStreamEnd
     window.__turnStartedAt = Date.now();
+    window.__streamingDeltaRenderDeferred = false;
     streamingContentRef.current = '';
     streamingThinkingRef.current = '';
+    clearStreamingBlockResets?.();
     isStreamingRef.current = true;
     startStallWatchdog();
     useBackendStreamingRenderRef.current = false;
@@ -361,6 +367,13 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
   const scheduleContentRaf = createStreamingRafScheduler(contentUpdateTimeoutRef, lastContentUpdateRef);
   const scheduleThinkingRaf = createStreamingRafScheduler(thinkingUpdateTimeoutRef, lastThinkingUpdateRef);
 
+  window.__flushDeferredStreamingRenders = () => {
+    if (!window.__streamingDeltaRenderDeferred || !isStreamingRef.current) return;
+    window.__streamingDeltaRenderDeferred = false;
+    scheduleContentRaf();
+    scheduleThinkingRaf();
+  };
+
   /**
    * Ensure streaming refs are live. STREAM_START can lag behind the first
    * content_delta / tool MESSAGE; without this, onContentDelta / onMessage
@@ -446,6 +459,13 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     if (!isStreamingRef.current) return;
     window.__lastStreamActivityAt = Date.now();
     streamingContentRef.current += delta;
+    if (window.__pendingUpdateRaf != null || window.__pendingUpdateJson != null) {
+      // Let the pending structural snapshot establish the message identity first.
+      // The snapshot merge already consumes this buffer, so a second React update
+      // here would only race the authoritative structural update.
+      window.__streamingDeltaRenderDeferred = true;
+      return;
+    }
     scheduleContentRaf();
   };
 
@@ -456,6 +476,10 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     if (!isStreamingRef.current) return;
     window.__lastStreamActivityAt = Date.now();
     streamingThinkingRef.current += delta;
+    if (window.__pendingUpdateRaf != null || window.__pendingUpdateJson != null) {
+      window.__streamingDeltaRenderDeferred = true;
+      return;
+    }
     scheduleThinkingRaf();
   };
 
@@ -637,6 +661,7 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     // Content buffer refs
     streamingContentRef.current = '';
     streamingThinkingRef.current = '';
+    clearStreamingBlockResets?.();
     autoExpandedThinkingKeysRef.current.clear();
 
     // Mark that streaming just ended - used by mergeConsecutiveAssistantMessages to
@@ -871,6 +896,7 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     streamingTurnIdRef.current = -1;
     streamingContentRef.current = '';
     streamingThinkingRef.current = '';
+    clearStreamingBlockResets?.();
     autoExpandedThinkingKeysRef.current.clear();
 
     setMessages((prev) => {
@@ -1144,35 +1170,28 @@ export function registerStreamingCallbacks(options: UseWindowCallbacksOptions): 
     } catch { /* ignore parse errors */ }
   };
 
-  // Block reset callback — clears streaming content refs when a new assistant
-  // message starts within an ongoing stream (e.g., after tool_use loop iteration).
-  // This prevents cross-turn content merging where new thinking/text deltas
-  // would append to previous turn's buffered content.
+  // Block reset callback — the backend emits [BLOCK_RESET] when a new content
+  // block starts within an ongoing stream (content_block_start boundaries and
+  // per-block normalized assistant snapshots, e.g. consecutive thinking blocks
+  // sharing one response id).
+  //
+  // The content/thinking buffers stay CUMULATIVE: syncThinkingBlocksWithContent /
+  // syncTextBlocksWithContent reconcile them against raw blocks by
+  // prefix-stripping, so clearing them here would either drop the finished block
+  // from the live render or freeze later deltas (multi-block prefix mismatch).
+  // Instead, record the current buffer offsets as a block boundary;
+  // patchAssistantForStreaming then materializes one raw block per recorded
+  // segment, so the new block never merges into the previous one — even while
+  // the backend snapshot lags behind the deltas.
+  //
+  // No explicit flush is needed before recording the boundary: deltas land in
+  // the refs synchronously (the rAF throttle only re-renders from the refs),
+  // so nothing sits in a throttle window that a reset could discard.
   window.onBlockReset = () => {
     if (!isStreamingRef.current) {
       // Stream not active, ignore (could be stale signal after stream ended)
       return;
     }
-    // Clear content buffers - new deltas will start fresh
-    streamingContentRef.current = '';
-    streamingThinkingRef.current = '';
-    // Intentionally NOT resetting streamingMessageIndexRef here: the backend will
-    // send a new updateMessages snapshot for this turn, which will eventually set
-    // the correct index via the isStaleSnapshot guard. Resetting the index now
-    // would leave a window where incoming deltas have nowhere to land.
-    // Reset throttle timeouts to ensure clean state for new deltas
-    if (contentUpdateTimeoutRef.current != null) {
-      cancelAnimationFrame(contentUpdateTimeoutRef.current);
-      contentUpdateTimeoutRef.current = null;
-    }
-    if (thinkingUpdateTimeoutRef.current != null) {
-      cancelAnimationFrame(thinkingUpdateTimeoutRef.current);
-      thinkingUpdateTimeoutRef.current = null;
-    }
-    // Reset last update timestamps to prevent throttle delays
-    lastContentUpdateRef.current = 0;
-    lastThinkingUpdateRef.current = 0;
-    // Clear auto-expanded thinking keys for the new turn
-    autoExpandedThinkingKeysRef.current.clear();
+    recordStreamingBlockReset?.();
   };
 }

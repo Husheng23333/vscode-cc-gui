@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { tmpdir } from 'os';
+import { randomUUID } from 'crypto';
 import * as vscode from 'vscode';
 import {
   buildRememberedApproval,
@@ -10,6 +11,34 @@ import {
 
 const REMEMBERED_TOOL_APPROVALS_KEY = 'ccg.remembered_tool_approvals';
 const STALE_PERMISSION_REQUEST_MAX_AGE_MS = 10 * 60 * 1000;
+const MAX_UNDELIVERED_CLOSE_SIGNALS = 64;
+/** Fallback when no settings getter is injected; mirrors SettingsStore's default. */
+const FALLBACK_DIALOG_TIMEOUT_SECONDS = 300;
+
+type DialogKind = 'permission' | 'askUserQuestion' | 'planApproval';
+
+/**
+ * One dialog currently shown (or awaiting delivery) in a webview. The host keeps
+ * the payload so the show can be re-injected after a webview reload; dialogToken
+ * distinguishes generations when a session reuses a request/channel id.
+ */
+interface PendingDialogShow {
+  kind: DialogKind;
+  requestId: string;
+  dialogToken: string;
+  sequence: number;
+  /** Inner JSON string exactly as the webview callback receives it. */
+  payloadJson: string;
+  /** Owning surface; survives the webview's own reload. */
+  webview: vscode.Webview;
+}
+
+interface UndeliveredCloseSignal {
+  kind: DialogKind;
+  targetId: string;
+  dialogToken: string;
+  webview: vscode.Webview;
+}
 
 type ToolPermissionRequest = {
   requestId: string;
@@ -28,6 +57,12 @@ export class PermissionIpcService implements vscode.Disposable {
   private readonly rememberedApprovals: RememberedApproval[] = [];
   private readonly log: vscode.OutputChannel;
   private readonly getWebview: () => vscode.Webview | undefined;
+  /** Dialogs shown and not yet resolved, keyed `${kind}:${requestId}`; replayed after reload. */
+  private readonly pendingShows = new Map<string, PendingDialogShow>();
+  private nextDialogSequence = 0;
+  /** Close signals not yet acknowledged by the frontend; replayed before shows and on ready. */
+  private undeliveredCloseSignals: UndeliveredCloseSignal[] = [];
+  private readonly getDialogTimeoutSeconds?: () => number;
   /** Map daemon/bridge request id → owning webview (multi-window routing). */
   private readonly getWebviewForBridgeRequestId?: (bridgeRequestId: string) => vscode.Webview | undefined;
   /** Number of live CC GUI webviews (tabs/sidebars). Used to avoid cross-tab fallback. */
@@ -40,12 +75,14 @@ export class PermissionIpcService implements vscode.Disposable {
     globalState?: vscode.Memento,
     getWebviewForBridgeRequestId?: (bridgeRequestId: string) => vscode.Webview | undefined,
     getKnownWebviewCount?: () => number,
+    getDialogTimeoutSeconds?: () => number,
   ) {
     this.log = log;
     this.getWebview = getWebview;
     this.globalState = globalState;
     this.getWebviewForBridgeRequestId = getWebviewForBridgeRequestId;
     this.getKnownWebviewCount = getKnownWebviewCount;
+    this.getDialogTimeoutSeconds = getDialogTimeoutSeconds;
   }
 
   /**
@@ -123,12 +160,134 @@ export class PermissionIpcService implements vscode.Disposable {
       // Ignore watcher cleanup failures.
     }
     this.watcher = undefined;
+    this.pendingShows.clear();
+    this.undeliveredCloseSignals = [];
+  }
+  private dialogDeadlineMs(): number {
+    const seconds = this.getDialogTimeoutSeconds?.() ?? FALLBACK_DIALOG_TIMEOUT_SECONDS;
+    return Date.now() + seconds * 1000;
+  }
+
+  private static pendingShowKey(kind: DialogKind, requestId: string): string {
+    return `${kind}:${requestId}`;
+  }
+
+  private static dialogFileNames(kind: DialogKind, sessionId: string, requestId: string): { request: string; response: string } {
+    if (kind === 'permission') {
+      return { request: `request-${sessionId}-${requestId}.json`, response: `response-${sessionId}-${requestId}.json` };
+    }
+    if (kind === 'askUserQuestion') {
+      return { request: `ask-user-question-${sessionId}-${requestId}.json`, response: `ask-user-question-response-${sessionId}-${requestId}.json` };
+    }
+    return { request: `plan-approval-${sessionId}-${requestId}.json`, response: `plan-approval-response-${sessionId}-${requestId}.json` };
+  }
+
+  private static kindForCloseFunction(functionName: string): DialogKind | undefined {
+    if (functionName.includes('AskUserQuestion')) return 'askUserQuestion';
+    if (functionName.includes('PlanApproval')) return 'planApproval';
+    if (functionName.includes('Permission')) return 'permission';
+    return undefined;
+  }
+
+  /**
+   * Push a force-close signal to the owning webview's dialog manager. Used after
+   * the daemon already resolved the request (safety-net timeout etc.) so the
+   * frontend dialog cannot stay stuck and block later shows. The signal is kept
+   * until the frontend acknowledges delivery, because a postMessage fired while
+   * the page reloads can be dropped silently.
+   */
+  private forceCloseFrontendDialog(kind: DialogKind, targetId: string, dialogToken: string, webview: vscode.Webview): void {
+    this.undeliveredCloseSignals = this.undeliveredCloseSignals.filter(
+      (signal) => !(signal.kind === kind && signal.targetId === targetId && signal.dialogToken === dialogToken),
+    );
+    while (this.undeliveredCloseSignals.length >= MAX_UNDELIVERED_CLOSE_SIGNALS) {
+      this.undeliveredCloseSignals.shift();
+    }
+    this.undeliveredCloseSignals.push({ kind, targetId, dialogToken, webview });
+    this.postForceClose(webview, kind, targetId, dialogToken);
+  }
+
+  /** Frontend consumed the close; stop replaying it. Acks without a token are ignored. */
+  handleDialogDeliveryAck(content: string): void {
+    try {
+      const ack = JSON.parse(content) as { functionName?: string; targetId?: string | null; dialogToken?: string };
+      if (!ack || typeof ack.dialogToken !== 'string' || typeof ack.targetId !== 'string' || typeof ack.functionName !== 'string') {
+        return;
+      }
+      const kind = PermissionIpcService.kindForCloseFunction(ack.functionName);
+      if (!kind) return;
+      this.undeliveredCloseSignals = this.undeliveredCloseSignals.filter(
+        (signal) => !(signal.kind === kind && signal.targetId === ack.targetId && signal.dialogToken === ack.dialogToken),
+      );
+    } catch (error) {
+      this.log.appendLine(`[BRIDGE] dialog_delivery_ack parse failed: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  /** Re-inject close signals that were never acknowledged by this webview. */
+  private flushUndeliveredCloseSignals(webview: vscode.Webview): void {
+    const signals = this.undeliveredCloseSignals.filter((signal) => signal.webview === webview);
+    for (const signal of signals) {
+      this.postForceClose(signal.webview, signal.kind, signal.targetId, signal.dialogToken);
+    }
+    if (signals.length > 0) {
+      this.log.appendLine(`[BRIDGE] replayed ${signals.length} unacknowledged dialog close signal(s)`);
+    }
+  }
+
+  /**
+   * The daemon resolved a shown request without the frontend (safety-net timeout
+   * wrote the response file): clean up host state and dismiss the frontend dialog.
+   */
+  private resolveShownDialogExternally(kind: DialogKind, requestId: string): void {
+    const key = PermissionIpcService.pendingShowKey(kind, requestId);
+    const pending = this.pendingShows.get(key);
+    if (!pending) return;
+    this.pendingShows.delete(key);
+    this.forceCloseFrontendDialog(kind, requestId, pending.dialogToken, pending.webview);
+  }
+
+  /**
+   * Replays this webview's pending dialog shows after a page (re)load, in the
+   * original request order. Shows whose daemon-side response already exists are
+   * closed out locally instead of resurrecting a stale dialog.
+   */
+  replayPendingDialogs(webview: vscode.Webview): void {
+    this.flushUndeliveredCloseSignals(webview);
+    const sessionId = this.sessionIdForPermissionIpc();
+    const dir = this.permissionIpcDir();
+    let entries: string[] = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      // Directory unreadable; still attempt replays — the webview may be the only live surface.
+    }
+    const replays = [...this.pendingShows.values()]
+      .filter((pending) => pending.webview === webview)
+      .sort((a, b) => a.sequence - b.sequence);
+    let replayed = 0;
+    for (const pending of replays) {
+      const files = PermissionIpcService.dialogFileNames(pending.kind, sessionId, pending.requestId);
+      if (entries.includes(files.response)) {
+        this.completed.add(pending.requestId);
+        this.awaitingUser.delete(pending.requestId);
+        this.pendingShows.delete(PermissionIpcService.pendingShowKey(pending.kind, pending.requestId));
+        this.deleteFileQuietly(path.join(dir, files.request), 'resolved-while-reloading dialog request');
+        continue;
+      }
+      this.postDialogShow(webview, pending.kind, pending.payloadJson);
+      replayed += 1;
+    }
+    if (replayed > 0) {
+      this.log.appendLine(`[BRIDGE] replayed ${replayed} pending dialog show(s) after frontend ready`);
+    }
   }
 
   handlePermissionDecision(content: string): void {
     try {
       const decision = JSON.parse(content) as {
         channelId?: string;
+        dialogToken?: string;
         allow?: boolean;
         remember?: boolean;
       };
@@ -136,6 +295,15 @@ export class PermissionIpcService implements vscode.Disposable {
       if (!requestId || typeof requestId !== 'string') {
         return;
       }
+      const showKey = PermissionIpcService.pendingShowKey('permission', requestId);
+      const pendingShow = this.pendingShows.get(showKey);
+      if (pendingShow && decision.dialogToken !== pendingShow.dialogToken) {
+        // A superseded/stale dialog generation answered late; it must not resolve
+        // the live request or write permission memory (upstream PermissionManager guard).
+        this.log.appendLine(`[BRIDGE] ignoring stale permission_decision for ${requestId} (dialogToken mismatch)`);
+        return;
+      }
+      this.pendingShows.delete(showKey);
 
       this.awaitingUser.delete(requestId);
       this.completed.add(requestId);
@@ -151,6 +319,10 @@ export class PermissionIpcService implements vscode.Disposable {
       }
       this.deleteFileQuietly(path.join(dir, `request-${sessionId}-${requestId}.json`), 'answered permission request');
       this.pendingRequests.delete(requestId);
+      if (pendingShow) {
+        // Dismiss any late re-show of this generation on the frontend.
+        this.forceCloseFrontendDialog('permission', requestId, pendingShow.dialogToken, pendingShow.webview);
+      }
       this.log.appendLine(`[BRIDGE] permission_decision -> ${path.basename(responseFile)} allow=${allow} remember=${decision.remember === true}`);
     } catch (error) {
       this.log.appendLine(`[BRIDGE] permission_decision failed: ${error instanceof Error ? error.message : error}`);
@@ -159,11 +331,18 @@ export class PermissionIpcService implements vscode.Disposable {
 
   handleAskUserQuestionResponse(content: string): void {
     try {
-      const response = JSON.parse(content) as { requestId?: string; answers?: Record<string, unknown> };
+      const response = JSON.parse(content) as { requestId?: string; dialogToken?: string; answers?: Record<string, unknown> };
       const requestId = response.requestId;
       if (!requestId || typeof requestId !== 'string') {
         return;
       }
+      const showKey = PermissionIpcService.pendingShowKey('askUserQuestion', requestId);
+      const pendingShow = this.pendingShows.get(showKey);
+      if (pendingShow && response.dialogToken !== pendingShow.dialogToken) {
+        this.log.appendLine(`[BRIDGE] ignoring stale ask_user_question_response for ${requestId} (dialogToken mismatch)`);
+        return;
+      }
+      this.pendingShows.delete(showKey);
 
       this.awaitingUser.delete(requestId);
       this.completed.add(requestId);
@@ -178,6 +357,9 @@ export class PermissionIpcService implements vscode.Disposable {
       // every re-entry.
       const requestFile = path.join(dir, `ask-user-question-${sessionId}-${requestId}.json`);
       this.deleteFileQuietly(requestFile, 'answered ask-user-question request');
+      if (pendingShow) {
+        this.forceCloseFrontendDialog('askUserQuestion', requestId, pendingShow.dialogToken, pendingShow.webview);
+      }
       this.log.appendLine(`[BRIDGE] ask_user_question_response -> ${path.basename(responseFile)}`);
     } catch (error) {
       this.log.appendLine(`[BRIDGE] ask_user_question_response failed: ${error instanceof Error ? error.message : error}`);
@@ -186,11 +368,18 @@ export class PermissionIpcService implements vscode.Disposable {
 
   handlePlanApprovalResponse(content: string): void {
     try {
-      const response = JSON.parse(content) as { requestId?: string; approved?: boolean; targetMode?: string; message?: string };
+      const response = JSON.parse(content) as { requestId?: string; dialogToken?: string; approved?: boolean; targetMode?: string; message?: string };
       const requestId = response.requestId;
       if (!requestId || typeof requestId !== 'string') {
         return;
       }
+      const showKey = PermissionIpcService.pendingShowKey('planApproval', requestId);
+      const pendingShow = this.pendingShows.get(showKey);
+      if (pendingShow && response.dialogToken !== pendingShow.dialogToken) {
+        this.log.appendLine(`[BRIDGE] ignoring stale plan_approval_response for ${requestId} (dialogToken mismatch)`);
+        return;
+      }
+      this.pendingShows.delete(showKey);
 
       this.awaitingUser.delete(requestId);
       this.completed.add(requestId);
@@ -207,6 +396,9 @@ export class PermissionIpcService implements vscode.Disposable {
       // `completed` set is cleared on webview reload) does not re-open the dialog.
       const requestFile = path.join(dir, `plan-approval-${sessionId}-${requestId}.json`);
       this.deleteFileQuietly(requestFile, 'answered plan-approval request');
+      if (pendingShow) {
+        this.forceCloseFrontendDialog('planApproval', requestId, pendingShow.dialogToken, pendingShow.webview);
+      }
       this.log.appendLine(`[BRIDGE] plan_approval_response -> ${path.basename(responseFile)} approved=${response.approved === true}`);
     } catch (error) {
       this.log.appendLine(`[BRIDGE] plan_approval_response failed: ${error instanceof Error ? error.message : error}`);
@@ -256,7 +448,7 @@ export class PermissionIpcService implements vscode.Disposable {
         this.deleteFileQuietly(filePath, 'stale permission request');
         continue;
       }
-      if (this.completed.has(requestId) || this.awaitingUser.has(requestId)) {
+      if (this.completed.has(requestId)) {
         continue;
       }
       const request = this.buildRequestRecord(data);
@@ -265,6 +457,13 @@ export class PermissionIpcService implements vscode.Disposable {
         this.completed.add(requestId);
         this.pendingRequests.delete(requestId);
         this.deleteFileQuietly(filePath, 'answered permission request');
+        if (this.awaitingUser.delete(requestId)) {
+          // The daemon resolved a shown dialog without the frontend (timeout etc.).
+          this.resolveShownDialogExternally('permission', requestId);
+        }
+        continue;
+      }
+      if (this.awaitingUser.has(requestId)) {
         continue;
       }
       this.pendingRequests.set(requestId, request);
@@ -294,15 +493,29 @@ export class PermissionIpcService implements vscode.Disposable {
 
       this.awaitingUser.add(requestId);
       try {
-        this.postDialogRequest(webview, 'showPermissionDialog', '__pendingPermissionDialogRequests', {
+        const dialogToken = randomUUID();
+        const payloadJson = JSON.stringify({
           channelId: requestId,
           toolName: data.toolName,
           inputs: data.inputs ?? {},
           cwd: data.cwd ?? '',
+          deadlineMs: this.dialogDeadlineMs(),
+          dialogToken,
         });
+        this.pendingShows.set(PermissionIpcService.pendingShowKey('permission', requestId), {
+          kind: 'permission',
+          requestId,
+          dialogToken,
+          sequence: ++this.nextDialogSequence,
+          payloadJson,
+          webview,
+        });
+        this.flushUndeliveredCloseSignals(webview);
+        this.postDialogShow(webview, 'permission', payloadJson);
       } catch (error) {
         this.awaitingUser.delete(requestId);
         this.pendingRequests.delete(requestId);
+        this.pendingShows.delete(PermissionIpcService.pendingShowKey('permission', requestId));
         this.log.appendLine(`[BRIDGE] showPermissionDialog postMessage failed: ${error}`);
         continue;
       }
@@ -331,7 +544,7 @@ export class PermissionIpcService implements vscode.Disposable {
       if (!requestId || typeof requestId !== 'string') {
         continue;
       }
-      if (this.completed.has(requestId) || this.awaitingUser.has(requestId)) {
+      if (this.completed.has(requestId)) {
         continue;
       }
       // Disk-durable guard: if an answer file already exists next to the request,
@@ -341,6 +554,13 @@ export class PermissionIpcService implements vscode.Disposable {
       if (entries.includes(responseName)) {
         this.completed.add(requestId);
         this.deleteFileQuietly(path.join(dir, name), 'stale answered ask-user-question request');
+        if (this.awaitingUser.delete(requestId)) {
+          // The daemon resolved a shown dialog without the frontend (timeout etc.).
+          this.resolveShownDialogExternally('askUserQuestion', requestId);
+        }
+        continue;
+      }
+      if (this.awaitingUser.has(requestId)) {
         continue;
       }
       const webview = this.resolveTargetWebview(data?.bridgeRequestId);
@@ -351,11 +571,24 @@ export class PermissionIpcService implements vscode.Disposable {
         continue;
       }
       this.awaitingUser.add(requestId);
-      this.postDialogRequest(webview, 'showAskUserQuestionDialog', '__pendingAskUserQuestionDialogRequests', {
+      const dialogToken = randomUUID();
+      const payloadJson = JSON.stringify({
         requestId,
         toolName: data?.toolName ?? 'AskUserQuestion',
         questions: data?.questions ?? [],
+        deadlineMs: this.dialogDeadlineMs(),
+        dialogToken,
       });
+      this.pendingShows.set(PermissionIpcService.pendingShowKey('askUserQuestion', requestId), {
+        kind: 'askUserQuestion',
+        requestId,
+        dialogToken,
+        sequence: ++this.nextDialogSequence,
+        payloadJson,
+        webview,
+      });
+      this.flushUndeliveredCloseSignals(webview);
+      this.postDialogShow(webview, 'askUserQuestion', payloadJson);
       this.log.appendLine(
         `[BRIDGE] showAskUserQuestionDialog (${requestId}) bridgeRequestId=${data?.bridgeRequestId ?? '(none)'}`,
       );
@@ -394,7 +627,7 @@ export class PermissionIpcService implements vscode.Disposable {
       if (!requestId || typeof requestId !== 'string') {
         continue;
       }
-      if (this.completed.has(requestId) || this.awaitingUser.has(requestId)) {
+      if (this.completed.has(requestId)) {
         continue;
       }
       // Disk-durable guard: skip and clean up requests already answered in a
@@ -403,6 +636,13 @@ export class PermissionIpcService implements vscode.Disposable {
       if (entries.includes(responseName)) {
         this.completed.add(requestId);
         this.deleteFileQuietly(path.join(dir, name), 'stale answered plan-approval request');
+        if (this.awaitingUser.delete(requestId)) {
+          // The daemon resolved a shown dialog without the frontend (timeout etc.).
+          this.resolveShownDialogExternally('planApproval', requestId);
+        }
+        continue;
+      }
+      if (this.awaitingUser.has(requestId)) {
         continue;
       }
       const webview = this.resolveTargetWebview(data?.bridgeRequestId);
@@ -413,13 +653,26 @@ export class PermissionIpcService implements vscode.Disposable {
         continue;
       }
       this.awaitingUser.add(requestId);
-      this.postDialogRequest(webview, 'showPlanApprovalDialog', '__pendingPlanApprovalDialogRequests', {
+      const dialogToken = randomUUID();
+      const payloadJson = JSON.stringify({
         requestId,
         toolName: data?.toolName ?? 'ExitPlanMode',
         plan: data?.plan ?? '',
         allowedPrompts: data?.allowedPrompts ?? [],
         timestamp: data?.timestamp,
+        deadlineMs: this.dialogDeadlineMs(),
+        dialogToken,
       });
+      this.pendingShows.set(PermissionIpcService.pendingShowKey('planApproval', requestId), {
+        kind: 'planApproval',
+        requestId,
+        dialogToken,
+        sequence: ++this.nextDialogSequence,
+        payloadJson,
+        webview,
+      });
+      this.flushUndeliveredCloseSignals(webview);
+      this.postDialogShow(webview, 'planApproval', payloadJson);
       this.log.appendLine(
         `[BRIDGE] showPlanApprovalDialog (${requestId}) bridgeRequestId=${data?.bridgeRequestId ?? '(none)'}`,
       );
@@ -524,13 +777,23 @@ export class PermissionIpcService implements vscode.Disposable {
     };
   }
 
-  private postDialogRequest(
-    webview: vscode.Webview,
-    functionName: string,
-    pendingQueueName: string,
-    payload: unknown,
-  ): void {
-    const stringArg = JSON.stringify(JSON.stringify(payload));
+  private static dialogFunctionNames(kind: DialogKind): { show: string; close: string } {
+    if (kind === 'askUserQuestion') {
+      return { show: 'showAskUserQuestionDialog', close: 'forceCloseAskUserQuestionDialog' };
+    }
+    if (kind === 'planApproval') {
+      return { show: 'showPlanApprovalDialog', close: 'forceClosePlanApprovalDialog' };
+    }
+    return { show: 'showPermissionDialog', close: 'forceClosePermissionDialog' };
+  }
+
+  /**
+   * Inject a dialog show. Shows and closes share one bootstrap FIFO
+   * (window.__pendingDialogEvents) so pre-React replay keeps arrival order.
+   */
+  private postDialogShow(webview: vscode.Webview, kind: DialogKind, payloadJson: string): void {
+    const functionName = PermissionIpcService.dialogFunctionNames(kind).show;
+    const stringArg = JSON.stringify(payloadJson);
     const evalContent = [
       'try{',
       'var _d=',
@@ -538,8 +801,24 @@ export class PermissionIpcService implements vscode.Disposable {
       ';',
       `if (typeof window.${functionName}==='function'){window.${functionName}(_d);}`,
       'else{',
-      `var a=window.${pendingQueueName}=window.${pendingQueueName}||[];`,
-      'a.push(_d);',
+      'var a=window.__pendingDialogEvents=window.__pendingDialogEvents||[];',
+      `a.push({kind:'${kind}',type:'show',payload:_d});`,
+      '};',
+      `}catch(e){console.error('[BRIDGE] ${functionName}',e);}`,
+    ].join('');
+    webview.postMessage({ type: 'js_eval', content: evalContent });
+  }
+
+  private postForceClose(webview: vscode.Webview, kind: DialogKind, targetId: string, dialogToken: string): void {
+    const functionName = PermissionIpcService.dialogFunctionNames(kind).close;
+    const idArg = JSON.stringify(targetId);
+    const tokenArg = JSON.stringify(dialogToken);
+    const evalContent = [
+      'try{',
+      `if (typeof window.${functionName}==='function'){window.${functionName}(${idArg},${tokenArg});}`,
+      'else{',
+      'var a=window.__pendingDialogEvents=window.__pendingDialogEvents||[];',
+      `a.push({kind:'${kind}',type:'close',targetId:${idArg},dialogToken:${tokenArg}});`,
       '};',
       `}catch(e){console.error('[BRIDGE] ${functionName}',e);}`,
     ].join('');

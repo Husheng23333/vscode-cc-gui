@@ -315,6 +315,23 @@
   gap: 6px;
 }
 
+/*
+ * Hidden from the provider switcher: dim the whole row except the eye
+ * toggle (direct .iconBtn child of .cliActions), which stays bright so the
+ * row can be re-enabled.
+ */
+.switcherHidden {
+  .cliMain,
+  .statusBadge,
+  .divider,
+  .actionButtons,
+  .primaryBtn {
+    opacity: 0.4;
+    filter: grayscale(0.7);
+    transition: opacity 0.15s, filter 0.15s;
+  }
+}
+
 .iconBtn {
   position: relative;
   display: inline-flex;

@@ -43,6 +43,9 @@ export interface UseMessageSenderOptions {
   permissionMode: PermissionMode;
   reasoningEffort: ReasoningEffort;
   codexFastMode: CodexFastMode;
+  /** Codex native auto-review support (SDK floor). When explicitly false, an
+   *  'auto' permission request degrades to 'default' like 'plan' does. */
+  codexNativeAutoReviewAvailable?: boolean;
   dshPreset?: string;
   streamingEnabledSetting: boolean;
   selectedAgent: SelectedAgent | null;
@@ -82,6 +85,7 @@ export function useMessageSender({
   permissionMode,
   reasoningEffort,
   codexFastMode,
+  codexNativeAutoReviewAvailable,
   dshPreset,
   streamingEnabledSetting,
   selectedAgent,
@@ -266,7 +270,9 @@ export function useMessageSender({
     requestedPermissionMode: PermissionMode
   ) => {
     const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
-    const effectivePermissionMode: PermissionMode = currentProvider === 'codex' && requestedPermissionMode === 'plan'
+    const effectivePermissionMode: PermissionMode = currentProvider === 'codex'
+      && (requestedPermissionMode === 'plan'
+        || (requestedPermissionMode === 'auto' && !codexNativeAutoReviewAvailable))
       ? 'default'
       : requestedPermissionMode;
     console.debug('[ModeSync][Frontend] send request mode', {
@@ -373,6 +379,7 @@ export function useMessageSender({
   }, [
     autoOpenFileEnabled,
     codexFastMode,
+    codexNativeAutoReviewAvailable,
     contextBarFile,
     currentProvider,
     currentSessionId,

@@ -43,12 +43,39 @@ export function transformCodexHistoryRows(
   // replayed as an update_plan tool_use; matching custom_tool_call_output rows
   // (keyed by call_id) become their tool_result.
   const replayedPlanCallIds = new Set<string>();
+  // Codex 0.148+ rollouts persist the user prompt only as a response_item row
+  // (no event_msg/user_message follows). Buffer that text and emit it as a
+  // user message unless a later event_msg carries the same prompt.
+  let pendingUserText: { text: string; timestamp: string } | null = null;
 
   const flushPendingImagesToPreviousUser = () => {
     if (!pendingUserImageBlocks || lastUserMessageWithoutImagesIndex < 0) return;
     prependBlocksToUserMessage(messages[lastUserMessageWithoutImagesIndex], pendingUserImageBlocks.blocks);
     pendingUserImageBlocks = null;
     lastUserMessageWithoutImagesIndex = -1;
+  };
+
+  const flushPendingUserText = () => {
+    const pending = pendingUserText;
+    if (!pending) return;
+    pendingUserText = null;
+    // Images buffered from the same response_item row belong to this message.
+    const ownImages = pendingUserImageBlocks && pendingUserImageBlocks.text.trim() === pending.text
+      ? pendingUserImageBlocks.blocks
+      : [];
+    if (ownImages.length > 0) pendingUserImageBlocks = null;
+    const displayText = options.normalizeUserDisplayText
+      ? options.normalizeUserDisplayText(pending.text)
+      : pending.text;
+    const textBlocks = displayText.trim() ? [{ type: 'text', text: displayText }] : [];
+    if (ownImages.length === 0 && textBlocks.length === 0) return;
+    messages.push({
+      type: 'user',
+      content: displayText,
+      raw: { message: { role: 'user', content: dedupeContentBlocks([...ownImages, ...textBlocks]) } },
+      timestamp: pending.timestamp,
+    });
+    lastUserMessageWithoutImagesIndex = ownImages.length > 0 ? -1 : messages.length - 1;
   };
 
   for (const row of rows) {
@@ -62,6 +89,17 @@ export function transformCodexHistoryRows(
       if (blocks.length === 0) continue;
 
       const rawText = extractTextFromBlocks(blocks);
+
+      // A buffered response_item user prompt is dropped when this event_msg
+      // carries the same text; otherwise it is a prompt the rollout only
+      // persisted as response_item (Codex 0.148+) and must be emitted first.
+      if (pendingUserText) {
+        if (pendingUserText.text === rawText.trim()) {
+          pendingUserText = null;
+        } else {
+          flushPendingUserText();
+        }
+      }
 
       // Codex may write the user turn as response_item(input_image/input_text)
       // immediately before event_msg(user_message). Match the text so those
@@ -125,6 +163,7 @@ export function transformCodexHistoryRows(
       // image as `<image path="...">` XML, which would double-count if also processed.
       if (role === 'user') {
         const rawContent = Array.isArray(payload.content) ? payload.content : [];
+        const responseUserText = extractCodexResponseUserText(rawContent);
         const imageBlocks: Array<Record<string, unknown>> = [];
         for (const entry of rawContent) {
           if (!entry || typeof entry !== 'object') continue;
@@ -141,14 +180,23 @@ export function transformCodexHistoryRows(
           if (pendingUserImageBlocks) flushPendingImagesToPreviousUser();
           pendingUserImageBlocks = {
             blocks: imageBlocks,
-            text: extractCodexResponseUserText(rawContent),
+            text: responseUserText,
           };
+        }
+        // Buffer the prompt text so sessions whose user turns exist only as
+        // response_item rows (Codex 0.148+) still restore their user messages.
+        if (responseUserText) {
+          if (pendingUserText && pendingUserText.text !== responseUserText) {
+            flushPendingUserText();
+          }
+          pendingUserText = { text: responseUserText, timestamp };
         }
         continue;
       }
       if (role !== 'assistant') continue;
       const blocks = convertCodexMessageContent(payload.content, imageLoader);
       if (blocks.length === 0) continue;
+      flushPendingUserText();
       messages.push({
         type: 'assistant',
         content: extractTextFromBlocks(blocks),
@@ -161,6 +209,7 @@ export function transformCodexHistoryRows(
     if (payloadType === 'reasoning') {
       const blocks = convertCodexReasoningPayload(payload);
       if (blocks.length === 0) continue;
+      flushPendingUserText();
       messages.push({
         type: 'assistant',
         content: extractTextFromBlocks(blocks),
@@ -173,6 +222,7 @@ export function transformCodexHistoryRows(
     if (payloadType === 'function_call') {
       const block = convertCodexFunctionCallPayload(payload);
       if (!block) continue;
+      flushPendingUserText();
       messages.push({
         type: 'assistant',
         content: '[tool_use]',
@@ -185,6 +235,7 @@ export function transformCodexHistoryRows(
     if (payloadType === 'function_call_output') {
       const block = convertCodexFunctionCallOutputPayload(payload);
       if (!block) continue;
+      flushPendingUserText();
       messages.push({
         type: 'user',
         content: '[tool_result]',
@@ -235,6 +286,7 @@ export function transformCodexHistoryRows(
     }
   }
 
+  flushPendingUserText();
   flushPendingImagesToPreviousUser();
   return messages;
 }

@@ -120,6 +120,7 @@ export function extractSubagentsFromMessages(
       if (!input) return;
 
       const id = String(block.id ?? `task-${messageIndex}-${subagents.length}`);
+
       const toolUseId = block.id ?? '';
       const result = findToolResult(toolUseId, messageIndex);
       if (toolName === 'spawn_agent' && isSpawnAgentArgumentFailureNoise(rawInput, result)) return;

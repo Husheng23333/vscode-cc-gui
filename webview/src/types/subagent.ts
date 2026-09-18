@@ -44,9 +44,12 @@ export interface SubagentHistoryResponse {
   completed?: boolean;
   toolUseId?: string;
   agentId?: string;
+  /** Codex agent path (task_name) used to locate the sidechain rollout file. */
   agentPath?: string;
   sessionId?: string;
+  /** Provider the response belongs to; late responses from other sessions are dropped. */
   provider?: string;
+  /** Lifecycle status snapshot reported by the backend, when available. */
   status?: SubagentStatus;
   error?: string;
   messages?: unknown[];
@@ -95,7 +98,7 @@ export interface SubagentInfo {
   messageIndex: number;
   /** Stable runtime agent id returned by Claude Code, used to locate sidechain logs */
   agentId?: string;
-  /** Codex agent path derived from spawn_agent task_name. */
+  /** Codex agent path (task_name), used to locate the sidechain rollout file */
   agentPath?: string;
   /** Total runtime in milliseconds */
   totalDurationMs?: number;

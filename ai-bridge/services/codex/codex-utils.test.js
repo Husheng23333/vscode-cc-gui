@@ -5,7 +5,27 @@ import {
   isCodexConfigError,
   normalizeCodexStreamingFlag,
   normalizeRequestedSandboxMode,
+  buildCodexCliEnvironment,
+  isCodexNativeAutoReviewSupported,
+  normalizeCodexPermissionMode,
 } from './codex-utils.js';
+test('removes Codex policy variables regardless of key casing', () => {
+  const result = buildCodexCliEnvironment({
+    codex_approval_policy: 'never',
+    CoDeX_SaNdBoX: 'danger-full-access',
+    SAFE_VALUE: 'kept'
+  });
+
+  assert.deepEqual(result.cliEnv, { SAFE_VALUE: 'kept' });
+  assert.deepEqual(result.removedKeys, ['codex_approval_policy', 'CoDeX_SaNdBoX']);
+});
+
+test('normalizes native auto mode casing and aliases before dispatch', () => {
+  assert.equal(normalizeCodexPermissionMode('AUTO'), 'auto');
+  assert.equal(normalizeCodexPermissionMode(' auto '), 'auto');
+  assert.equal(normalizeCodexPermissionMode('AUTOEDIT'), 'acceptEdits');
+  assert.equal(normalizeCodexPermissionMode(' AutoEdit '), 'acceptEdits');
+});
 
 test('normalizeRequestedSandboxMode accepts valid Codex sandbox modes', () => {
   assert.equal(normalizeRequestedSandboxMode('read-only'), 'read-only');
@@ -68,4 +88,16 @@ test('buildErrorPayload surfaces duplicate key config guidance', () => {
   );
   assert.equal(payload.details.isConfigError, true);
   assert.match(payload.error, /defined more than once/);
+});
+
+test('normalizes native auto mode casing before dispatch', () => {
+  assert.equal(normalizeCodexPermissionMode('AUTO'), 'auto');
+  assert.equal(normalizeCodexPermissionMode(' auto '), 'auto');
+});
+
+test('requires Codex 0.146.0 or later for native auto review config', () => {
+  assert.equal(isCodexNativeAutoReviewSupported('0.145.0'), false);
+  assert.equal(isCodexNativeAutoReviewSupported('0.146.0'), true);
+  assert.equal(isCodexNativeAutoReviewSupported('0.151.0'), true);
+  assert.equal(isCodexNativeAutoReviewSupported('not-a-version'), false);
 });

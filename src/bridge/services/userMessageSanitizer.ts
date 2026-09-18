@@ -34,6 +34,10 @@ export function sanitizeUserFacingText(text: string): string {
   normalized = normalized.replace(/<agents?-instructions>[\s\S]*?<\/agents?-instructions>\s*/gi, '');
   normalized = normalized.replace(/<environment_context>[\s\S]*?<\/environment_context>\s*/gi, '');
   normalized = normalized.replace(/<ide-context>[\s\S]*?<\/ide-context>\s*/gi, '');
+  // Codex CLI injects a <recommended_plugins> block as the first user turn of a
+  // session (upstream jetbrains-cc-gui bdcf21b2). Stripping it keeps the block
+  // out of transcripts and — critically — out of derived session titles.
+  normalized = normalized.replace(/<recommended_plugins>[\s\S]*?<\/recommended_plugins>\s*/gi, '');
   normalized = normalized.replace(/<system-reminder>[\s\S]*?<\/system-reminder>\s*/gi, '');
   normalized = normalized.replace(/<system-prompt>[\s\S]*?<\/system-prompt>\s*/gi, '');
   normalized = normalized.replace(INLINE_IMAGE_TAG_REGEX, '');
@@ -42,6 +46,7 @@ export function sanitizeUserFacingText(text: string): string {
   normalized = normalized.replace(/<agents?-instructions>[\s\S]*$/i, '');
   normalized = normalized.replace(/<environment_context>[\s\S]*$/i, '');
   normalized = normalized.replace(/<ide-context>[\s\S]*$/i, '');
+  normalized = normalized.replace(/<recommended_plugins>[\s\S]*$/i, '');
   normalized = normalized.replace(/<system-reminder>[\s\S]*$/i, '');
   normalized = normalized.replace(/<system-prompt>[\s\S]*$/i, '');
 

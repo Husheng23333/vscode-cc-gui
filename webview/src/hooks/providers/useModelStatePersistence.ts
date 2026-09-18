@@ -5,10 +5,12 @@ import {
   CODEX_MODELS,
   GROK_DEFAULT_MODEL_ID,
   KIMI_DEFAULT_MODEL_ID,
+  MINIMAX_DEFAULT_MODEL_ID,
   OPENCODE_DEFAULT_MODEL_ID,
   PI_DEFAULT_MODEL_ID,
   OMP_DEFAULT_MODEL_ID,
   DSH_DEFAULT_MODEL_ID,
+  ZCODE_DEFAULT_MODEL_ID,
   DSH_PRESET_NONE,
   isValidDshPreset,
   isValidPermissionMode,
@@ -31,6 +33,12 @@ const CODEX_FAST_MODE_VALUES = ['normal', 'fast'] as const;
 const OMP_MODE_ID_PATTERN = /^[a-zA-Z][\w-]{0,31}$/;
 const isRestorableOmpMode = (value: unknown): value is PermissionMode =>
   typeof value === 'string' && OMP_MODE_ID_PATTERN.test(value);
+
+// Older sessions stored autoEdit, but the canonical UI/backend value is acceptEdits.
+const normalizeRestoredPermissionMode = (value: unknown): PermissionMode | null => {
+  const candidate = value === 'autoEdit' ? 'acceptEdits' : value;
+  return typeof candidate === 'string' && isValidPermissionMode(candidate) ? candidate : null;
+};
 
 const getCustomModels = (key: string): { id: string }[] => {
   try {
@@ -55,16 +63,20 @@ export interface UseModelStatePersistenceOptions {
   setCodexPermissionMode: (value: PermissionMode) => void;
   setSelectedGrokModel: (value: string) => void;
   setSelectedKimiModel: (value: string) => void;
+  setSelectedMiniMaxModel: (value: string) => void;
   setSelectedOpenCodeModel: (value: string) => void;
   setSelectedPiModel: (value: string) => void;
   setSelectedOmpModel: (value: string) => void;
   setSelectedDshModel: (value: string) => void;
+  setSelectedZcodeModel: (value: string) => void;
   setGrokPermissionMode: (value: PermissionMode) => void;
   setKimiPermissionMode: (value: PermissionMode) => void;
+  setMiniMaxPermissionMode: (value: PermissionMode) => void;
   setOpenCodePermissionMode: (value: PermissionMode) => void;
   setPiPermissionMode: (value: PermissionMode) => void;
   setOmpPermissionMode: (value: PermissionMode) => void;
   setDshPermissionMode: (value: PermissionMode) => void;
+  setZcodePermissionMode: (value: PermissionMode) => void;
   setPermissionMode: (value: PermissionMode) => void;
   setLongContextEnabled: (value: boolean) => void;
   setReasoningEffort: (value: ReasoningEffort) => void;
@@ -77,16 +89,20 @@ export interface UseModelStatePersistenceOptions {
   codexPermissionMode: PermissionMode;
   selectedGrokModel: string;
   selectedKimiModel: string;
+  selectedMiniMaxModel: string;
   selectedOpenCodeModel: string;
   selectedPiModel: string;
   selectedOmpModel: string;
   selectedDshModel: string;
+  selectedZcodeModel: string;
   grokPermissionMode: PermissionMode;
   kimiPermissionMode: PermissionMode;
+  miniMaxPermissionMode: PermissionMode;
   openCodePermissionMode: PermissionMode;
   piPermissionMode: PermissionMode;
   ompPermissionMode: PermissionMode;
   dshPermissionMode: PermissionMode;
+  zcodePermissionMode: PermissionMode;
   longContextEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   codexFastMode: CodexFastMode;
@@ -105,16 +121,20 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     setCodexPermissionMode,
     setSelectedGrokModel,
     setSelectedKimiModel,
+    setSelectedMiniMaxModel,
     setSelectedOpenCodeModel,
     setSelectedPiModel,
     setSelectedOmpModel,
     setSelectedDshModel,
+    setSelectedZcodeModel,
     setGrokPermissionMode,
     setKimiPermissionMode,
+    setMiniMaxPermissionMode,
     setOpenCodePermissionMode,
     setPiPermissionMode,
     setOmpPermissionMode,
     setDshPermissionMode,
+    setZcodePermissionMode,
     setPermissionMode,
     setLongContextEnabled,
     setReasoningEffort,
@@ -127,16 +147,20 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     codexPermissionMode,
     selectedGrokModel,
     selectedKimiModel,
+    selectedMiniMaxModel,
     selectedOpenCodeModel,
     selectedPiModel,
     selectedOmpModel,
     selectedDshModel,
+    selectedZcodeModel,
     grokPermissionMode,
     kimiPermissionMode,
+    miniMaxPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
     ompPermissionMode,
     dshPermissionMode,
+    zcodePermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,
@@ -154,16 +178,20 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       let restoredCodexPermissionMode: PermissionMode = 'default';
       let restoredGrokModel = GROK_DEFAULT_MODEL_ID;
       let restoredKimiModel = KIMI_DEFAULT_MODEL_ID;
+      let restoredMiniMaxModel = MINIMAX_DEFAULT_MODEL_ID;
       let restoredOpenCodeModel = OPENCODE_DEFAULT_MODEL_ID;
       let restoredPiModel = PI_DEFAULT_MODEL_ID;
       let restoredOmpModel = OMP_DEFAULT_MODEL_ID;
       let restoredDshModel = DSH_DEFAULT_MODEL_ID;
+      let restoredZcodeModel = ZCODE_DEFAULT_MODEL_ID;
       let restoredGrokPermissionMode: PermissionMode = 'default';
       let restoredKimiPermissionMode: PermissionMode = 'default';
+      let restoredMiniMaxPermissionMode: PermissionMode = 'default';
       let restoredOpenCodePermissionMode: PermissionMode = 'default';
       let restoredPiPermissionMode: PermissionMode = 'default';
       let restoredOmpPermissionMode: PermissionMode = 'default';
       let restoredDshPermissionMode: PermissionMode = 'default';
+      let restoredZcodePermissionMode: PermissionMode = 'default';
       let restoredLongContextEnabled = true;
       let restoredCodexFastMode: CodexFastMode = 'normal';
       let restoredDshPreset = DSH_PRESET_NONE;
@@ -180,31 +208,49 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           setCurrentProvider(state.provider);
         }
 
-        if (isValidPermissionMode(state.claudePermissionMode)) {
-          restoredClaudePermissionMode = state.claudePermissionMode;
+        const restoredClaudeMode = normalizeRestoredPermissionMode(state.claudePermissionMode);
+        if (restoredClaudeMode) {
+          restoredClaudePermissionMode = restoredClaudeMode;
         }
-        if (isValidPermissionMode(state.codexPermissionMode)) {
-          restoredCodexPermissionMode = state.codexPermissionMode === 'plan'
+        const restoredCodexMode = normalizeRestoredPermissionMode(state.codexPermissionMode);
+        if (restoredCodexMode) {
+          restoredCodexPermissionMode = restoredCodexMode === 'plan'
             ? 'default'
-            : state.codexPermissionMode;
+            : restoredCodexMode;
         }
-        if (isValidPermissionMode(state.grokPermissionMode)) {
-          restoredGrokPermissionMode = normalizeCliPermissionMode(state.grokPermissionMode);
+        const restoredGrokMode = normalizeRestoredPermissionMode(state.grokPermissionMode);
+        if (restoredGrokMode) {
+          restoredGrokPermissionMode = normalizeCliPermissionMode(restoredGrokMode, 'grok');
         }
-        if (isValidPermissionMode(state.kimiPermissionMode)) {
-          restoredKimiPermissionMode = normalizeCliPermissionMode(state.kimiPermissionMode);
+        const restoredKimiMode = normalizeRestoredPermissionMode(state.kimiPermissionMode);
+        if (restoredKimiMode) {
+          restoredKimiPermissionMode = normalizeCliPermissionMode(restoredKimiMode, 'kimi');
         }
-        if (isValidPermissionMode(state.openCodePermissionMode)) {
-          restoredOpenCodePermissionMode = normalizeCliPermissionMode(state.openCodePermissionMode);
+        const restoredMiniMaxMode = normalizeRestoredPermissionMode(state.miniMaxPermissionMode);
+        if (restoredMiniMaxMode) {
+          restoredMiniMaxPermissionMode = normalizeCliPermissionMode(restoredMiniMaxMode, 'minimax');
         }
-        if (isValidPermissionMode(state.piPermissionMode)) {
-          restoredPiPermissionMode = normalizeCliPermissionMode(state.piPermissionMode);
+        const restoredOpenCodeMode = normalizeRestoredPermissionMode(state.openCodePermissionMode);
+        if (restoredOpenCodeMode) {
+          restoredOpenCodePermissionMode = normalizeCliPermissionMode(restoredOpenCodeMode, 'opencode');
+        }
+        const restoredPiMode = normalizeRestoredPermissionMode(state.piPermissionMode);
+        if (restoredPiMode) {
+          restoredPiPermissionMode = normalizeCliPermissionMode(restoredPiMode, 'pi');
         }
         if (isRestorableOmpMode(state.ompPermissionMode)) {
-          restoredOmpPermissionMode = normalizeCliPermissionMode(state.ompPermissionMode, 'omp');
+          const restoredOmpMode = state.ompPermissionMode === 'autoEdit'
+            ? 'default'
+            : state.ompPermissionMode;
+          restoredOmpPermissionMode = normalizeCliPermissionMode(restoredOmpMode, 'omp');
         }
-        if (isValidPermissionMode(state.dshPermissionMode)) {
-          restoredDshPermissionMode = normalizeCliPermissionMode(state.dshPermissionMode);
+        const restoredDshMode = normalizeRestoredPermissionMode(state.dshPermissionMode);
+        if (restoredDshMode) {
+          restoredDshPermissionMode = normalizeCliPermissionMode(restoredDshMode, 'dsh');
+        }
+        const restoredZcodeMode = normalizeRestoredPermissionMode(state.zcodePermissionMode);
+        if (restoredZcodeMode) {
+          restoredZcodePermissionMode = normalizeCliPermissionMode(restoredZcodeMode, 'zcode');
         }
         if (isValidDshPreset(state.dshPreset)) {
           restoredDshPreset = state.dshPreset;
@@ -253,6 +299,10 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           restoredKimiModel = state.kimiModel;
           setSelectedKimiModel(state.kimiModel);
         }
+        if (typeof state.miniMaxModel === 'string' && state.miniMaxModel.trim()) {
+          restoredMiniMaxModel = state.miniMaxModel;
+          setSelectedMiniMaxModel(state.miniMaxModel);
+        }
         if (typeof state.openCodeModel === 'string' && state.openCodeModel.trim()) {
           restoredOpenCodeModel = state.openCodeModel;
           setSelectedOpenCodeModel(state.openCodeModel);
@@ -268,6 +318,10 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         if (typeof state.dshModel === 'string' && state.dshModel.trim()) {
           restoredDshModel = state.dshModel;
           setSelectedDshModel(state.dshModel);
+        }
+        if (typeof state.zcodeModel === 'string' && state.zcodeModel.trim()) {
+          restoredZcodeModel = state.zcodeModel;
+          setSelectedZcodeModel(state.zcodeModel);
         }
       }
 
@@ -289,19 +343,23 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
       setCodexPermissionMode(restoredCodexPermissionMode);
       setGrokPermissionMode(restoredGrokPermissionMode);
       setKimiPermissionMode(restoredKimiPermissionMode);
+      setMiniMaxPermissionMode(restoredMiniMaxPermissionMode);
       setOpenCodePermissionMode(restoredOpenCodePermissionMode);
       setPiPermissionMode(restoredPiPermissionMode);
       setOmpPermissionMode(restoredOmpPermissionMode);
       setDshPermissionMode(restoredDshPermissionMode);
+      setZcodePermissionMode(restoredZcodePermissionMode);
 
       let initialPermissionMode: PermissionMode = restoredClaudePermissionMode;
       if (restoredProvider === 'codex') initialPermissionMode = restoredCodexPermissionMode;
       else if (restoredProvider === 'grok') initialPermissionMode = restoredGrokPermissionMode;
       else if (restoredProvider === 'kimi') initialPermissionMode = restoredKimiPermissionMode;
+      else if (restoredProvider === 'minimax') initialPermissionMode = restoredMiniMaxPermissionMode;
       else if (restoredProvider === 'opencode') initialPermissionMode = restoredOpenCodePermissionMode;
       else if (restoredProvider === 'pi') initialPermissionMode = restoredPiPermissionMode;
       else if (restoredProvider === 'omp') initialPermissionMode = restoredOmpPermissionMode;
       else if (restoredProvider === 'dsh') initialPermissionMode = restoredDshPermissionMode;
+      else if (restoredProvider === 'zcode') initialPermissionMode = restoredZcodePermissionMode;
       setPermissionMode(initialPermissionMode);
 
       let syncRetryCount = 0;
@@ -314,10 +372,12 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
           if (restoredProvider === 'codex') modelToSync = restoredCodexModel;
           else if (restoredProvider === 'grok') modelToSync = restoredGrokModel;
           else if (restoredProvider === 'kimi') modelToSync = restoredKimiModel;
+          else if (restoredProvider === 'minimax') modelToSync = restoredMiniMaxModel;
           else if (restoredProvider === 'opencode') modelToSync = restoredOpenCodeModel;
           else if (restoredProvider === 'pi') modelToSync = restoredPiModel;
           else if (restoredProvider === 'omp') modelToSync = restoredOmpModel;
           else if (restoredProvider === 'dsh') modelToSync = restoredDshModel;
+          else if (restoredProvider === 'zcode') modelToSync = restoredZcodeModel;
           sendBridgeEvent('set_model', modelToSync);
           sendBridgeEvent('set_mode', initialPermissionMode);
           sendBridgeEvent('set_codex_fast_mode', restoredCodexFastMode);
@@ -344,16 +404,20 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
         codexPermissionMode,
         grokModel: selectedGrokModel,
         kimiModel: selectedKimiModel,
+        miniMaxModel: selectedMiniMaxModel,
         openCodeModel: selectedOpenCodeModel,
         piModel: selectedPiModel,
         ompModel: selectedOmpModel,
         dshModel: selectedDshModel,
+        zcodeModel: selectedZcodeModel,
         grokPermissionMode,
         kimiPermissionMode,
+        miniMaxPermissionMode,
         openCodePermissionMode,
         piPermissionMode,
         ompPermissionMode,
         dshPermissionMode,
+        zcodePermissionMode,
         longContextEnabled,
         reasoningEffort,
         codexFastMode,
@@ -370,16 +434,20 @@ export function useModelStatePersistence(options: UseModelStatePersistenceOption
     codexPermissionMode,
     selectedGrokModel,
     selectedKimiModel,
+    selectedMiniMaxModel,
     selectedOpenCodeModel,
     selectedPiModel,
     selectedOmpModel,
     selectedDshModel,
+    selectedZcodeModel,
     grokPermissionMode,
     kimiPermissionMode,
+    miniMaxPermissionMode,
     openCodePermissionMode,
     piPermissionMode,
     ompPermissionMode,
     dshPermissionMode,
+    zcodePermissionMode,
     longContextEnabled,
     reasoningEffort,
     codexFastMode,

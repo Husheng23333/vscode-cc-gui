@@ -204,7 +204,9 @@ test('buildCliEnv preserves current model env but strips stale CLI override env 
 });
 
 test('buildWebviewControlledSettingsOverride neutralizes Claude CLI settings env precedence', () => {
-  const clearedModelRoutingVars = {
+  // Model routing vars are cleared so settings.json values cannot override
+  // the per-request process.env values set by setModelEnvironmentVariables().
+  const modelRoutingOverrides = {
     ANTHROPIC_MODEL: '',
     ANTHROPIC_DEFAULT_FABLE_MODEL: '',
     ANTHROPIC_DEFAULT_OPUS_MODEL: '',
@@ -218,7 +220,7 @@ test('buildWebviewControlledSettingsOverride neutralizes Claude CLI settings env
     env: {
       CLAUDE_CODE_EFFORT_LEVEL: '',
       MAX_THINKING_TOKENS: '',
-      ...clearedModelRoutingVars,
+      ...modelRoutingOverrides,
       CLAUDE_CODE_DISABLE_1M_CONTEXT: '',
     },
   });
@@ -227,7 +229,7 @@ test('buildWebviewControlledSettingsOverride neutralizes Claude CLI settings env
     env: {
       CLAUDE_CODE_EFFORT_LEVEL: '',
       MAX_THINKING_TOKENS: '',
-      ...clearedModelRoutingVars,
+      ...modelRoutingOverrides,
       CLAUDE_CODE_DISABLE_1M_CONTEXT: '1',
     },
   });
@@ -236,7 +238,7 @@ test('buildWebviewControlledSettingsOverride neutralizes Claude CLI settings env
     env: {
       CLAUDE_CODE_EFFORT_LEVEL: '',
       MAX_THINKING_TOKENS: '',
-      ...clearedModelRoutingVars,
+      ...modelRoutingOverrides,
     },
   });
 });

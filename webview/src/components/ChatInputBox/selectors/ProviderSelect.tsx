@@ -5,6 +5,7 @@ import { AVAILABLE_PROVIDERS } from '../types';
 import { ProviderModelIcon } from '../../shared/ProviderModelIcon';
 import AlertDialog from '../../AlertDialog';
 import { useBetaProviderNotice } from '../../../hooks/useBetaProviderNotice';
+import { useHiddenCliProviders } from '../../../hooks/useCliProviderVisibility';
 
 const RELATIVE_INLINE_BLOCK_STYLE: React.CSSProperties = { position: 'relative', display: 'inline-block' };
 const CHEVRON_ICON_STYLE: React.CSSProperties = { fontSize: '10px', marginLeft: '2px' };
@@ -29,6 +30,8 @@ interface ProviderSelectProps {
   onChange?: (providerId: string) => void;
   /** When true, shows only the provider icon without text or chevron */
   compact?: boolean;
+  /** Open Settings → Providers → CLI management from the dropdown footer */
+  onOpenCliSettings?: () => void;
 }
 
 /**
@@ -36,7 +39,7 @@ interface ProviderSelectProps {
  * Supports switching between Claude, Codex, Gemini, and other providers
  * compact mode: icon-only button for toolbar use
  */
-export const ProviderSelect = ({ value, onChange, compact = false }: ProviderSelectProps) => {
+export const ProviderSelect = ({ value, onChange, compact = false, onOpenCliSettings }: ProviderSelectProps) => {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [showToast, setShowToast] = useState(false);
@@ -46,6 +49,10 @@ export const ProviderSelect = ({ value, onChange, compact = false }: ProviderSel
   const betaNotice = useBetaProviderNotice();
 
   const currentProvider = AVAILABLE_PROVIDERS.find(p => p.id === value) || AVAILABLE_PROVIDERS[0];
+  // Hidden CLI providers stay usable when already active; they are only
+  // removed from the switcher menu below.
+  const hiddenProviders = useHiddenCliProviders();
+  const visibleProviders = AVAILABLE_PROVIDERS.filter((p) => !hiddenProviders.has(p.id));
 
   // Helper function to get translated provider label
   const getProviderLabel = (providerId: string) => {
@@ -142,10 +149,10 @@ export const ProviderSelect = ({ value, onChange, compact = false }: ProviderSel
         {isOpen && (
           <div
             ref={dropdownRef}
-            className="selector-dropdown"
+            className="selector-dropdown provider-dropdown"
             style={DROPDOWN_STYLE}
           >
-            {AVAILABLE_PROVIDERS.map((provider) => (
+            {visibleProviders.map((provider) => (
               <div
                 key={provider.id}
                 className={`selector-option ${provider.id === value ? 'selected' : ''} ${!provider.enabled ? 'disabled' : ''}`}
@@ -157,16 +164,33 @@ export const ProviderSelect = ({ value, onChange, compact = false }: ProviderSel
               >
                 <ProviderModelIcon providerId={provider.id} size={16} colored />
                 <span>{getProviderLabel(provider.id)}</span>
-                {provider.beta && (
-                  <span className="provider-beta-badge">
-                    {t('providers.beta.badge', { defaultValue: 'Beta' })}
-                  </span>
-                )}
-                {provider.id === value && (
-                  <span className="codicon codicon-check check-mark" />
-                )}
+                <span className="provider-option-trailing">
+                  {provider.id === value && (
+                    <span className="provider-active-dot" aria-hidden="true" />
+                  )}
+                  {provider.beta && (
+                    <span className="provider-beta-badge">
+                      {t('providers.beta.badge', { defaultValue: 'Beta' })}
+                    </span>
+                  )}
+                </span>
               </div>
             ))}
+            {onOpenCliSettings && (
+              <div className="provider-cli-footer">
+                <button
+                  type="button"
+                  className="provider-cli-footer-btn"
+                  onClick={() => {
+                    setIsOpen(false);
+                    onOpenCliSettings();
+                  }}
+                >
+                  <span className="codicon codicon-settings" />
+                  <span>{t('providers.manageCli', { defaultValue: 'CLI Settings' })}</span>
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

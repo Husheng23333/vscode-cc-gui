@@ -82,6 +82,24 @@ export class SettingsHandler implements BridgeHandler {
     this.store = store ?? new SettingsStore(context.extensionContext);
   }
 
+  /**
+   * Normalize a permission mode against the current provider (upstream
+   * PermissionModeHandler.normalizeModeForCurrentProvider): the legacy autoEdit
+   * alias migrates to acceptEdits (or default on omp), and native auto review is
+   * limited to claude/codex — every other provider falls back to default.
+   */
+  private normalizeModeForCurrentProvider(mode: string | null | undefined): string {
+    let normalized = (mode ?? '').trim() || 'default';
+    const provider = this.context.callbacks.getActiveProvider() || 'claude';
+    if (normalized === 'autoEdit') {
+      normalized = provider === 'omp' ? 'default' : 'acceptEdits';
+    }
+    if (normalized === 'auto' && provider !== 'claude' && provider !== 'codex') {
+      return 'default';
+    }
+    return normalized;
+  }
+
   async handle({ event, content, webview }: BridgeMessage): Promise<boolean> {
     switch (event) {
       case 'set_provider': {
@@ -94,7 +112,9 @@ export class SettingsHandler implements BridgeHandler {
           provider === 'opencode' ||
           provider === 'pi' ||
           provider === 'omp' ||
-          provider === 'dsh'
+          provider === 'dsh' ||
+          provider === 'zcode' ||
+          provider === 'minimax'
         ) {
           this.context.callbacks.setActiveProvider(provider);
         }
@@ -241,14 +261,20 @@ export class SettingsHandler implements BridgeHandler {
         return true;
 
       case 'get_mode':
-        postRaw(webview, 'mode_received', this.store.getPermissionMode());
+        postRaw(webview, 'mode_received', this.normalizeModeForCurrentProvider(this.store.getPermissionMode()));
         return true;
       case 'set_mode':
-        await this.store.setPermissionMode(content);
-        postRaw(webview, 'mode_received', this.store.getPermissionMode());
+        // Normalize per provider so read and write paths map the same stored
+        // value to the same effective mode (upstream ae562df8/1bd55ef1):
+        // legacy autoEdit → acceptEdits (omp → default), native auto only for
+        // claude/codex — headless CLI providers degrade to default.
+        const parsed = parseJson<{ mode?: string } | null>(content, null);
+        const effectiveMode = this.normalizeModeForCurrentProvider(parsed?.mode ?? content);
+        await this.store.setPermissionMode(effectiveMode);
+        postRaw(webview, 'mode_received', effectiveMode);
         // Hot-swap on the live Claude runtime so the next tool call in the
         // current turn honors the new mode (v0.4.6 parity).
-        this.context.callbacks.pushPermissionModeLive(this.store.getPermissionMode());
+        this.context.callbacks.pushPermissionModeLive(effectiveMode);
         return true;
 
       case 'get_commit_prompt':

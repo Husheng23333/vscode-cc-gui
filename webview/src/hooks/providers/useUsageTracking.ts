@@ -13,9 +13,11 @@ const PROVIDER_TO_SDK: Record<string, string> = {
   pi: 'pi-cli',
   // CLI providers have no npm SDK — markers are only for lookups.
   omp: 'omp-cli',
+  minimax: 'minimax-cli',
+  zcode: 'zcode-cli',
 };
 
-type SdkStatus = Record<string, { installed?: boolean; status?: string }>;
+type SdkStatus = Record<string, { installed?: boolean; status?: string; meetsMinimumVersion?: boolean }>;
 
 /**
  * Usage % / token counters and SDK install status. `isSdkInstalled(providerId)`

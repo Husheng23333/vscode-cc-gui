@@ -1,12 +1,13 @@
-import { useCallback, useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ButtonAreaProps, CodexFastMode, ModelInfo, PermissionMode, ReasoningEffort } from './types';
-import { CodexFastModeSelect, ConfigSelect, DshPresetSelect, ModelSelect, ModeSelect, ProviderSelect, ReasoningSelect } from './selectors';
+import { ConfigSelect, DshPresetSelect, ModeSelect, ModelConfigSelect, ProviderSelect } from './selectors';
 import { CLAUDE_MODELS, CODEX_MODELS, DEFAULT_CLAUDE_MODEL_ID, GROK_MODELS, OMP_DEFAULT_MODEL_ID, OMP_MODELS, OMP_ROLE_MODELS } from './types';
 import { STORAGE_KEYS, validateCodexCustomModels } from '../../types/provider';
 import type { CodexCustomModel } from '../../types/provider';
 import { readClaudeModelMapping } from '../../utils/claudeModelMapping';
 import { useCliModels, useOmpRoles } from '../../hooks/providers/useCliModels';
+import { useToolbarCompact } from './hooks/useToolbarCompact';
 
 /**
  * Get custom Codex model list from localStorage
@@ -74,6 +75,7 @@ export const ButtonArea = ({
   isEnhancing = false,
   selectedModel = DEFAULT_CLAUDE_MODEL_ID,
   permissionMode = 'bypassPermissions',
+  codexNativeAutoReviewAvailable = true,
   currentProvider = 'claude',
   reasoningEffort = 'high',
   codexFastMode = 'normal',
@@ -95,10 +97,13 @@ export const ButtonArea = ({
   onAgentSelect,
   onOpenAgentSettings,
   onAddModel,
+  onOpenCliSettings,
   longContextEnabled = true,
   onLongContextChange,
 }: ButtonAreaProps) => {
   const { t } = useTranslation();
+  const areaRef = useRef<HTMLDivElement>(null);
+  const compact = useToolbarCompact(areaRef);
   // const fileInputRef = useRef<HTMLInputElement>(null);
   const { cliModels, cliModelsLoading, cliModelsError, cliDefaultModel, refreshCliModels } = useCliModels(currentProvider);
   // Dynamic omp roles (static smol/slow/plan fallback until loaded).
@@ -176,16 +181,15 @@ export const ButtonArea = ({
     if (currentProvider === 'grok') {
       return GROK_MODELS;
     }
-    if (currentProvider === 'kimi' || currentProvider === 'opencode' || currentProvider === 'pi' || currentProvider === 'dsh') {
+    if (currentProvider === 'kimi' || currentProvider === 'minimax' || currentProvider === 'opencode' || currentProvider === 'pi' || currentProvider === 'dsh' || currentProvider === 'zcode') {
       return cliModels;
     }
     if (currentProvider === 'omp') {
-      // Built-ins first: 'auto' plus the role entries (dynamic from listModels,
-      // static smol/slow/plan until loaded), then the dynamic catalog appended.
-      // Dedupe by id — the role selector entries win on collision, and the
-      // static-fallback 'auto' must not duplicate the OMP_MODELS one.
-      const roles = ompRoles.length > 0 ? ompRoles : OMP_ROLE_MODELS;
-      const merged = [...OMP_MODELS, ...roles, ...cliModels];
+      // 'auto' plus the dynamic catalog. Role entries (smol/slow/plan) live in
+      // the mode selector, NOT the model dropdown.
+      // Dedupe by id — the static-fallback 'auto' must not duplicate the
+      // OMP_MODELS one.
+      const merged = [...OMP_MODELS, ...cliModels];
       const seenIds = new Set<string>();
       return merged.filter((m) => {
         if (seenIds.has(m.id)) return false;
@@ -227,16 +231,18 @@ export const ButtonArea = ({
     // so a persisted dynamic selection would be wrongly reset to the default.
     if (cliModelsLoading) return;
     if (currentProvider === 'omp') {
-      // Roles are valid selections but never appear in the runtime catalog —
-      // validate against the merged list (auto + roles + catalog).
+      // Roles are valid selections but never appear in the model dropdown —
+      // validate against auto + catalog + roles.
       if (!onModelSelect) return;
-      const exists = availableModels.some((model) => model.id === selectedModel);
+      const roles = ompRoles.length > 0 ? ompRoles : OMP_ROLE_MODELS;
+      const exists = availableModels.some((model) => model.id === selectedModel)
+        || roles.some((role) => role.id === selectedModel);
       if (!exists) {
         onModelSelect(OMP_DEFAULT_MODEL_ID);
       }
       return;
     }
-    if (currentProvider !== 'kimi' && currentProvider !== 'opencode' && currentProvider !== 'pi' && currentProvider !== 'dsh') return;
+    if (currentProvider !== 'kimi' && currentProvider !== 'minimax' && currentProvider !== 'opencode' && currentProvider !== 'pi' && currentProvider !== 'dsh' && currentProvider !== 'zcode') return;
     if (!cliModels.length || !onModelSelect) return;
     const exists = cliModels.some((model) => model.id === selectedModel);
     if (!exists) {
@@ -311,7 +317,7 @@ export const ButtonArea = ({
   }, [onEnhancePrompt]);
 
   return (
-    <div className="button-area" data-provider={currentProvider}>
+    <div ref={areaRef} className={`button-area${compact ? ' toolbar-compact' : ''}`} data-provider={currentProvider}>
       {/* Left side: selectors */}
       <div className="button-area-left">
         <ConfigSelect
@@ -327,12 +333,18 @@ export const ButtonArea = ({
         <ProviderSelect
           value={currentProvider}
           onChange={handleProviderSelect}
+          onOpenCliSettings={onOpenCliSettings}
           compact
         />
-        <ModeSelect value={permissionMode} onChange={handleModeSelect} provider={currentProvider} />
-        <ModelSelect
-          value={selectedModel}
-          onChange={handleModelSelect}
+        <ModeSelect
+          value={permissionMode}
+          onChange={handleModeSelect}
+          provider={currentProvider}
+          codexNativeAutoReviewAvailable={codexNativeAutoReviewAvailable}
+        />
+        <ModelConfigSelect
+          selectedModel={selectedModel}
+          onModelSelect={handleModelSelect}
           models={availableModels}
           currentProvider={currentProvider}
           loading={cliModelsLoading}
@@ -341,11 +353,11 @@ export const ButtonArea = ({
           onAddModel={onAddModel}
           longContextEnabled={longContextEnabled}
           onLongContextChange={onLongContextChange}
+          reasoningEffort={reasoningEffort}
+          onReasoningChange={handleReasoningChange}
+          codexFastMode={codexFastMode}
+          onCodexFastModeChange={handleCodexFastModeChange}
         />
-        <ReasoningSelect value={reasoningEffort} onChange={handleReasoningChange} selectedModel={selectedModel} currentProvider={currentProvider} />
-        {currentProvider === 'codex' && (
-          <CodexFastModeSelect value={codexFastMode} onChange={handleCodexFastModeChange} />
-        )}
         {currentProvider === 'dsh' && (
           <DshPresetSelect value={dshPreset} onChange={handleDshPresetChange} />
         )}

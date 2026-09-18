@@ -3,9 +3,9 @@
  * Detection only — the plugin never auto-installs these binaries.
  */
 
-export type CliToolId = 'grok' | 'kimi' | 'opencode' | 'pi' | 'omp' | 'dsh';
+export type CliToolId = 'grok' | 'kimi' | 'opencode' | 'pi' | 'omp' | 'dsh' | 'zcode' | 'minimax';
 
-export const CLI_ONLY_PROVIDERS = new Set<string>(['grok', 'kimi', 'opencode', 'pi', 'omp', 'dsh']);
+export const CLI_ONLY_PROVIDERS = new Set<string>(['grok', 'kimi', 'opencode', 'pi', 'omp', 'dsh', 'zcode', 'minimax']);
 
 export function isCliOnlyProvider(providerId: string | null | undefined): boolean {
   return !!providerId && CLI_ONLY_PROVIDERS.has(providerId);
@@ -15,8 +15,8 @@ export function isRuntimeProvider(providerId: string | null | undefined): boolea
   return providerId === 'claude' || providerId === 'codex' || isCliOnlyProvider(providerId);
 }
 
-/** Providers with a first-class history reader (local files or, for DSH, host RPC). */
-export const HISTORY_SUPPORTED_PROVIDERS = new Set<string>(['claude', 'codex', 'grok', 'omp', 'dsh']);
+/** Providers with a first-class history reader (local files or, for DSH, host RPC; ZCode queries its app-server live). */
+export const HISTORY_SUPPORTED_PROVIDERS = new Set<string>(['claude', 'codex', 'grok', 'omp', 'dsh', 'zcode', 'minimax']);
 
 /**
  * True when the history panel can list/load sessions for this runtime.
@@ -43,6 +43,9 @@ export interface CliToolDefinition {
   id: CliToolId;
   displayName: string;
   binaryName: string;
+  /** Secondary command name to probe when the primary one is not found
+   *  (e.g. MiniMax Code: `minimax` from the official installer, `mcode` from npm). */
+  altBinaryName?: string;
   envKeys: string[];
   homeBinDirs: string[];
 }
@@ -90,6 +93,24 @@ export const CLI_TOOL_DEFINITIONS: CliToolDefinition[] = [
     envKeys: ['DSH_BIN', 'DSH_PATH', 'DSH_CLI_PATH'],
     // Hermes (the DSH-native installer) keeps node + dsh together.
     homeBinDirs: ['.hermes/node/bin', '.dsh/bin', '.local/bin'],
+  },
+  {
+    id: 'zcode',
+    displayName: 'ZCode',
+    // No PATH binary: the app-server entry (zcode.cjs) lives inside the
+    // desktop app bundle; CliStatusDetector probes the bundle locations.
+    binaryName: 'zcode',
+    envKeys: ['ZCODE_CLI_PATH', 'ZCODE_PATH'],
+    homeBinDirs: [],
+  },
+  {
+    id: 'minimax',
+    displayName: 'MiniMax Code',
+    binaryName: 'minimax',
+    // Official installer exposes `minimax`; npm global installs expose `mcode`.
+    altBinaryName: 'mcode',
+    envKeys: ['MINIMAX_BIN', 'MINIMAX_PATH', 'MINIMAX_CLI_PATH', 'MCODE_BIN'],
+    homeBinDirs: ['.minimax/bin', '.minimax-code', '.local/bin'],
   },
 ];
 
